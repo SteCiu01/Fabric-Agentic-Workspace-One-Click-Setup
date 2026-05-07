@@ -1,4 +1,4 @@
-# Fabric Agentic Workspace — One-Click Setupp
+# Fabric Agentic Workspace — One-Click Setup
 
 [![Latest Release](https://img.shields.io/github/v/release/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup?include_prereleases&label=version)](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/releases)
 
