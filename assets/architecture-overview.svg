@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" width="1200" height="400">
+  <rect width="1200" height="400" fill="#f8f9fa" rx="8"/>
+  <rect x="1" y="1" width="1198" height="398" fill="none" stroke="#dee2e6" stroke-width="2" rx="8"/>
+  <text x="600" y="190" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="28" fill="#6c757d" font-weight="600">
+    Architecture Overview
+  </text>
+  <text x="600" y="230" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="16" fill="#adb5bd">
+    Placeholder — diagram coming soon
+  </text>
+</svg>
