@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Nothing yet — next changes will appear here._
 
-## [0.1.0-preview] - 2026-05-04
+## [v0.1.0-pre-release] - 2026-05-04
 
 ### Added
 
@@ -42,7 +42,5 @@ _Nothing yet — next changes will appear here._
 - Setup script is Windows-only (PowerShell + .bat)
 - No automated tests yet
 - Pipeline skill is manually maintained — deep maintenance mode checks freshness against Microsoft docs
+- Dependency on open source repositories
 - Fabric extension must be installed separately (installer checks and warns)
-
-[Unreleased]: https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/compare/v0.1.0-preview...HEAD
-[0.1.0-preview]: https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/releases/tag/v0.1.0-preview
