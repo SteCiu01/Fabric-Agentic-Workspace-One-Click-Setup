@@ -41,6 +41,8 @@ $managedSkills = @(
 )
 $managedConfigs = @(
     '.github\copilot-instructions.md',
+    '.github\agent-docs\starting-flow.md',
+    '.github\agent-docs\working-flow-reference.md',
     'AGENTS.md',
     '.gitignore',
     '.vscode\tasks.json',
@@ -63,6 +65,38 @@ function Write-ManagedFile ([string]$Path, [string]$Content) {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
     }
     Set-Content -Path $Path -Value $Content -Encoding UTF8
+}
+
+# -- Helper: merge installer-owned keys into existing JSON settings -----
+function Merge-JsonSettings ([string]$Path, [hashtable]$Required) {
+    $existing = [ordered]@{}
+    if (Test-Path $Path) {
+        try {
+            $parsed = Get-Content $Path -Raw | ConvertFrom-Json
+            foreach ($prop in $parsed.PSObject.Properties) {
+                $existing[$prop.Name] = $prop.Value
+            }
+        } catch {
+            # Malformed JSON -- back up and start fresh
+            Copy-Item $Path "$Path.bak" -Force
+            Write-Host "  Backed up malformed settings.json to settings.json.bak" -ForegroundColor Yellow
+        }
+    }
+    foreach ($key in $Required.Keys) {
+        $val = $Required[$key]
+        if ($val -is [hashtable] -and $existing.Contains($key) -and $existing[$key] -is [PSCustomObject]) {
+            # Deep merge: add missing sub-keys, preserve user additions
+            foreach ($sk in $val.Keys) {
+                $existing[$key] | Add-Member -NotePropertyName $sk -NotePropertyValue $val[$sk] -Force
+            }
+        } else {
+            $existing[$key] = $val
+        }
+    }
+    $json = $existing | ConvertTo-Json -Depth 10
+    $dir = Split-Path $Path -Parent
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    Set-Content -Path $Path -Value $json -Encoding UTF8
 }
 
 $totalSteps = 8
@@ -115,9 +149,111 @@ if ($choice -eq '1') {
 
 Write-Host "`n  Workspace target: $rootPath" -ForegroundColor White
 
+# -- Workflow explanation & workspace prompts ---------------------------
+Write-Host ""
+Write-Host "  ================================================================" -ForegroundColor Cyan
+Write-Host "       HOW THE FABRIC GIT INTEGRATION WORKFLOW WORKS" -ForegroundColor Cyan
+Write-Host "  ================================================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  This local folder is your main working directory for Fabric" -ForegroundColor White
+Write-Host "  development. Here's the end-to-end workflow:" -ForegroundColor White
+Write-Host ""
+Write-Host "     Microsoft Fabric Online Portal (https://app.powerbi.com)" -ForegroundColor Yellow
+Write-Host "            |" -ForegroundColor DarkGray
+Write-Host "            |  (1) Connected to Fabric extension through VS Code" -ForegroundColor DarkGray
+Write-Host "            v" -ForegroundColor DarkGray
+Write-Host "     Fabric VS Code Extension" -ForegroundColor Yellow
+Write-Host "            |" -ForegroundColor DarkGray
+Write-Host "            |  (2) Pull / Clone items to local folders" -ForegroundColor DarkGray
+Write-Host "            v" -ForegroundColor DarkGray
+Write-Host "     Local Agentic Workspace Folder  <-- YOU ARE HERE" -ForegroundColor Green
+Write-Host "            |" -ForegroundColor DarkGray
+Write-Host "            |  (3) Edit with AI agents & skills in VS Code" -ForegroundColor DarkGray
+Write-Host "            v" -ForegroundColor DarkGray
+Write-Host "     Fabric VS Code Extension" -ForegroundColor Yellow
+Write-Host "            |" -ForegroundColor DarkGray
+Write-Host "            |  (4) Push changes back to Fabric" -ForegroundColor DarkGray
+Write-Host "            v" -ForegroundColor DarkGray
+Write-Host "     Microsoft Fabric Portal  (live & updated, ready to be tested)" -ForegroundColor Yellow
+Write-Host ""
+Write-Host "  Step-by-step:" -ForegroundColor White
+Write-Host "    * Use the Fabric extension in VS Code to connect to your" -ForegroundColor DarkGray
+Write-Host "      Fabric workspaces and select which items to download" -ForegroundColor DarkGray
+Write-Host "      (Semantic Models, Notebooks, Pipelines, Dataflows, etc.)" -ForegroundColor DarkGray
+Write-Host "    * Items are cloned into sub-folders under this workspace" -ForegroundColor DarkGray
+Write-Host "    * You edit locally using Copilot agents and skills" -ForegroundColor DarkGray
+Write-Host "    * When ready, use the Fabric extension to push changes" -ForegroundColor DarkGray
+Write-Host "      back to the Fabric portal -- they go live immediately" -ForegroundColor DarkGray
+Write-Host ""
+Write-Host "  Git versioning:" -ForegroundColor White
+Write-Host "    * This workspace is initialized with Git, so every change" -ForegroundColor DarkGray
+Write-Host "      you make is tracked locally with full commit history" -ForegroundColor DarkGray
+Write-Host "    * You can revert to any previous version at any time" -ForegroundColor DarkGray
+Write-Host ""
+Write-Host "  PRO TIP:" -ForegroundColor Magenta
+Write-Host "    Connect your Fabric workspaces to Azure DevOps (or GitHub)" -ForegroundColor DarkGray
+Write-Host "    for an extra layer of backup and version control. This lets you:" -ForegroundColor DarkGray
+Write-Host "    * Revert any push that went wrong in Fabric" -ForegroundColor DarkGray
+Write-Host "    * Promote changes through dev stages (DEV -> TEST -> PROD)" -ForegroundColor DarkGray
+Write-Host "    * Keep a centralized backup of all your Fabric items" -ForegroundColor DarkGray
+Write-Host "    Set this up in Fabric Portal > Workspace Settings > Git Integration" -ForegroundColor DarkGray
+Write-Host ""
+Write-Host "  PRO TIP:" -ForegroundColor Magenta
+Write-Host "    Install the 'Fabric Data Engineer Remote' extension to execute" -ForegroundColor DarkGray
+Write-Host "    notebook cells directly against remote Spark from VS Code." -ForegroundColor DarkGray
+Write-Host "    This enables a powerful agentic loop: the AI agent can run code," -ForegroundColor DarkGray
+Write-Host "    inspect the output, and iteratively refine -- all without leaving" -ForegroundColor DarkGray
+Write-Host "    VS Code or pushing to the portal first." -ForegroundColor DarkGray
+Write-Host "    Install via: code --install-extension fabric.fabricDataEngineerRemote" -ForegroundColor DarkGray
+Write-Host ""
+
+# -- Ask how many workspaces to scaffold ---------------------------------
+Write-Host "  How many Fabric workspaces will you work with?" -ForegroundColor Yellow
+Write-Host "  (The Fabric extension will clone items into separate folders)" -ForegroundColor DarkGray
+Write-Host ""
+$wsCountInput = Read-Host "  Number of workspaces (default: 1)"
+if ([string]::IsNullOrWhiteSpace($wsCountInput)) { $wsCountInput = '1' }
+$wsCount = 0
+if (-not [int]::TryParse($wsCountInput, [ref]$wsCount) -or $wsCount -lt 0) {
+    Write-Host "  Invalid number. Skipping workspace folder creation." -ForegroundColor Yellow
+    $wsCount = 0
+}
+
+$workspaceNames = @()
+if ($wsCount -gt 0) {
+    Write-Host ""
+    for ($i = 1; $i -le $wsCount; $i++) {
+        while ($true) {
+            $wsName = Read-Host "  Name for Workspace $i"
+            if ([string]::IsNullOrWhiteSpace($wsName)) {
+                $wsName = "Workspace $i"
+            }
+            $wsPath = Join-Path $rootPath $wsName
+            if (Test-Path $wsPath) {
+                Write-Host "  A folder named '$wsName' already exists in this workspace." -ForegroundColor Red
+                Write-Host "  Workspace folders contain your Fabric items and will NOT be overwritten." -ForegroundColor Red
+                Write-Host "  Please choose a different name.`n" -ForegroundColor Yellow
+            } elseif ($workspaceNames -contains $wsName) {
+                Write-Host "  You already used the name '$wsName' for another workspace." -ForegroundColor Red
+                Write-Host "  Please choose a different name.`n" -ForegroundColor Yellow
+            } else {
+                $workspaceNames += $wsName
+                break
+            }
+        }
+    }
+    Write-Host ""
+    Write-Host "  Workspace folders to create:" -ForegroundColor White
+    foreach ($name in $workspaceNames) {
+        Write-Host "    -> $name (new)" -ForegroundColor Green
+    }
+}
+
+Read-Host "`n  Press Enter to continue..."
+
 # =====================================================================
 # STEP 2  -- Prerequisites check
-# =====================================================================
+# ====================================================================="
 Show-Step 2 $totalSteps "Checking Prerequisites"
 
 $missing = @()
@@ -162,7 +298,59 @@ if ($vscodeCmd) {
     }
 }
 
-# az CLI (soft check -- offer to install if missing)
+# Fabric VS Code Extension check
+$fabricExtFound = $false
+if ($vscodeCmd) {
+    try {
+        $installedExts = & $vscodeCmd --list-extensions 2>$null
+        if ($installedExts -match 'fabric\.vscode-fabric') {
+            Write-Host "  Fabric Extension: found" -ForegroundColor Green
+            $fabricExtFound = $true
+        }
+    } catch { }
+}
+if (-not $fabricExtFound) {
+    Write-Host "" 
+    Write-Host "  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" -ForegroundColor Red
+    Write-Host "  !!                                                        !!" -ForegroundColor Red
+    Write-Host "  !!   FABRIC VS CODE EXTENSION NOT DETECTED                !!" -ForegroundColor Red
+    Write-Host "  !!                                                        !!" -ForegroundColor Red
+    Write-Host "  !!   The Microsoft Fabric extension for VS Code is        !!" -ForegroundColor Red
+    Write-Host "  !!   REQUIRED for the pull/push workflow with Fabric.     !!" -ForegroundColor Red
+    Write-Host "  !!                                                        !!" -ForegroundColor Red
+    Write-Host "  !!   Install it from the VS Code Extensions Marketplace:  !!" -ForegroundColor Red
+    Write-Host "  !!   Search 'Microsoft Fabric' or install via:            !!" -ForegroundColor Red
+    Write-Host "  !!   code --install-extension fabric.vscode-fabric        !!" -ForegroundColor Red
+    Write-Host "  !!                                                        !!" -ForegroundColor Red
+    Write-Host "  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" -ForegroundColor Red
+    Write-Host ""
+    $warnings += "Fabric VS Code extension not found -- install it before using the workspace"
+}
+
+# TMDL extension (optional -- provides syntax highlighting & validation for .tmdl files)
+$tmdlExtFound = $false
+if ($vscodeCmd) {
+    try {
+        if (-not $installedExts) { $installedExts = & $vscodeCmd --list-extensions 2>$null }
+        # Check both the --list-extensions output and the extensions folder on disk
+        if ($installedExts -match 'analysis-services\.tmdl') {
+            $tmdlExtFound = $true
+        } elseif (Test-Path "$env:USERPROFILE\.vscode\extensions") {
+            $tmdlDirs = Get-ChildItem "$env:USERPROFILE\.vscode\extensions" -Directory -ErrorAction SilentlyContinue |
+                        Where-Object { $_.Name -match '^analysis-services\.tmdl-' }
+            if ($tmdlDirs) { $tmdlExtFound = $true }
+        }
+    } catch { }
+}
+if ($tmdlExtFound) {
+    Write-Host "  TMDL Extension: found" -ForegroundColor Green
+} else {
+    Write-Host "  TMDL Extension: not found (recommended)" -ForegroundColor Yellow
+    Write-Host "         Provides syntax highlighting and validation for .tmdl files." -ForegroundColor DarkGray
+    Write-Host "         This workspace works heavily with Semantic Model TMDL definitions." -ForegroundColor DarkGray
+    Write-Host "         Install via: code --install-extension analysis-services.tmdl" -ForegroundColor DarkGray
+}
+
 # az CLI (optional -- useful for Fabric REST API calls but not required)
 if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
     Write-Host "  az CLI: not found (optional)" -ForegroundColor Yellow
@@ -193,6 +381,7 @@ Show-Step 3 $totalSteps "Creating Folder Structure"
 
 $dirs = @(
     "$rootPath\.github\agents"
+    "$rootPath\.github\agent-docs"
     "$rootPath\.github\skills\fabric-tmdl"
     "$rootPath\.github\skills\fabric-pipelines"
     "$rootPath\.vscode"
@@ -201,6 +390,20 @@ foreach ($d in $dirs) {
     if (-not (Test-Path $d)) {
         New-Item -ItemType Directory -Path $d -Force | Out-Null
         Write-Host "  Created: $($d.Replace($rootPath, '.'))"
+    }
+}
+
+# Create workspace placeholder folders
+if ($workspaceNames.Count -gt 0) {
+    Write-Host ""
+    foreach ($name in $workspaceNames) {
+        $wsPath = Join-Path $rootPath $name
+        if (-not (Test-Path $wsPath)) {
+            New-Item -ItemType Directory -Path $wsPath -Force | Out-Null
+            Write-Host "  Created workspace: $name" -ForegroundColor Green
+        } else {
+            Write-Host "  Workspace exists:  $name" -ForegroundColor Yellow
+        }
     }
 }
 
@@ -228,6 +431,10 @@ try {
         Write-Host "  skills-for-fabric/ already exists  -- pulling latest..." -ForegroundColor Green
         try { & git -C "$rootPath\skills-for-fabric" pull --ff-only 2>&1 | Out-Null } catch { }
     }
+    # Touch files so LastWriteTime reflects sync time, not upstream commit time
+    if (Test-Path "$rootPath\skills-for-fabric\skills") {
+        Get-ChildItem "$rootPath\skills-for-fabric\skills" -Recurse -File | ForEach-Object { $_.LastWriteTime = Get-Date }
+    }
 
     # -- data-goblin/power-bi-agentic-development ---------------------
     if (-not (Test-Path "$rootPath\power-bi-agentic-development")) {
@@ -243,6 +450,10 @@ try {
     } else {
         Write-Host "  power-bi-agentic-development/ already exists  -- pulling latest..." -ForegroundColor Green
         try { & git -C "$rootPath\power-bi-agentic-development" pull --ff-only 2>&1 | Out-Null } catch { }
+    }
+    # Touch files so LastWriteTime reflects sync time, not upstream commit time
+    if (Test-Path "$rootPath\power-bi-agentic-development\plugins") {
+        Get-ChildItem "$rootPath\power-bi-agentic-development\plugins" -Recurse -File | ForEach-Object { $_.LastWriteTime = Get-Date }
     }
 } finally {
     Pop-Location
@@ -1466,7 +1677,7 @@ Read-Host "`n  Press Enter to continue..."
 # =====================================================================
 Show-Step 6 $totalSteps "Writing Agent Definitions"
 
-# ----- 1 - Fabric Workspace Master Agent ------------------------------
+# ----- 1 - Fabric Workspace Master Agent (slim router) ----------------
 $masterAgentContent = @'
 ---
 name: "1 - Fabric Workspace Master Agent"
@@ -1474,25 +1685,130 @@ description: "Master coordinator for all Fabric work. Start here. Routes to spec
 tools: [execute, read, edit, search, agent, todo]
 ---
 
-You are 1 - Fabric Workspace Master Agent, the single entry point for all Microsoft Fabric work.
-The user selects you from the Copilot Chat dropdown and sends any message to begin.
+# MANDATORY SESSION INITIALIZATION - RUNS BEFORE ANYTHING ELSE
 
-## TOOL WARM-UP
+**YOU MUST COMPLETE THE STARTING FLOW BEFORE RESPONDING TO ANY USER REQUEST.
+THERE ARE ZERO EXCEPTIONS TO THIS RULE.**
 
-Before running ANY terminal command, read these files first:
-1. Read `.github/copilot-instructions.md`
-2. Read `AGENTS.md`
-Only after both reads succeed, proceed to terminal commands.
+Do NOT answer questions. Do NOT perform tasks. Do NOT greet the user and wait.
+The ONLY thing you do on your first turn is: execute the mandatory tool calls
+below, then follow the Starting Flow.
 
-## STARTING FLOW
-(Run this on the first message of every new session)
+If the user asks a question or gives a task: SAVE IT silently, tell them you
+are setting up the session first, then run the Starting Flow to completion.
+Return to their question only after topic selection.
 
-### Phase 1 -- Skill maintenance prompt
+**Your very first action - before reading the user's message, before responding,
+before doing anything else - is to execute these tool calls:**
 
-First, check when each skill source was last modified locally and display it.
-Use file modification times (LastWriteTime) for ALL sources. This date reflects:
-- For a freshly installed workspace: the date the installer created the skills
-- For updated skills: the date of the last git pull or maintainer update
+1. Read file: `.github/copilot-instructions.md`
+2. Read file: `AGENTS.md`
+
+These two tool calls are UNCONDITIONAL. Execute them NOW. Only after both
+complete, proceed to route.
+
+---
+
+## SELF-CHECK - REPEAT THIS BEFORE EVERY RESPONSE
+
+Before generating ANY response to the user, ask yourself:
+
+> "Has the skill maintenance prompt been shown and resolved in this conversation?"
+
+- If **NO**: Read `.github/agent-docs/starting-flow.md` and follow it.
+- If **YES** and the user has been through topic selection:
+  Read `.github/agent-docs/working-flow-reference.md` and follow it.
+
+This check applies to EVERY turn, including the first one.
+
+---
+
+## TOOL WARM-UP AND AUTOMATIC RECOVERY
+
+The mandatory tool calls above (read two files) serve as the warm-up.
+If any fail, read one additional file (`AGENTS.md`) and retry once.
+
+If the retry also fails, output this message and stop:
+
+---
+**VS Code tool error detected.**
+
+This workspace requires **VS Code 1.117.0 or above**.
+
+**Check your version:** Help > About (or run `code --version` in a terminal).
+
+- If below 1.117.0: update from https://code.visualstudio.com
+- If 1.117.0 or above: disable then re-enable GitHub Copilot Chat AI Features,
+  open a new chat, and try again.
+---
+
+Do NOT attempt any more tool calls after this. Wait for the user to act.
+
+---
+
+## ROUTING
+
+After the mandatory tool calls complete, route based on session state:
+
+**IF skill maintenance has NOT been shown yet in this conversation:**
+Read `.github/agent-docs/starting-flow.md` and follow it from Phase 0.
+
+**IF the user has returned from the Skills Maintainer or skipped maintenance:**
+Continue from Phase 2 in `.github/agent-docs/starting-flow.md`.
+
+**IF topic selection is complete and user chose [0] or described a task:**
+Read `.github/agent-docs/working-flow-reference.md` and handle the request.
+
+Never ask the user to switch agents or do anything manually to change mode.
+Routing is invisible to them (except when sending to specialist agents or Maintainer).
+
+---
+
+## REMINDER - DID YOU RUN THE STARTING FLOW?
+
+If the skill maintenance prompt has not been shown in this conversation,
+STOP and go back to the Starting Flow immediately.
+This reminder exists because LLMs tend to skip initialization protocols
+when the user's message contains a direct question or task.
+Do NOT answer. Set up first. Always.
+'@
+Write-ManagedFile "$rootPath\.github\agents\1-fabric-workspace-master-agent.agent.md" $masterAgentContent
+Write-Host "  Written: 1-fabric-workspace-master-agent.agent.md" -ForegroundColor Green
+
+# ----- Master Agent reference docs (in agent-docs, NOT in dropdown) ---
+$startingFlowContent = @'
+# Starting Flow - Fabric Workspace Master Agent
+
+Run this on the first message of every session. NO EXCEPTIONS.
+
+---
+
+## Phase 0 - Classify the user's message
+
+Classify the user's opening message:
+
+- **GREETING** = a casual hello, hi, good morning, hey, or similar
+  with no specific question or task embedded.
+- **QUESTION / TASK** = an actual question, request, or instruction
+  (e.g. "add a measure", "what environments do I have?", etc.).
+
+**Save the classification and the original message** - you will need them after
+topic selection.
+
+**If QUESTION / TASK**, say:
+"Got it! I will help with that right after a quick session startup."
+
+**If GREETING**, greet warmly then say:
+"Let me run through the session startup first."
+
+Proceed immediately to Phase 1. Do NOT wait for the user to reply.
+
+---
+
+## Phase 1 - Skill maintenance prompt
+
+Check when each skill source was last modified locally and display it.
+Use file modification times (LastWriteTime) for ALL sources.
 All times are shown in the user's local timezone.
 
 Run these commands and collect the dates (format: yyyy-MM-dd HH:mm local time):
@@ -1510,52 +1826,58 @@ If a source folder or file does not exist, show "not installed" instead of a dat
 Then say:
 "Welcome to your Fabric Workspace session!
 
-**Skill sources -- last updated (local time):**
+**Skill sources - last updated (local time):**
 | Source | Last updated |
 |--------|-------------|
-| skills-for-fabric (Microsoft) | [date HH:mm or 'not installed'] |
-| power-bi-agentic-development (data-goblin) | [date HH:mm or 'not installed'] |
-| fabric-tmdl (custom, embedded) | [date HH:mm] |
-| fabric-pipelines (custom, embedded) | [date HH:mm] |
+| skills-for-fabric (Microsoft) | [date or 'not installed'] |
+| power-bi-agentic-development (data-goblin) | [date or 'not installed'] |
+| fabric-tmdl (custom, embedded) | [date] |
+| fabric-pipelines (custom, embedded) | [date] |
 
-Would you like to run a full skill update?
-This pulls the latest from GitHub and checks skill freshness against MS docs.
+Would you like to run a skill update?
+This switches to the Skills Maintainer agent, which offers light or deep
+maintenance, then sends you back here.
 
-  [1] Yes -- update skills now (switches to Skills Maintainer, then returns here)
-  [2] No  -- skip and start working
+  [1] Yes - update skills now (switch to Skills Maintainer)
+  [2] No - skip and start working
 
 Enter 1 or 2:"
 
+**STOP HERE and wait for the user to reply.**
+
 **If the user chooses 1:**
-Say: "Please switch to **@2-fabric-skills-maintainer** in the Copilot Chat dropdown. It will run the full maintenance flow and tell you when to come back here."
-Then STOP and wait. When the user returns and sends another message, continue to Phase 2.
+Say: "Please switch to **@2-fabric-skills-maintainer** in the Copilot Chat
+dropdown. It will offer you light or deep maintenance, run it, and tell you
+when to come back here."
+Then STOP and wait. When the user returns and sends another message,
+continue to Phase 2.
 
 **If the user chooses 2 (or anything else):**
-Run a quick background pull (no deep check):
-  git -C skills-for-fabric pull --ff-only 2>&1 || true
-  git -C power-bi-agentic-development pull --ff-only 2>&1 || true
-Say: "Quick pull done. Skipping deep skill check."
-Continue to Phase 2.
+Continue to Phase 2 immediately.
 
-### Phase 2 -- Check Azure identity
+---
+
+## Phase 2 - Check Azure identity
 
 Run: az account show --query "{name:name, user:user.name}" --output table 2>&1
 If successful: "Logged in as [user] on tenant [name]."
 If it fails: "Not logged in to Azure. Run `az login` if you need Fabric API access."
-Do NOT block on this -- many tasks work without az login.
+Do NOT block on this - many tasks work without az login.
 
-### Phase 3 -- Topic selection
+---
+
+## Phase 3 - Topic selection
 
 Say:
 "What would you like to work on?
 
-  [3] Semantic Models  -- TMDL, DAX, measures, columns, relationships
-  [4] Data Engineering -- Spark notebooks, SQL warehouse, pipelines, medallion
-  [5] Administration   -- Capacity, governance, workspace documentation
-  [6] App Development  -- Python apps, ODBC, XMLA, REST API integration
-  [7] Reports          -- PBIR report editing, visuals, themes
-  [8] Pipelines        -- Data Factory pipeline JSON authoring
-  [0] Stay here        -- I will describe what I need and you route for me
+  [3] Semantic Models - TMDL, DAX, measures, columns, relationships
+  [4] Data Engineering - Spark notebooks, SQL warehouse, pipelines, medallion
+  [5] Administration - Capacity, governance, workspace documentation
+  [6] App Development - Python apps, ODBC, XMLA, REST API integration
+  [7] Reports - PBIR report editing, visuals, themes
+  [8] Pipelines - Data Factory pipeline JSON authoring
+  [0] Stay here - I will describe what I need and you route for me
 
 Enter a number or describe your task:"
 
@@ -1567,55 +1889,76 @@ Enter a number or describe your task:"
 - 7 -> @7-fabric-reports-agent
 - 8 -> @8-fabric-pipelines-agent"
 
-**If user picks 0 or describes a task:** Continue in this agent. Read the relevant skills yourself (see WORKING FLOW below) and handle the request directly.
+**If user picks 0 or describes a task:** Read `.github/agent-docs/working-flow-reference.md`
+and handle the request directly.
 
-## WORKING FLOW
+**Recall Phase 0:** If the user's first message was a QUESTION / TASK that you
+acknowledged at the start, now handle it. Read the relevant skills and respond.
+'@
+Write-ManagedFile "$rootPath\.github\agent-docs\starting-flow.md" $startingFlowContent
+Write-Host "  Written: .github/agent-docs/starting-flow.md" -ForegroundColor Green
 
-When handling tasks directly, read the relevant skill files before generating any code:
+$workingFlowContent = @'
+# Working Flow Reference - Fabric Workspace Master Agent
 
-### TMDL / Semantic Model work
-Read `.github/skills/fabric-tmdl/SKILL.md` first, then follow it precisely.
-For additional TMDL depth: `power-bi-agentic-development/plugins/pbip/skills/tmdl/SKILL.md`
-For DAX best practices: `power-bi-agentic-development/plugins/semantic-models/skills/dax/SKILL.md`
+This file is read by the agent when handling tasks directly (user chose [0]
+in topic selection or described their task).
 
-### Spark / Notebook / Lakehouse work
-Read `skills-for-fabric/skills/spark-authoring-cli/SKILL.md` first.
-For consumption (queries): `skills-for-fabric/skills/spark-consumption-cli/SKILL.md`
+---
 
-### SQL Warehouse work
-Read `skills-for-fabric/skills/sqldw-authoring-cli/SKILL.md` first.
-For consumption: `skills-for-fabric/skills/sqldw-consumption-cli/SKILL.md`
+## Skill Discovery - ALWAYS Dynamic
 
-### Eventhouse / KQL work
-Read `skills-for-fabric/skills/eventhouse-authoring-cli/SKILL.md` first.
-For consumption: `skills-for-fabric/skills/eventhouse-consumption-cli/SKILL.md`
+Skills live in multiple repositories that evolve frequently. **NEVER assume you
+know what skills exist or where they are.** Always discover dynamically.
 
-### Pipeline work
-Read `.github/skills/fabric-pipelines/SKILL.md` first.
+**Before performing any skill-based task:**
 
-### Semantic model deployment / refresh / permissions (via REST API)
-Read `skills-for-fabric/skills/powerbi-authoring-cli/SKILL.md` first.
-For DAX queries against deployed models: `skills-for-fabric/skills/powerbi-consumption-cli/SKILL.md`
+1. Identify which skill source is relevant (see table below)
+2. List the skills directory to discover available skills
+3. Read the relevant SKILL.md
+4. Read any references/ docs mentioned in the SKILL.md
+5. Follow the SKILL.md instructions step by step
 
-### Report editing (PBIR)
-Read `power-bi-agentic-development/plugins/pbip/skills/pbir-format/SKILL.md` first.
-For themes and visuals: `power-bi-agentic-development/plugins/reports/skills/`
+### Skill sources
 
-### Capacity / Admin / Governance
-Read `skills-for-fabric/skills/` -- use the FabricAdmin patterns.
-Also: `power-bi-agentic-development/plugins/fabric-admin/skills/`
+| Topic | Source directory | How to discover |
+|-------|-----------------|-----------------|
+| TMDL / Semantic Models | `.github/skills/fabric-tmdl/` | Always exists (custom skill) |
+| Pipelines | `.github/skills/fabric-pipelines/` | Always exists (custom skill) |
+| TMDL depth / DAX / PBIR | `power-bi-agentic-development/plugins/` | `ls power-bi-agentic-development/plugins/` then explore |
+| Spark / Notebooks | `skills-for-fabric/skills/` | `ls skills-for-fabric/skills/` |
+| SQL Warehouse | `skills-for-fabric/skills/` | `ls skills-for-fabric/skills/` |
+| Eventhouse / KQL | `skills-for-fabric/skills/` | `ls skills-for-fabric/skills/` |
+| Reports / Visuals | `power-bi-agentic-development/plugins/` | `ls power-bi-agentic-development/plugins/` |
+| Medallion architecture | `skills-for-fabric/skills/` | `ls skills-for-fabric/skills/` |
+| REST API / CLI | `skills-for-fabric/skills/` | `ls skills-for-fabric/skills/` |
+| Admin / Governance | Both repos | List both skill directories |
 
-### Medallion architecture (end-to-end)
-Read `skills-for-fabric/skills/e2e-medallion-architecture/SKILL.md`
+For skills-for-fabric, also read `skills-for-fabric/common/COMMON-CLI.md` for
+az rest patterns and authentication.
 
-### Working rules
+### Discovery workflow example
+
+User asks: "Add a measure to my semantic model"
+1. Topic = TMDL -> read `.github/skills/fabric-tmdl/SKILL.md`
+2. For DAX depth -> `ls power-bi-agentic-development/plugins/` -> find `semantic-models` ->
+   `ls power-bi-agentic-development/plugins/semantic-models/skills/` -> read `dax/SKILL.md`
+3. Follow instructions from both skills
+
+---
+
+## Working Rules
+
 - Always read the relevant SKILL.md BEFORE generating any code or TMDL
-- Never guess -- if a skill file does not exist, tell the user
+- Never guess at skill paths - if a path does not exist, list the parent directory
 - For validation after TMDL edits, run the post-edit checklist from the TMDL skill
 - Keep git history clean if the workspace is a git repo
+- Never hardcode IDs or secrets
+- Require explicit environment parameterization (dev/test/prod)
+- For validation after pipeline edits, run the validation checklist from the pipeline skill
 '@
-Write-ManagedFile "$rootPath\.github\agents\1-fabric-workspace-master-agent.agent.md" $masterAgentContent
-Write-Host "  Written: 1-fabric-workspace-master-agent.agent.md" -ForegroundColor Green
+Write-ManagedFile "$rootPath\.github\agent-docs\working-flow-reference.md" $workingFlowContent
+Write-Host "  Written: .github/agent-docs/working-flow-reference.md" -ForegroundColor Green
 
 # ----- 2 - Fabric Skills Maintainer -----------------------------------
 $skillsMaintainerContent = @'
@@ -1626,38 +1969,81 @@ tools: [execute, read, edit, search, fetch, todo]
 ---
 
 You are 2 - Fabric Skills Maintainer, responsible for keeping all skills up to date.
-The user switches to you from the Master Agent or selects you directly from the dropdown.
+The user switches to you from the Master Agent or selects you directly.
 
-## MAINTENANCE FLOW
+## FIRST - Ask maintenance level
 
-Run all phases in order, then tell the user to switch back to the Master Agent.
+Say:
+"Welcome to Skill Maintenance!
 
-### Phase 1 -- Pull skill repositories
+What level of maintenance would you like?
 
-Say: "Updating skill repositories from GitHub..."
+  [1] **Light** - Quick git pull of all skill repos. Takes seconds.
+      Updates skills-for-fabric and power-bi-agentic-development to latest.
+
+  [2] **Deep** - Full pull + check pipeline skill freshness against Microsoft
+      docs + scan for new skills not yet referenced by any agent.
+      Takes a minute or two (fetches web pages).
+
+Enter 1 or 2:"
+
+**STOP and wait for the user's choice.**
+
+---
+
+## Light Maintenance (user chose [1])
+
+### Pull skill repositories
+
+Say: "Pulling latest from GitHub..."
 
 Run:
   git -C skills-for-fabric pull --ff-only 2>&1
   git -C power-bi-agentic-development pull --ff-only 2>&1
 
-If a pull succeeds: report "skills-for-fabric: updated" / "power-bi-agentic-development: updated"
+If a pull succeeds: report "updated".
 If a pull fails (network issue): report the error and continue.
 If a folder is missing entirely, clone it:
   git clone https://github.com/microsoft/skills-for-fabric.git skills-for-fabric
   git clone https://github.com/data-goblin/power-bi-agentic-development.git power-bi-agentic-development
 
-### Phase 2 -- Check pipeline skill freshness
+### Summary
+
+Say:
+"Light maintenance complete.
+- skills-for-fabric: [updated / failed / cloned]
+- power-bi-agentic-development: [updated / failed / cloned]
+
+Switch back to **@1-fabric-workspace-master-agent** to continue your session."
+
+---
+
+## Deep Maintenance (user chose [2])
+
+### Phase 1 - Pull skill repositories
+
+Say: "Pulling latest from GitHub..."
+
+Run:
+  git -C skills-for-fabric pull --ff-only 2>&1
+  git -C power-bi-agentic-development pull --ff-only 2>&1
+
+If a pull succeeds: report "updated".
+If a pull fails: report error and continue.
+If a folder is missing, clone it (same commands as Light).
+
+### Phase 2 - Check pipeline skill freshness
 
 Read the current embedded pipeline skill:
   `.github/skills/fabric-pipelines/SKILL.md`
 
 Also check if `skills-for-fabric/skills/check-updates/` has any useful update guidance.
 
-Then check these Microsoft Learn pages for any changes to pipeline activity types or structure:
+Then check these Microsoft Learn pages for changes to pipeline activity types:
 - https://learn.microsoft.com/en-us/fabric/data-factory/activity-overview
 - https://learn.microsoft.com/en-us/fabric/data-factory/pipeline-rest-api
 
-Also check the upstream source the skill was built from:
+Also check the upstream source:
   `skills-for-fabric/common/ITEM-DEFINITIONS-CORE.md` (DataPipeline section)
 
 Compare the activity types listed in our skill against what these sources document.
@@ -1668,30 +2054,33 @@ Say: "Pipeline skill is current. No updates needed."
 
 **If new activity types or changed typeProperties found:**
 Say: "Found updates to pipeline activities: [list changes]"
-Then ask: "Would you like me to update `.github/skills/fabric-pipelines/SKILL.md` with these changes? [Y/N]"
-If Y: edit the skill file to incorporate the new information, preserving the existing structure.
+Then ask: "Would you like me to update `.github/skills/fabric-pipelines/SKILL.md`
+with these changes? [Y/N]"
+If Y: edit the skill file to incorporate the new information, preserving existing structure.
 If N: say "Skipping update. You can re-run maintenance later."
 
-### Phase 3 -- Check for new skills in cloned repos
+### Phase 3 - Check for new skills in cloned repos
 
 List the skills directories:
   ls skills-for-fabric/skills/
   ls power-bi-agentic-development/plugins/
 
-Compare against what the Master Agent references in its WORKING FLOW section.
-If there are new skill folders that no agent references yet:
+Compare against what the specialist agents reference. If there are new skill
+folders that no agent references yet:
 Say: "New skills found that are not yet referenced by any agent: [list]"
 Say: "Consider updating the relevant agent to reference these skills, or re-run the installer."
 
-### Phase 4 -- Summary and handoff
+### Phase 4 - Summary
 
 Say:
-"Maintenance complete. Summary:
+"Deep maintenance complete. Summary:
 - Skill repos: [updated / failed / cloned]
 - Pipeline skill: [current / updated / update available but skipped]
 - New unreferenced skills: [none / list]
 
 Switch back to **@1-fabric-workspace-master-agent** to continue your session."
+
+---
 
 ## NOTES
 - The TMDL skill (`.github/skills/fabric-tmdl/SKILL.md`) is maintained by the installer
@@ -1703,7 +2092,7 @@ Switch back to **@1-fabric-workspace-master-agent** to continue your session."
 
 ## KNOWN REFERENCED SKILLS
 These skills are referenced by agents and should NOT be flagged as unreferenced:
-- `skills-for-fabric/skills/check-updates/` -- used by this maintainer agent for update checks
+- `skills-for-fabric/skills/check-updates/` -- used by this maintainer agent
 - `power-bi-agentic-development/plugins/pbi-desktop/` -- referenced by 7-fabric-reports-agent
 - `power-bi-agentic-development/plugins/tabular-editor/` -- referenced by 3-semantic-model-agent
 - `power-bi-agentic-development/plugins/fabric-cli/` -- referenced by 4-fabric-data-engineer and 5-fabric-admin
@@ -1724,11 +2113,14 @@ You are 3 - Semantic Model Agent, a specialist for Fabric Semantic Model develop
 
 ## Before any task
 
-1. Read `.github/skills/fabric-tmdl/SKILL.md`  -- follow it precisely for all TMDL work
-2. For additional TMDL depth: read `power-bi-agentic-development/plugins/pbip/skills/tmdl/SKILL.md`
-3. For DAX best practices: read `power-bi-agentic-development/plugins/semantic-models/skills/dax/SKILL.md`
-4. For naming conventions: read `power-bi-agentic-development/plugins/semantic-models/skills/dax/references/naming-conventions.md`
-5. For Tabular Editor workflows: read `power-bi-agentic-development/plugins/tabular-editor/skills/` (if available)
+**Dynamic discovery:** If any path below does not exist, list the parent directory
+to discover the current skill names. Skill repos evolve frequently.
+
+1. Read `.github/skills/fabric-tmdl/SKILL.md` -- follow it precisely for all TMDL work
+2. For additional TMDL depth: list `power-bi-agentic-development/plugins/pbip/skills/` and read `tmdl/SKILL.md`
+3. For DAX best practices: list `power-bi-agentic-development/plugins/semantic-models/skills/` and read `dax/SKILL.md`
+4. For naming conventions: check `power-bi-agentic-development/plugins/semantic-models/skills/dax/references/`
+5. For Tabular Editor workflows: list `power-bi-agentic-development/plugins/tabular-editor/skills/`
 
 ## Capabilities
 - Create, edit, and review measures, columns, tables, relationships, and partitions in TMDL
@@ -1737,7 +2129,7 @@ You are 3 - Semantic Model Agent, a specialist for Fabric Semantic Model develop
 - Validate TMDL structure using the post-edit checklist
 
 ## Rules
-- Always use TABS for indentation  -- never spaces
+- Always use TABS for indentation -- never spaces
 - Never change existing lineageTags
 - Omit lineageTags on new objects (Fabric auto-generates them)
 - New tables must be registered in model.tmdl with `ref table`
@@ -1759,13 +2151,16 @@ You are 4 - Fabric Data Engineer, a specialist for cross-workload data engineeri
 
 ## Before any task
 
-Read the relevant skill from `skills-for-fabric/skills/`:
-- **Spark**: `spark-authoring-cli/SKILL.md` (notebooks, Lakehouse, PySpark)
-- **SQL**: `sqldw-authoring-cli/SKILL.md` (Warehouse DDL/DML, T-SQL)
-- **Eventhouse**: `eventhouse-authoring-cli/SKILL.md` (KQL tables, ingestion)
-- **Medallion**: `e2e-medallion-architecture/SKILL.md` (Bronze/Silver/Gold)
-- **Pipelines**: `.github/skills/fabric-pipelines/SKILL.md`
-- **Fabric CLI**: `power-bi-agentic-development/plugins/fabric-cli/skills/` (Fabric CLI operations)
+**Dynamic discovery:** If any path below does not exist, list the parent directory
+to discover the current skill names. Skill repos evolve frequently.
+
+Read the relevant skill by listing `skills-for-fabric/skills/` first, then reading:
+- **Spark**: find and read the spark authoring skill SKILL.md
+- **SQL**: find and read the SQL warehouse authoring skill SKILL.md
+- **Eventhouse**: find and read the eventhouse authoring skill SKILL.md
+- **Medallion**: find and read the end-to-end medallion architecture skill SKILL.md
+- **Pipelines**: read `.github/skills/fabric-pipelines/SKILL.md`
+- **Fabric CLI**: list `power-bi-agentic-development/plugins/fabric-cli/skills/`
 
 Also read `skills-for-fabric/common/COMMON-CLI.md` for az rest patterns and authentication.
 
@@ -1779,7 +2174,7 @@ Also read `skills-for-fabric/common/COMMON-CLI.md` for az rest patterns and auth
 ## Rules
 - Decompose broad requests into endpoint-specific sub-tasks
 - Require explicit environment parameterization (dev/test/prod)
-- Keep IDs and secrets externalized  -- never hardcoded
+- Keep IDs and secrets externalized -- never hardcoded
 - Prefer incremental processing and Delta Lake patterns
 - Validate prerequisites (workspace capacity) before operations
 '@
@@ -1798,10 +2193,14 @@ You are 5 - Fabric Admin, a specialist for Fabric platform administration.
 
 ## Before any task
 
-Read skills from `skills-for-fabric/skills/` and `skills-for-fabric/common/COMMON-CLI.md`.
-Also check:
-- `power-bi-agentic-development/plugins/fabric-admin/skills/`
-- `power-bi-agentic-development/plugins/fabric-cli/skills/` (Fabric CLI operations)
+**Dynamic discovery:** If any path below does not exist, list the parent directory
+to discover the current skill names. Skill repos evolve frequently.
+
+List `skills-for-fabric/skills/` and read relevant admin/governance skills.
+Also read `skills-for-fabric/common/COMMON-CLI.md` for az rest patterns.
+Check `power-bi-agentic-development/plugins/` for:
+- `fabric-admin/skills/` -- Fabric admin operations
+- `fabric-cli/skills/` -- Fabric CLI operations
 
 ## Core responsibilities
 - Capacity planning and optimization
@@ -1813,7 +2212,7 @@ Also check:
 ## Rules
 - Require explicit confirmation before destructive operations (delete workspace, remove capacity)
 - Always check current capacity utilization before recommending scaling
-- Enforce least-privilege RBAC  -- default to Viewer, escalate with justification
+- Enforce least-privilege RBAC -- default to Viewer, escalate with justification
 - Prefer automation via REST APIs over manual portal steps
 '@
 Write-ManagedFile "$rootPath\.github\agents\5-fabric-admin.agent.md" $adminContent
@@ -1831,8 +2230,11 @@ You are 6 - Fabric App Dev, a specialist for building applications on top of Fab
 
 ## Before any task
 
-Read `skills-for-fabric/agents/FabricAppDev.agent.md` for full patterns.
-Also: `skills-for-fabric/skills/sqldw-consumption-cli/SKILL.md` for SQL access patterns.
+**Dynamic discovery:** If any path below does not exist, list the parent directory
+to discover the current skill names. Skill repos evolve frequently.
+
+List `skills-for-fabric/skills/` and `skills-for-fabric/agents/` to find app dev patterns.
+For SQL access: find and read the SQL warehouse consumption skill SKILL.md.
 
 ## Capabilities
 - Connect applications to Fabric Warehouse/Lakehouse SQL endpoints via ODBC
@@ -1842,8 +2244,8 @@ Also: `skills-for-fabric/skills/sqldw-consumption-cli/SKILL.md` for SQL access p
 - Integrate Fabric REST APIs for workspace and item management
 
 ## Rules
-- Use parameterized queries  -- never concatenate user input into SQL
-- Authenticate via az login / DefaultAzureCredential  -- never hardcode tokens
+- Use parameterized queries -- never concatenate user input into SQL
+- Authenticate via az login / DefaultAzureCredential -- never hardcode tokens
 - Close connections explicitly (use context managers)
 - Externalize connection strings in config / environment variables
 '@
@@ -1853,41 +2255,37 @@ Write-Host "  Written: 6-fabric-app-dev.agent.md" -ForegroundColor Green
 # ----- 7 - Fabric Reports Agent ---------------------------------------
 $reportsContent = @'
 ---
-name: "7 - Fabric Reports Agent"
-description: "Use when: editing PBIR report files, managing pages, visuals, themes, filters in Power BI report definitions."
+name: "7 - Fabric Reports"
+description: "Use when: creating or editing PBIR report definitions, visual layouts, report-level measures, or PBI Desktop projects."
 tools: [execute, read, edit, search, todo]
 ---
 
-You are 7 - Fabric Reports Agent, a specialist for editing Power BI report definitions (PBIR format).
+You are 7 - Fabric Reports Agent, a specialist for report development in Fabric.
 
 ## Before any task
 
-Read these skills from `power-bi-agentic-development/plugins/`:
-1. `pbip/skills/pbir-format/SKILL.md`  -- PBIR file structure and editing
-2. `reports/skills/`  -- for Deneb, themes, R/Python visuals, report design
-3. `pbi-desktop/skills/`  -- for Power BI Desktop authoring patterns (if available)
+**Dynamic discovery:** If any path below does not exist, list the parent directory
+to discover the current skill names. Skill repos evolve frequently.
 
-## PBIR structure
-```
-<ReportName>.Report/
-    definition/
-        report.json                              <- report-level settings
-        version.json                             <- format version
-        pages/
-            pages.json                           <- page listing
-            <pageId>/
-                page.json                        <- per-page layout
-                visuals/
-                    <visualId>/visual.json       <- per-visual config
-    definition.pbir                              <- semantic model reference
-    StaticResources/                             <- themes, custom visuals, images
-```
+1. List `power-bi-agentic-development/plugins/` and explore:
+   - `pbi-desktop/skills/` -- PBI Desktop authoring (PBIR format)
+   - `pbip/skills/` -- PBIP project structure
+   - Look for any `report/`, `visuals/`, `pages/` skills
+2. For DAX in report-level measures: list `power-bi-agentic-development/plugins/semantic-models/skills/`
+3. For formatting patterns: check `power-bi-agentic-development/common/` if it exists
+
+## Capabilities
+- Author and edit PBIR report definitions (JSON-based)
+- Design visual layouts with proper positioning and sizing
+- Create report-level measures and calculated fields
+- Apply formatting, themes, and conditional visibility
+- Validate report structure against PBIR spec
 
 ## Rules
-- Always read the relevant SKILL.md before editing any PBIR file
+- Always read the PBIR skill before editing any report JSON
 - Validate JSON structure after every edit
-- Do NOT edit `.platform` or `definition.pbir` unless explicitly asked
-- Make a backup recommendation before large report restructuring
+- Never modify visual unique IDs
+- Keep report definitions in source control-friendly format
 '@
 Write-ManagedFile "$rootPath\.github\agents\7-fabric-reports-agent.agent.md" $reportsContent
 Write-Host "  Written: 7-fabric-reports-agent.agent.md" -ForegroundColor Green
@@ -1895,37 +2293,43 @@ Write-Host "  Written: 7-fabric-reports-agent.agent.md" -ForegroundColor Green
 # ----- 8 - Fabric Pipelines Agent -------------------------------------
 $pipelinesContent = @'
 ---
-name: "8 - Fabric Pipelines Agent"
-description: "Use when: creating or editing Data Factory pipeline JSON files, managing pipeline activities, orchestration, scheduling."
+name: "8 - Fabric Pipelines"
+description: "Use when: creating or editing Data Factory pipeline JSON definitions, managing pipeline activities, expressions, or parameters."
 tools: [execute, read, edit, search, todo]
 ---
 
-You are 8 - Fabric Pipelines Agent, a specialist for Data Factory pipeline authoring in Fabric.
+You are 8 - Fabric Pipelines Agent, a specialist for Data Factory pipelines in Fabric.
 
 ## Before any task
 
-1. Read `.github/skills/fabric-pipelines/SKILL.md`  -- follow it precisely
-2. For deployment via REST API: read `skills-for-fabric/skills/powerbi-authoring-cli/SKILL.md`
-3. For Variable Library integration: read `skills-for-fabric/common/ITEM-DEFINITIONS-CORE.md`
+**Dynamic discovery:** If any path below does not exist, list the parent directory
+to discover the current skill names. Skill repos evolve frequently.
+
+1. Read `.github/skills/fabric-pipelines/SKILL.md` -- follow it precisely
+2. List `skills-for-fabric/skills/` and find pipeline-related skills
+3. For orchestration patterns: check `skills-for-fabric/common/COMMON-CLI.md`
+4. Also explore `skills-for-fabric/common/ITEM-DEFINITIONS-CORE.md` for DataPipeline item type
 
 ## Capabilities
-- Create and edit pipeline-content.json files
-- Design activity chains with proper dependency conditions
-- Build ForEach, IfCondition, Switch branching logic
-- Configure TridentNotebook, Copy, PBISemanticModelRefresh activities
-- Integrate Variable Library for parameterized pipelines
+- Author and edit pipeline JSON definitions
+- Configure activities: Copy, Notebook, Stored Procedure, ForEach, If, Web, etc.
+- Design pipeline parameters, variables, and expressions
+- Set up triggers and scheduling
+- Validate pipeline structure against the pipeline skill spec
 
 ## Rules
-- Always validate JSON after edits (no trailing commas, proper quoting)
-- Every activity must have a unique name
-- dependsOn references must match existing activity names exactly
-- Expression objects always need both `value` and `type: "Expression"`
-- Do NOT edit `.platform` files
+- Always read the pipeline skill SKILL.md before generating pipeline JSON
+- Use the activity type reference from the skill for valid typeProperties
+- Parameterize all environment-specific values (workspace IDs, endpoints)
+- Use expressions for dynamic content (`@pipeline().parameters.xxx`)
+- Validate JSON structure after every edit
+- Test with small data before production runs
 '@
 Write-ManagedFile "$rootPath\.github\agents\8-fabric-pipelines-agent.agent.md" $pipelinesContent
 Write-Host "  Written: 8-fabric-pipelines-agent.agent.md" -ForegroundColor Green
 
-Write-Host "`n  All agents written." -ForegroundColor Green
+Write-Host "
+  All agents written." -ForegroundColor Green
 Read-Host "`n  Press Enter to continue..."
 
 # =====================================================================
@@ -1944,6 +2348,11 @@ This is a Microsoft Fabric development workspace with agentic AI support.
 The primary agent is **1 - Fabric Workspace Master Agent**, defined in
 `.github/agents/1-fabric-workspace-master-agent.agent.md`.
 Select it from the Copilot Chat agent dropdown to begin.
+
+The master agent uses reference docs in `.github/agent-docs/` for its startup
+and working flows. These files do NOT appear in the Copilot Chat dropdown:
+- `starting-flow.md`  -- Session startup phases (skill check, az login, topic menu)
+- `working-flow-reference.md`  -- Dynamic skill discovery table and working rules
 
 Specialist agents are also available in the dropdown for direct access:
 - **2 - Fabric Skills Maintainer** -- Updates skill repos, checks pipeline skill freshness
@@ -1999,12 +2408,14 @@ if you know what you need.
 ## Agent architecture
 
 ### 1 - Fabric Workspace Master Agent  `.github/agents/1-fabric-workspace-master-agent.agent.md`
-Single entry point. On session start: offers skill update (via Maintainer), checks az login,
-presents topic selection menu. Can also handle tasks directly by reading skills.
+Slim routing hub. On session start: reads copilot-instructions.md and AGENTS.md, then
+follows `.github/agent-docs/starting-flow.md` (skill check, az login, topic menu).
+For direct task handling: follows `.github/agent-docs/working-flow-reference.md`.
+Reference docs in `agent-docs/` do NOT appear in the Copilot Chat dropdown.
 
 ### 2 - Fabric Skills Maintainer  `.github/agents/2-fabric-skills-maintainer.agent.md`
-Pulls skill repos, checks pipeline skill freshness against Microsoft docs,
-reports new unreferenced skills. Called from Master Agent or directly.
+Offers light (quick pull) or deep (pull + MS docs freshness check + unreferenced scan).
+Called from Master Agent or directly.
 
 ### Specialist agents (also selectable from dropdown)
 
@@ -2079,19 +2490,24 @@ $tasksJson = @'
 Write-ManagedFile "$rootPath\.vscode\tasks.json" $tasksJson
 Write-Host "  Written: .vscode/tasks.json" -ForegroundColor Green
 
-# -- .vscode/settings.json ---------------------------------------------
-$settingsJson = @'
-{
-    "task.allowAutomaticTasks": "on"
+# -- .vscode/settings.json (merge -- preserves user customisations) -----
+$requiredSettings = @{
+    "task.allowAutomaticTasks" = "on"
+    "chat.agentSkillsLocations" = @{
+        ".github/skills" = $true
+        "~/.vscode/extensions/synapsevscode.synapse-1.22.0/copilot/skills" = $true
+        "~/.vscode/extensions/synapsevscode.synapse-1.23.0/copilot/skills" = $true
+    }
+    "git.ignoreLimitWarning" = $true
+    "search.exclude" = @{
+        "skills-for-fabric/" = $true
+        "power-bi-agentic-development/" = $true
+    }
 }
-'@
 $settingsPath = "$rootPath\.vscode\settings.json"
-if (-not (Test-Path $settingsPath)) {
-    Write-ManagedFile $settingsPath $settingsJson
-    Write-Host "  Written: .vscode/settings.json" -ForegroundColor Green
-} else {
-    Write-Host "  .vscode/settings.json already exists  -- skipping" -ForegroundColor Yellow
-}
+$existed = Test-Path $settingsPath
+Merge-JsonSettings $settingsPath $requiredSettings
+Write-Host "  $(if ($existed) {'Merged'} else {'Written'}): .vscode/settings.json" -ForegroundColor Green
 
 Write-Host "`n  All configuration files ready." -ForegroundColor Green
 
