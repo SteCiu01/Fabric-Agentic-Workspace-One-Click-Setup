@@ -410,3 +410,11 @@ Quick links:
 ## License
 
 This project is licensed under the MIT License — see the [LICENSE](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/blob/main/LICENSE) file for details.
+
+## Third-party notices
+
+This project integrates and references third-party open-source skill repositories
+that remain the property of their respective authors and are licensed separately.
+
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for attribution,
+repository links, and license information.
