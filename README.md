@@ -15,7 +15,7 @@ two open-source skill repositories — all inside VS Code.
 ---
 
 <p align="center">
-  <img src="assets/architecture-overview.svg" alt="Fabric Agentic Workspace — Architecture Overview" width="100%"/>
+  <img src="assets/architecture-overview.png" alt="Fabric Agentic Workspace — Architecture Overview" width="100%"/>
 </p>
 
 ---
