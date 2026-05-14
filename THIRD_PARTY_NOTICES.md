@@ -48,7 +48,9 @@ Integration method:
 - Not redistributed as part of this repository
 
 Ownership:
-Copyright © the respective repository authors/contributors
+Copyright © Kurt Buhler (data-goblin)
+GitHub: https://github.com/data-goblin
+LinkedIn: https://www.linkedin.com/in/kurtbuhler/
 
 License:
 GPL-3.0

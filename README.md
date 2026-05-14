@@ -78,7 +78,7 @@ the community, and custom embedded knowledge.
 | **Custom TMDL Skill** | Comprehensive embedded skill covering TMDL syntax, indentation rules, property ordering, Direct Lake patterns, lineageTag rules, and post-edit validation |
 | **Custom Pipelines Skill** | Full pipeline activity type reference with typeProperties, expression syntax, Variable Library integration, and validation checklist |
 | **Microsoft skills-for-fabric** | Git-cloned from [microsoft/skills-for-fabric](https://github.com/microsoft/skills-for-fabric) — Spark, SQL, Eventhouse, medallion, and more |
-| **Data-goblin skills** | Git-cloned from [data-goblin/power-bi-agentic-development](https://github.com/data-goblin/power-bi-agentic-development) — PBIP, DAX, reports, Fabric CLI, Fabric admin |
+| **Data-goblin skills** | Git-cloned from [data-goblin/power-bi-agentic-development](https://github.com/data-goblin/power-bi-agentic-development) by [Kurt Buhler](https://www.linkedin.com/in/kurtbuhler/) — PBIP, DAX, reports, Fabric CLI, Fabric admin |
 | **Git Version Control** | Repository initialised with a clean `.gitignore` and first commit out of the box |
 | **VS Code Configuration** | Settings and tasks pre-configured for the agentic workflow |
 
@@ -211,7 +211,7 @@ The skills come from three sources:
 |---|---|---|
 | **Custom embedded** (`.github/skills/`) | TMDL syntax, pipeline JSON | Re-run installer or edit directly |
 | **Microsoft** (`skills-for-fabric/`) | Spark, SQL, Eventhouse, medallion, CLI | Auto on session start |
-| **Data-goblin** (`power-bi-agentic-development/`) | PBIP, DAX, reports, Fabric CLI/admin | Auto on session start |
+| **Data-goblin** — [Kurt Buhler](https://www.linkedin.com/in/kurtbuhler/) (`power-bi-agentic-development/`) | PBIP, DAX, reports, Fabric CLI/admin | Auto on session start |
 
 > **Why git clone instead of npm install?** Corporate environments typically
 > block npm global installs and require admin approval. This workspace clones
