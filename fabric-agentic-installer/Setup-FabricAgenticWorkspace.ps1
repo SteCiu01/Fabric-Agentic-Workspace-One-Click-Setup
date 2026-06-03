@@ -8,7 +8,10 @@
     Once complete it opens the folder in VS Code  -- select Fabric Master Agent
     from the Copilot Chat dropdown and type anything to start.
 .NOTES
-    Requirements: git, VS Code 1.117.0+ with GitHub Copilot, az CLI (recommended)
+    Requirements: git, VS Code 1.117.0+ with GitHub Copilot.
+    Optional CLIs (workspace works without them): Fabric CLI `fab` (recommended,
+    `pip install ms-fabric-cli`) and Azure CLI `az` (fallback for SQL/TDS and
+    non-Fabric token audiences).
     This script is the source of truth for managed agents and skills.
     It will overwrite its own files but leave unmanaged files untouched.
 #>
@@ -37,7 +40,8 @@ $managedAgents = @(
 )
 $managedSkills = @(
     'fabric-tmdl',
-    'fabric-pipelines'
+    'fabric-pipelines',
+    'fabric-cli-policy'
 )
 $managedConfigs = @(
     '.github\copilot-instructions.md',
@@ -65,6 +69,90 @@ function Write-ManagedFile ([string]$Path, [string]$Content) {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
     }
     Set-Content -Path $Path -Value $Content -Encoding UTF8
+}
+
+# -- Helper: locate a REAL, runnable Python interpreter -----------------
+# On Windows, `python` / `python3` on PATH are often the Microsoft Store
+# "App execution alias" stubs that only print "Python was not found" and exit
+# non-zero. Get-Command still finds them, so we must actually RUN --version and
+# confirm a real "Python 3.x" before trusting the interpreter for pip installs.
+# Returns the usable launcher string (e.g. 'py' / 'python') or $null.
+function Find-RealPython {
+    foreach ($cand in @('py', 'python', 'python3')) {
+        if (-not (Get-Command $cand -ErrorAction SilentlyContinue)) { continue }
+        try {
+            $v = (& $cand --version 2>&1 | Out-String).Trim()
+            if ($LASTEXITCODE -eq 0 -and $v -match 'Python\s+3') { return $cand }
+        } catch { }
+    }
+    return $null
+}
+
+# -- Helper: attempt an optional tool install, never fatal --------------
+# Prompts the user, then tries each strategy in $Attempts (ordered list of
+# @{ Exe = '<exe>'; Args = @(...) }) until $CheckCmd is satisfied. Strategies
+# whose Exe is missing are skipped, so a blocked winget or missing pip does not
+# stop us trying another route. On total failure it reports the captured cause
+# (exit code + output) so the user knows WHY, and always returns control to the
+# caller -- a failed optional install never aborts the setup.
+function Try-InstallOptionalTool {
+    param(
+        [string]$Name,        # friendly name, e.g. "Fabric CLI (fab)"
+        [string]$CheckCmd,    # command to detect presence, e.g. "fab"
+        [array]$Attempts,     # ordered list of @{ Exe=..; Args=@(..) } strategies
+        [string]$ManualUrl    # fallback manual install URL
+    )
+    $ans = Read-Host "    Attempt to install $Name now? [y/N]"
+    if ($ans -notmatch '^(y|yes)$') {
+        Write-Host "    Skipped. Install later if needed: $ManualUrl" -ForegroundColor DarkGray
+        return $false
+    }
+
+    $anyRan = $false
+    foreach ($attempt in $Attempts) {
+        $exe = $attempt.Exe
+        $eArgs = $attempt.Args
+        if (-not (Get-Command $exe -ErrorAction SilentlyContinue)) { continue }
+        $anyRan = $true
+        Write-Host "    Trying: $exe $($eArgs -join ' ') ..." -ForegroundColor White
+        $output = ''
+        try { $output = & $exe @eArgs 2>&1 | Out-String } catch { $output = $_.Exception.Message }
+        $code = $LASTEXITCODE
+
+        # Refresh PATH so a freshly-installed command is visible this session.
+        $env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
+                    [System.Environment]::GetEnvironmentVariable('Path', 'User')
+        # pip --user drops console scripts in the per-user Scripts dir, which is
+        # often not on PATH yet -- add it so the CheckCmd test can find the tool.
+        if ($exe -match '^(py|python|python3)$') {
+            try {
+                $userBase = (& $exe -c "import site;print(site.getuserbase())" 2>$null)
+                if ($userBase) {
+                    $userScripts = Join-Path $userBase 'Scripts'
+                    if (Test-Path $userScripts) { $env:Path = "$userScripts;$env:Path" }
+                }
+            } catch { }
+        }
+
+        if (Get-Command $CheckCmd -ErrorAction SilentlyContinue) {
+            Write-Host "    $Name installed successfully (via $exe)." -ForegroundColor Green
+            return $true
+        }
+        Write-Host "    That method did not succeed (exit code: $code)." -ForegroundColor Yellow
+        $reason = ($output -split "`n" | Where-Object { $_ -match '\S' } | Select-Object -Last 3) -join "`n      "
+        if ($reason) { Write-Host "      $reason" -ForegroundColor DarkGray }
+        Write-Host "    Trying next method if available..." -ForegroundColor DarkGray
+    }
+
+    # Nothing worked -- explain why and how to recover.
+    if (-not $anyRan) {
+        Write-Host "    Cannot install automatically: no working installer (real Python/pip or winget) is available." -ForegroundColor Yellow
+    }
+    Write-Host "    Likely causes: corporate security policy blocking installs, no real Python/pip or winget, or no network access." -ForegroundColor DarkGray
+    Write-Host "    Install it later when convenient -- either manually ($ManualUrl)," -ForegroundColor DarkGray
+    Write-Host "    or just open the workspace and ask the Fabric agent to walk you through it." -ForegroundColor DarkGray
+    Write-Host "    Continuing without $Name (the workspace works fine without it)." -ForegroundColor DarkGray
+    return $false
 }
 
 # -- Helper: merge installer-owned keys into existing JSON settings -----
@@ -351,11 +439,46 @@ if ($tmdlExtFound) {
     Write-Host "         Install via: code --install-extension analysis-services.tmdl" -ForegroundColor DarkGray
 }
 
-# az CLI (optional -- useful for Fabric REST API calls but not required)
+# Fabric CLI (fab) -- RECOMMENDED (optional). Primary CLI for Fabric control-plane:
+# item lifecycle, jobs, export/import, OneLake file ops, table ops. Not required --
+# the core workflow (Fabric extension + agents editing local files) needs no CLI.
+if (-not (Get-Command fab -ErrorAction SilentlyContinue)) {
+    Write-Host "  Fabric CLI (fab): not found (recommended)" -ForegroundColor Yellow
+    Write-Host "         Primary CLI for Fabric API, jobs, export/import, OneLake and table ops." -ForegroundColor DarkGray
+    Write-Host "         Needs Python 3.10-3.13. Reference: https://github.com/microsoft/fabric-cli" -ForegroundColor DarkGray
+    # Only build pip strategies when a REAL Python is present (ignore Store-alias stubs).
+    $realPy = Find-RealPython
+    if ($realPy) {
+        Try-InstallOptionalTool -Name "Fabric CLI (fab)" -CheckCmd "fab" -Attempts @(
+            @{ Exe = $realPy; Args = @("-m", "pip", "install", "--user", "ms-fabric-cli") }
+        ) -ManualUrl "https://github.com/microsoft/fabric-cli (pip install ms-fabric-cli)" | Out-Null
+    } else {
+        Write-Host "         No working Python found (the 'python' on PATH is the Microsoft Store stub)." -ForegroundColor DarkGray
+        Write-Host "         Install Python 3.10-3.13 from https://www.python.org/downloads/ (tick 'Add to PATH')," -ForegroundColor DarkGray
+        Write-Host "         then run: pip install ms-fabric-cli  -- or ask the Fabric agent to guide you later." -ForegroundColor DarkGray
+    }
+} else {
+    Write-Host "  Fabric CLI (fab): found" -ForegroundColor Green
+}
+
+# az CLI -- OPTIONAL (fallback). Only needed for SQL/TDS (sqlcmd -G) and non-Fabric
+# token audiences (Storage, database.windows.net). fab covers the rest.
 if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
-    Write-Host "  az CLI: not found (optional)" -ForegroundColor Yellow
-    Write-Host "         Some agents can use az rest for Fabric API calls." -ForegroundColor DarkGray
-    Write-Host "         Install later if needed: https://aka.ms/installazurecli" -ForegroundColor DarkGray
+    Write-Host "  az CLI: not found (optional, fallback)" -ForegroundColor Yellow
+    Write-Host "         Only needed for SQL/TDS (sqlcmd) and non-Fabric token audiences; fab covers the rest." -ForegroundColor DarkGray
+    Write-Host "         Reference: https://aka.ms/installazurecli" -ForegroundColor DarkGray
+    # Prefer winget (system MSI); if it is blocked (common 1603 in locked-down
+    # environments), fall back to a user-scoped pip install -- but only if a real
+    # Python exists. Build attempts dynamically so we never run the Store stub.
+    $realPy = Find-RealPython
+    $azAttempts = @(
+        @{ Exe = "winget"; Args = @("install", "--silent", "--accept-package-agreements", "--accept-source-agreements", "-e", "--id", "Microsoft.AzureCLI") }
+    )
+    if ($realPy) {
+        $azAttempts += @{ Exe = $realPy; Args = @("-m", "pip", "install", "--user", "azure-cli") }
+    }
+    Try-InstallOptionalTool -Name "az CLI" -CheckCmd "az" -Attempts $azAttempts `
+        -ManualUrl "https://aka.ms/installazurecli" | Out-Null
 } else {
     Write-Host "  az CLI: found" -ForegroundColor Green
 }
@@ -384,6 +507,7 @@ $dirs = @(
     "$rootPath\.github\agent-docs"
     "$rootPath\.github\skills\fabric-tmdl"
     "$rootPath\.github\skills\fabric-pipelines"
+    "$rootPath\.github\skills\fabric-cli-policy"
     "$rootPath\.vscode"
 )
 foreach ($d in $dirs) {
@@ -413,6 +537,11 @@ Write-Host "`n  Folder structure ready." -ForegroundColor Green
 # STEP 4  -- Clone skill repositories
 # =====================================================================
 Show-Step 4 $totalSteps "Cloning Skill Repositories"
+
+# NOTE: We deliberately do NOT clone microsoft/fabric-cli (https://github.com/microsoft/fabric-cli).
+# The data-goblin plugin (power-bi-agentic-development/plugins/fabric-cli/) already provides
+# rich `fab` references and scripts, and the `fab` tool itself is installed via pip
+# (ms-fabric-cli) in Step 2. Cloning the CLI source repo would add no agent-usable skills.
 
 Push-Location $rootPath
 try {
@@ -1670,6 +1799,76 @@ Write-ManagedFile $pipelineSkillPath $pipelineContent
 (Get-Item $pipelineSkillPath).LastWriteTime = $ps1LastModified
 Write-Host "  Written: .github/skills/fabric-pipelines/SKILL.md" -ForegroundColor Green
 
+# ----- fabric-cli-policy/SKILL.md ------------------------------------
+$cliPolicySkillPath = "$rootPath\.github\skills\fabric-cli-policy\SKILL.md"
+$cliPolicyContent = @'
+---
+name: fabric-cli-policy
+description: "CLI decision policy for Fabric/Power BI work. Read this BEFORE any terminal CLI or REST API task. Triggers: fabric cli, fab, fab api, call Fabric API, run notebook, run job, export item, import item, deploy item, onelake copy, table load, az rest, sqlcmd, capacity, governance, workspace item CRUD."
+---
+
+# Fabric CLI Policy -- prefer `fab`, fall back to `az`
+
+This workspace standardises on the **Fabric CLI (`fab`)** for control-plane and
+data-plane Fabric work. `az` (Azure CLI) is retained as a documented **fallback**
+for the few things `fab` does not cover. Neither CLI is required for the core
+local-editing workflow -- they add terminal/API power on top.
+
+## Decision rule
+
+**Default to `fab`** for:
+- Calling the Fabric REST API -> `fab api <endpoint>` (replaces `az rest --resource https://api.fabric.microsoft.com`)
+- Running and monitoring jobs -> `fab job run`, `fab job run-sch`, `fab job run-status`
+- Exporting / importing items -> `fab export`, `fab import`
+- Table operations -> `fab table load`, `fab table optimize`, `fab table schema`
+- OneLake file operations -> `fab cp`, `fab ls`, `fab rm` (and shortcuts)
+- Workspace / item CRUD -> `fab create`, `fab get`, `fab set`, `fab rm`
+- Identity -> `fab auth login`, `fab auth status`
+
+**Fall back to `az` / `sqlcmd` ONLY** for:
+- SQL / TDS data-plane queries -> `sqlcmd -G -S <endpoint> -d <db> -Q "<query>"`
+- Tokens for **non-Fabric** audiences -> `az account get-access-token --resource <audience>`
+  (e.g. Storage `https://storage.azure.com`, SQL `https://database.windows.net`)
+- Any Fabric REST endpoint not yet surfaced by `fab api` (rare) -> `az rest` is acceptable
+
+## `az rest` -> `fab api` translation
+
+`fab api` handles auth automatically (no `--resource`, no token juggling) and
+supports JMESPath result filtering with `-q`.
+
+| Task | az (old) | fab (preferred) |
+|------|----------|-----------------|
+| List workspaces | `az rest --method get --resource https://api.fabric.microsoft.com --url https://api.fabric.microsoft.com/v1/workspaces` | `fab api workspaces` |
+| Get one item | `az rest --method get --url .../v1/workspaces/<wsId>/items/<id>` | `fab api workspaces/<wsId>/items/<id>` |
+| Filter output | `... -q "value[].displayName"` | `fab api workspaces -q "value[].displayName"` |
+| Run a notebook job | n/a (raw REST) | `fab job run <workspace>/<notebook>.Notebook` |
+| Check job status | raw REST polling | `fab job run-status <workspace>/<item> --id <jobId>` |
+
+Notes:
+- `fab api` is not a 1:1 mirror of every `az rest` call. If a specific endpoint
+  is not covered by `fab api`, fall back to `az rest` for that single call.
+- Use `fab auth status` to confirm identity; `fab auth login` to sign in.
+
+## Where the deep `fab` references live (already cloned)
+
+The data-goblin plugin ships rich `fab` references and scripts -- discover them
+dynamically (paths evolve):
+- `power-bi-agentic-development/plugins/fabric-cli/skills/fabric-cli/` -- references/ and scripts/
+  - e.g. `fab-api.md`, `fab-vs-az-cli.md`, `import-download-deploy.md`, `semantic-models.md`
+  - e.g. `export_semantic_model_as_pbip.py`
+
+The Microsoft `skills-for-fabric/common/COMMON-CLI.md` is **az-based** and is the
+documented fallback reference for SQL/TDS and non-Fabric token audiences.
+
+## Guardrails
+- Never hardcode tokens, secrets, or IDs -- parameterise (dev/test/prod).
+- Confirm before destructive `fab rm` / delete operations.
+- Prefer the smallest-scope call; filter with `-q` instead of dumping everything.
+'@
+Write-ManagedFile $cliPolicySkillPath $cliPolicyContent
+(Get-Item $cliPolicySkillPath).LastWriteTime = $ps1LastModified
+Write-Host "  Written: .github/skills/fabric-cli-policy/SKILL.md" -ForegroundColor Green
+
 Read-Host "`n  Press Enter to continue..."
 
 # =====================================================================
@@ -1857,12 +2056,20 @@ Continue to Phase 2 immediately.
 
 ---
 
-## Phase 2 - Check Azure identity
+## Phase 2 - Check identity
 
-Run: az account show --query "{name:name, user:user.name}" --output table 2>&1
-If successful: "Logged in as [user] on tenant [name]."
-If it fails: "Not logged in to Azure. Run `az login` if you need Fabric API access."
-Do NOT block on this - many tasks work without az login.
+Prefer the Fabric CLI for identity. Try `fab` first; fall back to `az` only if
+`fab` is not installed.
+
+1. Run: fab auth status 2>&1
+   - If it reports a signed-in account: "Logged in to Fabric as [account]."
+   - If `fab` is not found OR not logged in, continue to step 2.
+2. Fallback - run: az account show --query "{name:name, user:user.name}" --output table 2>&1
+   - If successful: "Logged in as [user] on tenant [name]."
+   - If it fails: "Not logged in. Run `fab auth login` (preferred) or `az login` if you need Fabric API access."
+
+Do NOT block on this - many tasks work without any CLI login. The core workflow
+(Fabric extension + local file editing) needs no CLI at all.
 
 ---
 
@@ -1931,11 +2138,13 @@ know what skills exist or where they are.** Always discover dynamically.
 | Eventhouse / KQL | `skills-for-fabric/skills/` | `ls skills-for-fabric/skills/` |
 | Reports / Visuals | `power-bi-agentic-development/plugins/` | `ls power-bi-agentic-development/plugins/` |
 | Medallion architecture | `skills-for-fabric/skills/` | `ls skills-for-fabric/skills/` |
-| REST API / CLI | `skills-for-fabric/skills/` | `ls skills-for-fabric/skills/` |
+| REST API / CLI | `.github/skills/fabric-cli-policy/` + `skills-for-fabric/skills/` | Read policy skill first (prefer `fab`) |
 | Admin / Governance | Both repos | List both skill directories |
 
-For skills-for-fabric, also read `skills-for-fabric/common/COMMON-CLI.md` for
-az rest patterns and authentication.
+For any terminal CLI or REST API work, read `.github/skills/fabric-cli-policy/SKILL.md` first:
+prefer the Fabric CLI (`fab api`, `fab job`, `fab export/import`, OneLake `fab cp`). The
+Microsoft `skills-for-fabric/common/COMMON-CLI.md` (az rest) is the documented FALLBACK
+for SQL/TDS and non-Fabric token audiences.
 
 ### Discovery workflow example
 
@@ -2162,7 +2371,12 @@ Read the relevant skill by listing `skills-for-fabric/skills/` first, then readi
 - **Pipelines**: read `.github/skills/fabric-pipelines/SKILL.md`
 - **Fabric CLI**: list `power-bi-agentic-development/plugins/fabric-cli/skills/`
 
-Also read `skills-for-fabric/common/COMMON-CLI.md` for az rest patterns and authentication.
+## CLI / API policy
+
+Read `.github/skills/fabric-cli-policy/SKILL.md` FIRST for any terminal CLI or REST
+API work. **Prefer the Fabric CLI (`fab`)** -- `fab api`, `fab job run`, `fab export/import`,
+`fab table ...`, OneLake `fab cp`. Use `skills-for-fabric/common/COMMON-CLI.md` (az rest)
+only as a FALLBACK for SQL/TDS (`sqlcmd -G`) and non-Fabric token audiences.
 
 ## Core responsibilities
 - Design and orchestrate medallion architecture (Bronze -> Silver -> Gold)
@@ -2197,7 +2411,9 @@ You are 5 - Fabric Admin, a specialist for Fabric platform administration.
 to discover the current skill names. Skill repos evolve frequently.
 
 List `skills-for-fabric/skills/` and read relevant admin/governance skills.
-Also read `skills-for-fabric/common/COMMON-CLI.md` for az rest patterns.
+For any terminal CLI or REST API work, read `.github/skills/fabric-cli-policy/SKILL.md` FIRST:
+**prefer `fab api`** for governance/capacity/workspace calls; use `skills-for-fabric/common/COMMON-CLI.md`
+(az rest) only as a FALLBACK for SQL/TDS and non-Fabric token audiences.
 Check `power-bi-agentic-development/plugins/` for:
 - `fabric-admin/skills/` -- Fabric admin operations
 - `fabric-cli/skills/` -- Fabric CLI operations
@@ -2240,6 +2456,7 @@ For SQL access: find and read the SQL warehouse consumption skill SKILL.md.
 - Connect applications to Fabric Warehouse/Lakehouse SQL endpoints via ODBC
 - Integrate with semantic models via XMLA endpoints
 - Set up local dev environments with `az login` + DefaultAzureCredential
+  (for Fabric CLI sign-in you can use `fab auth login` as an alternative to `az login`)
 - Build data access layers using pyodbc, sqlalchemy, pandas
 - Integrate Fabric REST APIs for workspace and item management
 
@@ -2307,7 +2524,9 @@ to discover the current skill names. Skill repos evolve frequently.
 
 1. Read `.github/skills/fabric-pipelines/SKILL.md` -- follow it precisely
 2. List `skills-for-fabric/skills/` and find pipeline-related skills
-3. For orchestration patterns: check `skills-for-fabric/common/COMMON-CLI.md`
+3. For triggering and monitoring runs: read `.github/skills/fabric-cli-policy/SKILL.md` and
+   prefer `fab job run` / `fab job run-status` / `fab api`. Use `skills-for-fabric/common/COMMON-CLI.md`
+   (az rest) only as a FALLBACK for SQL/TDS and non-Fabric token audiences.
 4. Also explore `skills-for-fabric/common/ITEM-DEFINITIONS-CORE.md` for DataPipeline item type
 
 ## Capabilities
@@ -2351,7 +2570,7 @@ Select it from the Copilot Chat agent dropdown to begin.
 
 The master agent uses reference docs in `.github/agent-docs/` for its startup
 and working flows. These files do NOT appear in the Copilot Chat dropdown:
-- `starting-flow.md`  -- Session startup phases (skill check, az login, topic menu)
+- `starting-flow.md`  -- Session startup phases (skill check, fab auth / az fallback, topic menu)
 - `working-flow-reference.md`  -- Dynamic skill discovery table and working rules
 
 Specialist agents are also available in the dropdown for direct access:
@@ -2368,6 +2587,15 @@ Specialist agents are also available in the dropdown for direct access:
 ### Custom skills (embedded by installer  -- source of truth is the PS1)
 - `.github/skills/fabric-tmdl/SKILL.md`  -- TMDL syntax, indentation, property ordering
 - `.github/skills/fabric-pipelines/SKILL.md`  -- Pipeline JSON structure, activity types
+- `.github/skills/fabric-cli-policy/SKILL.md`  -- CLI decision policy: prefer `fab`, `az` fallback
+
+## CLI policy
+
+This workspace prefers the **Fabric CLI (`fab`)** for control-plane / data-plane
+work; **`az` is a documented fallback** (SQL/TDS via `sqlcmd -G`, non-Fabric token
+audiences, uncovered endpoints). Neither CLI is required for the core local-editing
+workflow. Before any terminal CLI or REST API task, read
+`.github/skills/fabric-cli-policy/SKILL.md`.
 
 ### Microsoft skills (cloned repo  -- auto-updated on session start)
 - `skills-for-fabric/skills/`  -- Spark, SQL, Eventhouse, Power BI, Medallion
@@ -2397,8 +2625,9 @@ $agentsReadme = @'
 
 Open this folder in VS Code.
 In Copilot Chat, select **1 - Fabric Workspace Master Agent** from the agent dropdown.
-Type anything to begin. The agent offers to update skills, checks your Azure identity,
-and presents a topic menu to route you to the right specialist.
+Type anything to begin. The agent offers to update skills, checks your identity
+(`fab auth status`, falling back to `az account show`), and presents a topic menu
+to route you to the right specialist.
 
 You can also select specialist agents directly from the dropdown
 if you know what you need.
@@ -2409,7 +2638,7 @@ if you know what you need.
 
 ### 1 - Fabric Workspace Master Agent  `.github/agents/1-fabric-workspace-master-agent.agent.md`
 Slim routing hub. On session start: reads copilot-instructions.md and AGENTS.md, then
-follows `.github/agent-docs/starting-flow.md` (skill check, az login, topic menu).
+follows `.github/agent-docs/starting-flow.md` (skill check, fab auth / az fallback, topic menu).
 For direct task handling: follows `.github/agent-docs/working-flow-reference.md`.
 Reference docs in `agent-docs/` do NOT appear in the Copilot Chat dropdown.
 
@@ -2434,7 +2663,7 @@ Called from Master Agent or directly.
 
 | Source | Location | Updated |
 |--------|----------|---------|
-| Custom (TMDL, Pipelines) | `.github/skills/` | Re-run installer |
+| Custom (TMDL, Pipelines, CLI policy) | `.github/skills/` | Re-run installer |
 | Microsoft skills-for-fabric | `skills-for-fabric/` | Auto on session start |
 | Data-goblin plugins | `power-bi-agentic-development/` | Auto on session start |
 '@

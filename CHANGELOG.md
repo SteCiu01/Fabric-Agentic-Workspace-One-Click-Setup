@@ -5,16 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-_Nothing yet — next changes will appear here._
-
 ## [v0.1.0-pre-release] - 2026-05-04
 
 ### Added
 
 - One-click setup via `Setup-FabricAgenticWorkspace.bat` + `.ps1` (Windows)
-- **Fabric Workspace Master Agent** — slim routing hub that handles session startup, skill checks, Azure identity, and topic-based routing to specialist agents
+- **Fabric Workspace Master Agent** — slim routing hub that handles session startup, skill checks, identity (`fab auth status`, falling back to `az account show`), and topic-based routing to specialist agents
 - **Fabric Skills Maintainer** — light (quick pull) and deep (pull + MS docs freshness check + unreferenced skill scan) maintenance modes
 - **Semantic Model Agent** — TMDL editing, DAX measures, columns, relationships, partitions
 - **Fabric Data Engineer** — Spark notebooks, SQL warehouse, pipelines, medallion architecture
@@ -24,6 +20,7 @@ _Nothing yet — next changes will appear here._
 - **Fabric Pipelines Agent** — Data Factory pipeline JSON authoring
 - Custom **fabric-tmdl** skill (embedded) — comprehensive TMDL syntax, indentation rules, property ordering, Direct Lake patterns
 - Custom **fabric-pipelines** skill (embedded) — full pipeline activity type reference with typeProperties and expression syntax
+- Custom **fabric-cli-policy** skill (embedded) — the `fab`-first / `az`-fallback decision rule and `az rest` → `fab api` translation table
 - Git-cloned [microsoft/skills-for-fabric](https://github.com/microsoft/skills-for-fabric) integration — Spark, SQL, Eventhouse, medallion skills
 - Git-cloned [data-goblin/power-bi-agentic-development](https://github.com/data-goblin/power-bi-agentic-development) integration — PBIP, DAX, report, Fabric CLI skills
 - Organised workspace folder structure (`.github/agents/`, `.github/skills/`, `.github/agent-docs/`, `.vscode/`)
@@ -31,7 +28,10 @@ _Nothing yet — next changes will appear here._
 - Workspace-level Copilot instructions (`.github/copilot-instructions.md`)
 - `AGENTS.md` quick-reference guide
 - VS Code settings and tasks auto-configuration
-- Prerequisite checks for git, VS Code, Fabric extension, TMDL extension, and az CLI
+- CLI standardisation on the **Fabric CLI (`fab`)** for control-plane / data-plane work, with **`az` (Azure CLI) as a documented fallback** (SQL/TDS via `sqlcmd -G` and non-Fabric token audiences)
+- Optional, resilient CLI installation — the installer offers to install `fab` and `az`, trying multiple methods (`py`/`python`/`pip --user`, and `winget` for `az`) and reporting the likely cause when an install fails (e.g. corporate security policy, missing Python/winget)
+- [CLI-FUNCTIONALITIES.md](CLI-FUNCTIONALITIES.md) — categorised deep-dive of what you can do with the CLIs, with a small example per item
+- Prerequisite checks for git, VS Code, Fabric extension, TMDL extension, and the optional `fab` (recommended) and `az` (fallback) CLIs
 - Interactive workspace folder selection (existing folder or new)
 - Multi-workspace scaffolding support
 - Idempotent installer — safe to re-run on existing folders (managed files overwritten, user files untouched)

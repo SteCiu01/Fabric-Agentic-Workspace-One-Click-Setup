@@ -96,7 +96,10 @@ Before running the installer, make sure you have:
 | **[Microsoft Fabric Extension](https://marketplace.visualstudio.com/items?itemName=fabric.vscode-fabric)** | Yes | Required for the pull/push workflow with Fabric. Install from VS Code marketplace or `code --install-extension fabric.vscode-fabric` |
 | **[TMDL Extension](https://marketplace.visualstudio.com/items?itemName=analysis-services.tmdl)** | Recommended | Provides syntax highlighting and validation for `.tmdl` files |
 | **[Fabric Data Engineer Remote](https://marketplace.visualstudio.com/items?itemName=SynapseVSCode.synapse)** | Nice to have | Execute notebook cells against remote Spark directly from VS Code |
-| **az CLI** | Optional | Some agents use `az rest` for Fabric API calls. [Install](https://aka.ms/installazurecli) |
+| **Fabric CLI (`fab`)** | Recommended | Primary CLI the agents use for Fabric API, jobs, export/import, OneLake & table ops. Needs Python 3.10–3.13: `pip install ms-fabric-cli`. [Repo](https://github.com/microsoft/fabric-cli) |
+| **az CLI** | Optional (fallback) | Only needed for SQL/TDS (`sqlcmd -G`) and non-Fabric token audiences; `fab` covers the rest. [Install](https://aka.ms/installazurecli) |
+
+> **CLIs are optional power-ups.** The core workflow — the Fabric extension plus agents editing local files — needs no CLI at all. The CLIs add terminal and control-plane/data-plane power on top. The installer offers to install `fab` (recommended) and `az` (fallback) for you, and reports the cause if an install fails. For a deep dive into what you can do once a CLI is installed, see [CLI-FUNCTIONALITIES.md](CLI-FUNCTIONALITIES.md).
 
 ---
 
@@ -136,10 +139,10 @@ Follow the prompts. The script will:
 1. Ask for your workspace folder (existing or new)
 2. Explain the Fabric Git integration workflow
 3. Ask how many Fabric workspaces to scaffold
-4. Check all prerequisites (git, VS Code, Fabric extension, TMDL extension, az CLI)
+4. Check all prerequisites (git, VS Code, Fabric extension, TMDL extension, and optionally the `fab` and `az` CLIs)
 5. Create the folder structure
 6. Clone Microsoft's skills-for-fabric and data-goblin's power-bi-agentic-development
-7. Write custom skills (TMDL, Pipelines)
+7. Write custom skills (TMDL, Pipelines, CLI policy)
 8. Generate all agent definitions (8 agents)
 9. Write configuration files (Copilot instructions, AGENTS.md, .gitignore, VS Code settings)
 10. Initialise a git repo with the first commit
@@ -156,7 +159,7 @@ Once VS Code opens:
 On first message the agent will:
 - Check when each skill source was last updated
 - Offer to run skill maintenance (light or deep)
-- Check your Azure identity (`az account show`)
+- Check your identity (`fab auth status`, falling back to `az account show`)
 - Present a topic menu to route you to the right specialist
 
 ### 4. Keeping it up to date
@@ -180,7 +183,7 @@ You don't configure anything manually. On your **first message** each session, t
 
 1. **Checks skill freshness** — shows when each skill source was last updated locally
 2. **Offers maintenance** — optionally switches to the Skills Maintainer for a light or deep update
-3. **Checks Azure identity** — runs `az account show` to verify your login
+3. **Checks identity** — runs `fab auth status` (falling back to `az account show`) to verify your login
 4. **Presents topic selection** — routes you to the specialist agent for your task
 
 ### Specialist agents
@@ -191,7 +194,7 @@ Once routed, the specialist agents handle their domain:
 |---|---|
 | **Semantic Model Agent** | Create/edit TMDL files, write DAX measures, manage columns, relationships, partitions, Direct Lake models, Field Parameters. Reads the fabric-tmdl skill and data-goblin DAX conventions before every task. |
 | **Fabric Data Engineer** | Design medallion architecture, develop Spark notebooks, author SQL objects, create Data Factory pipelines. Reads skills-for-fabric and the fabric-pipelines skill. |
-| **Fabric Admin** | Capacity planning, governance validation, workspace inventory, RBAC, cost analysis. Uses az rest patterns from skills-for-fabric. |
+| **Fabric Admin** | Capacity planning, governance validation, workspace inventory, RBAC, cost analysis. Prefers the Fabric CLI (`fab api`); falls back to `az rest` patterns from skills-for-fabric. |
 | **Fabric App Dev** | Connect apps to Fabric via ODBC/XMLA/REST, build data access layers in Python, set up local dev environments with DefaultAzureCredential. |
 | **Fabric Reports Agent** | Author PBIR report definitions, design visual layouts, apply themes, create report-level measures. Reads data-goblin report skills. |
 | **Fabric Pipelines Agent** | Author pipeline JSON, configure activities (Copy, Notebook, ForEach, IfCondition, Refresh, etc.), manage parameters and expressions. Reads the fabric-pipelines skill. |
