@@ -88,6 +88,85 @@ function Find-RealPython {
     return $null
 }
 
+# -- Helper: refresh the current-session PATH from Machine + User scopes -
+# A freshly installed tool updates the persisted PATH but not the in-memory one,
+# which is the usual reason a successful install still reports "not found".
+function Update-InstallerPath {
+    $machine = [System.Environment]::GetEnvironmentVariable('Path', 'Machine')
+    $user    = [System.Environment]::GetEnvironmentVariable('Path', 'User')
+    $env:Path = (@($machine, $user) | Where-Object { $_ }) -join ';'
+}
+
+# -- Helper: add a dir to the session PATH and persist it (User scope) ---
+# Idempotent. Ensures a newly installed tool resolves both now and on the next
+# VS Code/terminal launch without a manual restart.
+function Add-DirToPath {
+    param([string]$Dir)
+    if (-not $Dir) { return }
+    if ($env:Path -notlike "*$Dir*") { $env:Path = "$Dir;$env:Path" }
+    try {
+        $userPath = [System.Environment]::GetEnvironmentVariable('Path', 'User')
+        if ($userPath -notlike "*$Dir*") {
+            [System.Environment]::SetEnvironmentVariable(
+                'Path', ((@($userPath, $Dir) | Where-Object { $_ }) -join ';'), 'User')
+        }
+    } catch { }
+}
+
+# -- Helper: ensure a REAL Python is available, installing if missing ----
+# The Fabric CLI (fab) is a Python package, so without Python it cannot install.
+# This force-installs Python (mirroring the Power Platform twin's pac/.NET
+# bootstrap) so the common "fab won't install because Python is missing" case
+# resolves itself. Tries, in order:
+#   1. An existing real Python (Find-RealPython)
+#   2. winget  (Python.Python.3.12, per-user, no admin)
+#   3. The official python.org silent installer (pinned), per-user, no admin
+# Refreshes PATH after each attempt. Returns a usable launcher string
+# ('py'/'python') or $null on total failure -- never throws, never aborts setup.
+function Ensure-Python {
+    $py = Find-RealPython
+    if ($py) { return $py }
+
+    Write-Host "         No real Python found -- attempting to install Python 3.12 (required by the Fabric CLI)..." -ForegroundColor Yellow
+
+    # -- Attempt 1: winget (per-user, no admin) -------------------------
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Write-Host "         Trying winget: Python.Python.3.12 ..." -ForegroundColor DarkGray
+        try {
+            & winget install -e --id Python.Python.3.12 --scope user --silent `
+                --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
+        } catch { }
+        Update-InstallerPath
+        $py = Find-RealPython
+        if ($py) { Write-Host "         Python installed (via winget)." -ForegroundColor Green; return $py }
+    }
+
+    # -- Attempt 2: official python.org silent installer ----------------
+    try {
+        $pyVer = '3.12.10'
+        $arch  = if ([Environment]::Is64BitOperatingSystem) { 'amd64' } else { 'win32' }
+        $url   = "https://www.python.org/ftp/python/$pyVer/python-$pyVer-$arch.exe"
+        $exe   = Join-Path $env:TEMP "python-$pyVer-$arch.exe"
+        Write-Host "         Downloading Python $pyVer from python.org ..." -ForegroundColor DarkGray
+        $oldProgress = $ProgressPreference; $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -Uri $url -OutFile $exe -UseBasicParsing
+        $ProgressPreference = $oldProgress
+        if (Test-Path $exe) {
+            Write-Host "         Installing Python silently (per-user, no admin; this can take a minute)..." -ForegroundColor DarkGray
+            $proc = Start-Process $exe -ArgumentList '/quiet InstallAllUsers=0 PrependPath=1 Include_pip=1' -Wait -PassThru
+            if ($proc.ExitCode -ne 0) { Write-Host "         Python installer exit code: $($proc.ExitCode)." -ForegroundColor DarkGray }
+            Remove-Item $exe -Force -ErrorAction SilentlyContinue
+        }
+    } catch {
+        Write-Host "         Python download/install failed: $($_.Exception.Message)" -ForegroundColor DarkGray
+    }
+    Update-InstallerPath
+    $py = Find-RealPython
+    if ($py) { Write-Host "         Python installed (via python.org)." -ForegroundColor Green; return $py }
+
+    return $null
+}
+
 # -- Helper: attempt an optional tool install, never fatal --------------
 # Prompts the user, then tries each strategy in $Attempts (ordered list of
 # @{ Exe = '<exe>'; Args = @(...) }) until $CheckCmd is satisfied. Strategies
@@ -102,11 +181,9 @@ function Try-InstallOptionalTool {
         [array]$Attempts,     # ordered list of @{ Exe=..; Args=@(..) } strategies
         [string]$ManualUrl    # fallback manual install URL
     )
-    $ans = Read-Host "    Attempt to install $Name now? [y/N]"
-    if ($ans -notmatch '^(y|yes)$') {
-        Write-Host "    Skipped. Install later if needed: $ManualUrl" -ForegroundColor DarkGray
-        return $false
-    }
+    # Install automatically -- no opt-out prompt. The goal is to set up as much
+    # as possible up front; a failed optional install is reported but never fatal.
+    Write-Host "    Installing $Name automatically..." -ForegroundColor White
 
     $anyRan = $false
     foreach ($attempt in $Attempts) {
@@ -129,7 +206,7 @@ function Try-InstallOptionalTool {
                 $userBase = (& $exe -c "import site;print(site.getuserbase())" 2>$null)
                 if ($userBase) {
                     $userScripts = Join-Path $userBase 'Scripts'
-                    if (Test-Path $userScripts) { $env:Path = "$userScripts;$env:Path" }
+                    if (Test-Path $userScripts) { Add-DirToPath $userScripts }
                 }
             } catch { }
         }
@@ -292,7 +369,7 @@ Write-Host "    notebook cells directly against remote Spark from VS Code." -For
 Write-Host "    This enables a powerful agentic loop: the AI agent can run code," -ForegroundColor DarkGray
 Write-Host "    inspect the output, and iteratively refine -- all without leaving" -ForegroundColor DarkGray
 Write-Host "    VS Code or pushing to the portal first." -ForegroundColor DarkGray
-Write-Host "    Install via: code --install-extension fabric.fabricDataEngineerRemote" -ForegroundColor DarkGray
+Write-Host "    Install via: code --install-extension synapsevscode.vscode-synapse-remote" -ForegroundColor DarkGray
 Write-Host ""
 
 # -- Ask how many workspaces to scaffold ---------------------------------
@@ -446,16 +523,16 @@ if (-not (Get-Command fab -ErrorAction SilentlyContinue)) {
     Write-Host "  Fabric CLI (fab): not found (recommended)" -ForegroundColor Yellow
     Write-Host "         Primary CLI for Fabric API, jobs, export/import, OneLake and table ops." -ForegroundColor DarkGray
     Write-Host "         Needs Python 3.10-3.13. Reference: https://github.com/microsoft/fabric-cli" -ForegroundColor DarkGray
-    # Only build pip strategies when a REAL Python is present (ignore Store-alias stubs).
-    $realPy = Find-RealPython
+    # Ensure a REAL Python exists (install it if missing), then install fab via pip.
+    $realPy = Ensure-Python
     if ($realPy) {
         Try-InstallOptionalTool -Name "Fabric CLI (fab)" -CheckCmd "fab" -Attempts @(
             @{ Exe = $realPy; Args = @("-m", "pip", "install", "--user", "ms-fabric-cli") }
         ) -ManualUrl "https://github.com/microsoft/fabric-cli (pip install ms-fabric-cli)" | Out-Null
     } else {
-        Write-Host "         No working Python found (the 'python' on PATH is the Microsoft Store stub)." -ForegroundColor DarkGray
-        Write-Host "         Install Python 3.10-3.13 from https://www.python.org/downloads/ (tick 'Add to PATH')," -ForegroundColor DarkGray
-        Write-Host "         then run: pip install ms-fabric-cli  -- or ask the Fabric agent to guide you later." -ForegroundColor DarkGray
+        Write-Host "         Could not install Python automatically (corporate policy, no winget, or no network)." -ForegroundColor DarkGray
+        Write-Host "         No problem -- the workspace works fine without it. Open the workspace and ask the" -ForegroundColor DarkGray
+        Write-Host "         Fabric agent to walk you through installing Python + the Fabric CLI when convenient." -ForegroundColor DarkGray
     }
 } else {
     Write-Host "  Fabric CLI (fab): found" -ForegroundColor Green

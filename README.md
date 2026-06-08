@@ -7,8 +7,8 @@ Contributions and feedback welcome.
 
 **Zero to fully configured in under 60 seconds.**
 
-Double-click one the .bat file, answer a few questions, and you have a complete
-Microsoft Fabric agentic development environment with eight specialist AI
+Double-click the `.bat` file, answer a few questions, and you have a complete
+Microsoft Fabric agentic development environment with eight AI
 agents, custom skills for TMDL and pipeline authoring, and integration with
 two open-source skill repositories — all inside VS Code.
 
@@ -95,11 +95,11 @@ Before running the installer, make sure you have:
 | **Git** | Yes | [git-scm.com](https://git-scm.com) |
 | **[Microsoft Fabric Extension](https://marketplace.visualstudio.com/items?itemName=fabric.vscode-fabric)** | Yes | Required for the pull/push workflow with Fabric. Install from VS Code marketplace or `code --install-extension fabric.vscode-fabric` |
 | **[TMDL Extension](https://marketplace.visualstudio.com/items?itemName=analysis-services.tmdl)** | Recommended | Provides syntax highlighting and validation for `.tmdl` files |
-| **[Fabric Data Engineer Remote](https://marketplace.visualstudio.com/items?itemName=SynapseVSCode.synapse)** | Nice to have | Execute notebook cells against remote Spark directly from VS Code |
-| **Fabric CLI (`fab`)** | Recommended | Primary CLI the agents use for Fabric API, jobs, export/import, OneLake & table ops. Needs Python 3.10–3.13: `pip install ms-fabric-cli`. [Repo](https://github.com/microsoft/fabric-cli) |
-| **az CLI** | Optional (fallback) | Only needed for SQL/TDS (`sqlcmd -G`) and non-Fabric token audiences; `fab` covers the rest. [Install](https://aka.ms/installazurecli) |
+| **[Fabric Data Engineer Remote](https://marketplace.visualstudio.com/items?itemName=synapsevscode.vscode-synapse-remote)** | Nice to have | Execute notebook cells against remote Spark directly from VS Code |
+| **Fabric CLI (`fab`)** | Auto-installed | Primary CLI the agents use for Fabric API, jobs, export/import, OneLake & table ops. The installer sets up Python 3.12 + `fab` for you (per-user, no admin); falls back to agent-guided setup if your environment blocks it. [Repo](https://github.com/microsoft/fabric-cli) |
+| **az CLI** | Auto-installed (fallback) | Only needed for SQL/TDS (`sqlcmd -G`) and non-Fabric token audiences; `fab` covers the rest. The installer attempts it automatically (winget, then pip). [Install](https://aka.ms/installazurecli) |
 
-> **CLIs are optional power-ups.** The core workflow — the Fabric extension plus agents editing local files — needs no CLI at all. The CLIs add terminal and control-plane/data-plane power on top. The installer offers to install `fab` (recommended) and `az` (fallback) for you, and reports the cause if an install fails. For a deep dive into what you can do once a CLI is installed, see [CLI-FUNCTIONALITIES.md](CLI-FUNCTIONALITIES.md).
+> **CLIs are optional power-ups.** The core workflow — the Fabric extension plus agents editing local files — needs no CLI at all. The CLIs add terminal and control-plane/data-plane power on top. The installer **automatically installs** Python, `fab` (recommended), and `az` (fallback) where possible — and if your environment blocks it (corporate policy, no winget, no network), it continues anyway and you can ask the Fabric agent to walk you through it on first run. For a deep dive into what you can do once a CLI is installed, see [CLI-FUNCTIONALITIES.md](CLI-FUNCTIONALITIES.md).
 
 ---
 
@@ -139,7 +139,7 @@ Follow the prompts. The script will:
 1. Ask for your workspace folder (existing or new)
 2. Explain the Fabric Git integration workflow
 3. Ask how many Fabric workspaces to scaffold
-4. Check all prerequisites (git, VS Code, Fabric extension, TMDL extension, and optionally the `fab` and `az` CLIs)
+4. Check all prerequisites (git, VS Code, Fabric extension, TMDL extension) and automatically install Python + the `fab`/`az` CLIs where possible
 5. Create the folder structure
 6. Clone Microsoft's skills-for-fabric and data-goblin's power-bi-agentic-development
 7. Write custom skills (TMDL, Pipelines, CLI policy)
@@ -361,7 +361,7 @@ The `.gitignore` keeps skill repos and VS Code settings clean.
 
 ---
 
-## Current status (v0.1.0-preview)
+## Current status (v0.1.0-pre-release)
 
 | Area | Status |
 |---|---|
