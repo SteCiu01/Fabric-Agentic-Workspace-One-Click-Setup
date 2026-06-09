@@ -199,14 +199,15 @@ function Try-InstallOptionalTool {
         # Refresh PATH so a freshly-installed command is visible this session.
         $env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
                     [System.Environment]::GetEnvironmentVariable('Path', 'User')
-        # pip --user drops console scripts in the per-user Scripts dir, which is
-        # often not on PATH yet -- add it so the CheckCmd test can find the tool.
-        if ($exe -match '^(py|python|python3)$') {
+        # pip drops console scripts either in the interpreter's own Scripts dir
+        # (sys.prefix\Scripts) or, with --user, in the per-user Scripts dir
+        # (%APPDATA%\Python\PythonXY\Scripts). Neither is guaranteed to be on
+        # PATH yet -- add both so the CheckCmd test can find the freshly installed tool.
+        if ($exe -match '(^|\\)(py|python|python3)(\.exe)?$') {
             try {
-                $userBase = (& $exe -c "import site;print(site.getuserbase())" 2>$null)
-                if ($userBase) {
-                    $userScripts = Join-Path $userBase 'Scripts'
-                    if (Test-Path $userScripts) { Add-DirToPath $userScripts }
+                $scriptDirs = & $exe -c "import site, sys, os; print(os.path.join(sys.prefix, 'Scripts')); print(os.path.join(site.getuserbase(), 'Scripts'))" 2>$null
+                foreach ($sd in @($scriptDirs)) {
+                    if ($sd -and (Test-Path $sd)) { Add-DirToPath $sd }
                 }
             } catch { }
         }
@@ -219,6 +220,22 @@ function Try-InstallOptionalTool {
         $reason = ($output -split "`n" | Where-Object { $_ -match '\S' } | Select-Object -Last 3) -join "`n      "
         if ($reason) { Write-Host "      $reason" -ForegroundColor DarkGray }
         Write-Host "    Trying next method if available..." -ForegroundColor DarkGray
+    }
+
+    # Last-ditch recovery: the package may have installed but landed in a Scripts
+    # dir we didn't compute (e.g. pip reported a different layout). Search the
+    # common per-user Python Scripts locations for the tool and add it to PATH.
+    foreach ($root in @("$env:APPDATA\Python", "$env:LOCALAPPDATA\Programs\Python")) {
+        if (Test-Path $root) {
+            $hit = Get-ChildItem $root -Recurse -Filter "$CheckCmd.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($hit) {
+                Add-DirToPath $hit.DirectoryName
+                if (Get-Command $CheckCmd -ErrorAction SilentlyContinue) {
+                    Write-Host "    $Name installed successfully (found in $($hit.DirectoryName))." -ForegroundColor Green
+                    return $true
+                }
+            }
+        }
     }
 
     # Nothing worked -- explain why and how to recover.
@@ -526,8 +543,14 @@ if (-not (Get-Command fab -ErrorAction SilentlyContinue)) {
     # Ensure a REAL Python exists (install it if missing), then install fab via pip.
     $realPy = Ensure-Python
     if ($realPy) {
+        # Two shots, each resilient to transient network failures (--retries/--timeout):
+        #   1. plain install -> lands in the interpreter's own Scripts dir, which is
+        #      already on PATH for a winget/python.org per-user Python (the common case)
+        #   2. --user fallback -> for system Pythons where the prefix isn't writable
+        # Listing both also gives a free retry if the first attempt dies mid-download.
         Try-InstallOptionalTool -Name "Fabric CLI (fab)" -CheckCmd "fab" -Attempts @(
-            @{ Exe = $realPy; Args = @("-m", "pip", "install", "--user", "ms-fabric-cli") }
+            @{ Exe = $realPy; Args = @("-m", "pip", "install", "--upgrade", "--retries", "5", "--timeout", "60", "ms-fabric-cli") }
+            @{ Exe = $realPy; Args = @("-m", "pip", "install", "--user", "--upgrade", "--retries", "5", "--timeout", "60", "ms-fabric-cli") }
         ) -ManualUrl "https://github.com/microsoft/fabric-cli (pip install ms-fabric-cli)" | Out-Null
     } else {
         Write-Host "         Could not install Python automatically (corporate policy, no winget, or no network)." -ForegroundColor DarkGray
@@ -552,7 +575,8 @@ if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
         @{ Exe = "winget"; Args = @("install", "--silent", "--accept-package-agreements", "--accept-source-agreements", "-e", "--id", "Microsoft.AzureCLI") }
     )
     if ($realPy) {
-        $azAttempts += @{ Exe = $realPy; Args = @("-m", "pip", "install", "--user", "azure-cli") }
+        $azAttempts += @{ Exe = $realPy; Args = @("-m", "pip", "install", "--upgrade", "--retries", "5", "--timeout", "60", "azure-cli") }
+        $azAttempts += @{ Exe = $realPy; Args = @("-m", "pip", "install", "--user", "--upgrade", "--retries", "5", "--timeout", "60", "azure-cli") }
     }
     Try-InstallOptionalTool -Name "az CLI" -CheckCmd "az" -Attempts $azAttempts `
         -ManualUrl "https://aka.ms/installazurecli" | Out-Null
