@@ -42,7 +42,9 @@ Then I thought: *this should be replicable*. Not just for me — for anyone who 
 >
 > **Early stage — use with care:** This is very much a v0.1. It has been tested and works, but it is at the beginning of its life. Given the level of AI involvement in its creation, there may be bugs, edge cases, or behaviours that do not work as expected in your specific environment. **Do not use this in production environments without fully understanding what the scripts do.** Always review the code before running it.
 >
-> **Third-party skill dependencies:** This workspace clones and depends on two external repositories — [microsoft/skills-for-fabric](https://github.com/microsoft/skills-for-fabric) and [data-goblin/power-bi-agentic-development](https://github.com/data-goblin/power-bi-agentic-development). These are independent open-source projects maintained by their respective owners. This project has no control over their content, availability, or future changes. If either repository is renamed, moved, or removed, the installer and skill-update workflow will break until the references are updated. Always check those repos directly for their own licensing terms and usage conditions.
+> **Third-party skill dependencies:** This workspace clones and depends on two external repositories — [microsoft/skills-for-fabric](https://github.com/microsoft/skills-for-fabric) and [data-goblin/power-bi-agentic-development](https://github.com/data-goblin/power-bi-agentic-development). These are independent open-source projects maintained by their respective owners. This project has no control over their content, availability, or future changes. The agents are **resilient to these repos restructuring or renaming their internal folders** — skills are discovered dynamically at runtime (list the repo root, search by keyword) rather than from fixed paths. However, if a whole repository is **renamed, moved, or removed** at the GitHub level, or its history diverges so `git pull --ff-only` fails, the clone/update step will break until the references are updated.
+>
+> **Licensing & provenance:** `skills-for-fabric` is MIT-licensed; `power-bi-agentic-development` is **GPL-3.0** and is used **only as a locally cloned, gitignored reference** that agents read at runtime — it is never copied, AI-rewritten, or redistributed inside this project. The custom embedded skills are **independent works** (`fabric-tmdl` written from my production reports; `fabric-pipelines` derived from Microsoft sources). Always check those repos directly for their own licensing terms and usage conditions.
 >
 > That said — it is a genuinely interesting starting point, and I hope it saves you time and sparks ideas. Feedback, bug reports, and contributions are very welcome.
 
@@ -67,9 +69,9 @@ the community, and custom embedded knowledge.
 
 | Component | Description |
 |---|---|
-| **Fabric Workspace Master Agent** | Routing hub — handles session startup (skill check, Azure identity, topic menu), then routes to the right specialist or handles tasks directly with dynamic skill discovery |
+| **Fabric Workspace Master Agent** | Routing hub — handles session startup (skill check, Azure identity, topic menu), then routes to the right specialist or handles tasks directly with dynamic skill discovery. Can also proactively recommend the best specialist for a free-text request |
 | **Fabric Skills Maintainer** | Light (quick pull) or deep (pull + MS docs freshness check + unreferenced skill scan) maintenance of all skill sources |
-| **Semantic Model Agent** | TMDL editing, DAX measures, columns, relationships, partitions — guided by the custom fabric-tmdl skill and data-goblin DAX conventions |
+| **Semantic Model Agent** | TMDL editing, DAX measures, columns, relationships, partitions — house style from the custom fabric-tmdl skill, syntax/DAX depth from data-goblin (explicit precedence) |
 | **Fabric Data Engineer** | Spark notebooks, SQL warehouse, pipelines, medallion architecture — guided by Microsoft's skills-for-fabric |
 | **Fabric Admin** | Capacity management, governance, security, workspace documentation |
 | **Fabric App Dev** | Python apps, ODBC, XMLA, REST API integration with Fabric data |
@@ -361,14 +363,14 @@ The `.gitignore` keeps skill repos and VS Code settings clean.
 
 ---
 
-## Current status (v0.1.0-pre-release)
+## Current status (v0.2.0-pre-release)
 
 | Area | Status |
 |---|---|
 | One-click setup (.bat + .ps1) | **Working** — tested on Windows 10/11 |
-| Master Agent session startup flow | **Working** — skill check, az identity, topic routing |
-| Specialist agent routing | **Working** — all 6 specialist agents functional |
-| Skills Maintainer (light + deep) | **Working** — pull, freshness check, unreferenced scan |
+| Master Agent session startup flow | **Working** — skill freshness (real upstream commit dates), `fab`/`az` identity, topic routing, advisory specialist recommendations |
+| Specialist agent routing | **Working** — all 6 specialist agents functional, bulletproof against upstream repo restructuring |
+| Skills Maintainer (light + deep) | **Working** — pull, MS-docs freshness check, unreferenced scan |
 | Custom TMDL skill | **Working** — comprehensive syntax and validation rules |
 | Custom Pipelines skill | **Working** — full activity type reference |
 | Microsoft skills-for-fabric integration | **Working** — cloned and auto-updated |

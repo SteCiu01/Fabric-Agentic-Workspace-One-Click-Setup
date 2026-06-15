@@ -707,6 +707,23 @@ description: "Use when: editing or creating TMDL files, DAX measures, columns, r
 
 # Fabric TMDL Skill
 
+## Provenance and maintenance
+
+- **Authored from**: real production Power BI / Fabric semantic models (the author's
+  own reports). This is a HOUSE-STYLE skill - conventions, property ordering, and
+  layout - not a TMDL/DAX language reference.
+- **Independent of data-goblin**: this content was written from first-hand production
+  work, NOT copied or AI-rewritten from `power-bi-agentic-development` (GPL-3.0).
+  For TMDL/DAX language depth and validation, the semantic-model agent reads the
+  cloned data-goblin skills separately; this skill layers house style on top.
+- **Updating**: edit the PS1 installer (source of truth) and re-run it, or edit this
+  file directly. The Skills Maintainer does NOT auto-modify it (it is house style,
+  not an external API surface).
+- **Freshness**: the date shown in the startup table is this file's real on-disk
+  modification time (when this workspace last installed/updated it).
+
+---
+
 ## When to use
 - User asks to add, edit, or review measures, tables, columns, relationships, or partitions in `.tmdl` files
 - User asks about TMDL syntax or Fabric Semantic Model structure
@@ -996,6 +1013,32 @@ relationship e0828589-8818-68a1-c67a-b12fcd64d3ab
 
 ---
 
+## House modelling decisions
+
+These are the author's standing modelling choices - apply them unless the user
+asks otherwise. They are DECISIONS, not syntax (for syntax/DAX depth, the agent
+also reads the cloned data-goblin skills).
+
+- **Storage mode**: prefer Direct Lake for fact tables sourced from the Lakehouse/
+  Warehouse; use Import only for small calculated/parameter tables that cannot be
+  Direct Lake (e.g. field-parameter and disconnected slicer tables).
+- **Measure home**: keep measures in dedicated measure-only tables (`X - Measures -`),
+  not on fact tables, so the field list stays clean.
+- **Folder taxonomy**: organise tables with the numeric-prefix convention (`0.x -`
+  system/dimension, `1.x -`..`4.x -` domain areas); group measures with `displayFolder`.
+- **Naming**: dimensions `X.X - Dim_Name`, facts `X.X - Facts_Name`; single-quote any
+  name containing spaces.
+- **Formatting**: set an explicit `formatString` on every numeric measure; never rely
+  on the implicit default.
+- **Hygiene**: hide key/technical columns (`isHidden`) and surface only business-
+  friendly fields; set `summarizeBy: none` on non-additive columns.
+
+For HOW to design star schemas, RLS, calc groups, incremental refresh, time
+intelligence, or to tune DAX, defer to the cloned data-goblin skills + Microsoft
+docs - this skill intentionally does not duplicate that depth.
+
+---
+
 ## Common mistakes to AVOID
 
 1. Never use semicolons -- TMDL is indentation-based
@@ -1044,12 +1087,9 @@ relationship e0828589-8818-68a1-c67a-b12fcd64d3ab
 - [ ] **File not in do-not-edit list**
 '@
 Write-ManagedFile $tmdlSkillPath $tmdlContent
-# Set the custom skill file date to the PS1 installer's own modification date
-# so on first install the date reflects when the skill content was last authored,
-# not when the installer happened to run. After maintainer updates, the file's
-# own LastWriteTime will reflect the actual update date.
-$ps1LastModified = (Get-Item $MyInvocation.MyCommand.Path).LastWriteTime
-(Get-Item $tmdlSkillPath).LastWriteTime = $ps1LastModified
+# The on-disk LastWriteTime is left untouched on purpose: it honestly reflects
+# when this workspace installed/updated the skill. The freshness display reads
+# this real mtime for custom skills (and git commit dates for cloned repos).
 Write-Host "  Written: .github/skills/fabric-tmdl/SKILL.md" -ForegroundColor Green
 
 # ----- fabric-pipelines/SKILL.md -------------------------------------
@@ -1066,8 +1106,14 @@ description: "Use when: editing or creating Data Factory pipeline JSON files (pi
 ## Origin and maintenance
 
 - **Created from**: microsoft/skills-for-fabric `ITEM-DEFINITIONS-CORE.md` (DataPipeline section)
-  and Microsoft Learn docs for Data Factory in Fabric
+  and Microsoft Learn docs for Data Factory in Fabric (both Microsoft, MIT-licensed)
+- **Independent of data-goblin**: this skill is derived from Microsoft sources and
+  Fabric docs only - NOT from `power-bi-agentic-development` (GPL-3.0). That repo is
+  used solely as a locally cloned reference and is never copied into this skill.
 - **Pipeline JSON schemas** are NOT published at `microsoft/json-schemas` (as of April 2026)
+- **Last reviewed against Microsoft docs**: 2026-06-15 (against
+  https://learn.microsoft.com/en-us/fabric/data-factory/activity-overview, updated 2026-06-07).
+  Added `RefreshMaterializedLakeView` and `Approval` activities at that review.
 - **To update this skill**: check `skills-for-fabric/common/ITEM-DEFINITIONS-CORE.md` for new
   activity types, and review https://learn.microsoft.com/en-us/fabric/data-factory/
   for updated typeProperties. Then re-run the installer or edit this file directly.
@@ -1787,6 +1833,45 @@ Valid conditions: `Succeeded`, `Failed`, `Skipped`, `Completed`
 - Deactivates another activity in the pipeline at runtime
 - Useful for conditional disabling of pipeline branches
 
+### RefreshMaterializedLakeView (refresh a materialized lake view)
+```json
+{
+  "name": "Refresh MLV",
+  "type": "RefreshMaterializedLakeView",
+  "dependsOn": [],
+  "typeProperties": {
+    "workspaceId": "<workspace-guid>",
+    "lakehouseId": "<lakehouse-guid>"
+  },
+  "externalReferences": { "connection": "<connection-guid>" }
+}
+```
+- Refreshes a materialized lake view in a Lakehouse so downstream queries see the latest data
+- Typically placed after Copy/Notebook/LakehouseMaintenance steps, or run on a schedule
+- Does NOT support SPN or workspace-identity auth (use a user-based connection)
+- Exact `type` string and typeProperties are not published in a schema - if authoring
+  by hand, confirm them via "View JSON" in the pipeline editor
+
+### Approval (pause for human approve/reject)
+```json
+{
+  "name": "Approve Load",
+  "type": "Approval",
+  "dependsOn": [],
+  "typeProperties": {
+    "approvalType": "Teams",
+    "title": "Approve production load",
+    "description": "Review row counts before publishing"
+  },
+  "externalReferences": { "connection": "<connection-guid>" }
+}
+```
+- Pauses the pipeline and requests an approve/reject decision from designated reviewers
+- `approvalType` is one of `Outlook365`, `Teams`, or a custom endpoint
+- Approved -> success path; Rejected or timed out -> failure path (set Timeout on the activity)
+- Exact `type` string and typeProperties are not published in a schema - if authoring
+  by hand, confirm them via "View JSON" in the pipeline editor
+
 ---
 
 ## Variable Library integration
@@ -1897,7 +1982,6 @@ After editing `pipeline-content.json`:
 - [ ] Do NOT edit `.platform` file
 '@
 Write-ManagedFile $pipelineSkillPath $pipelineContent
-(Get-Item $pipelineSkillPath).LastWriteTime = $ps1LastModified
 Write-Host "  Written: .github/skills/fabric-pipelines/SKILL.md" -ForegroundColor Green
 
 # ----- fabric-cli-policy/SKILL.md ------------------------------------
@@ -1967,7 +2051,6 @@ documented fallback reference for SQL/TDS and non-Fabric token audiences.
 - Prefer the smallest-scope call; filter with `-q` instead of dumping everything.
 '@
 Write-ManagedFile $cliPolicySkillPath $cliPolicyContent
-(Get-Item $cliPolicySkillPath).LastWriteTime = $ps1LastModified
 Write-Host "  Written: .github/skills/fabric-cli-policy/SKILL.md" -ForegroundColor Green
 
 Read-Host "`n  Press Enter to continue..."
@@ -2059,8 +2142,12 @@ Continue from Phase 2 in `.github/agent-docs/starting-flow.md`.
 **IF topic selection is complete and user chose [0] or described a task:**
 Read `.github/agent-docs/working-flow-reference.md` and handle the request.
 
-Never ask the user to switch agents or do anything manually to change mode.
-Routing is invisible to them (except when sending to specialist agents or Maintainer).
+Routing to a specialist is the ONE exception where you may suggest the user switch
+agents (via the dropdown), because specialists live as separate dropdown agents.
+Keep all OTHER mode changes invisible - never ask the user to switch for internal
+reasons. When a free-text task would clearly benefit from a specialist, you MAY
+recommend switching (see working-flow-reference, "Per-request routing advice"),
+but always offer to handle it inline too.
 
 ---
 
@@ -2107,17 +2194,25 @@ Proceed immediately to Phase 1. Do NOT wait for the user to reply.
 
 ## Phase 1 - Skill maintenance prompt
 
-Check when each skill source was last modified locally and display it.
-Use file modification times (LastWriteTime) for ALL sources.
-All times are shown in the user's local timezone.
+Show when each skill source was last updated. Use the most HONEST signal available
+for each source - never fake, touch, or normalise these dates.
 
-Run these commands and collect the dates (format: yyyy-MM-dd HH:mm local time):
+For the two CLONED repos, the real freshness signal is the upstream commit date.
+Run (and if `git` errors because the folder is not a git checkout, fall back to the
+newest file modification time from the fallback command):
 
-For cloned repos, check the most recently modified skill file:
-  Get-ChildItem "skills-for-fabric/skills" -Recurse -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty LastWriteTime | ForEach-Object { $_.ToString("yyyy-MM-dd HH:mm") }
-  Get-ChildItem "power-bi-agentic-development/plugins" -Recurse -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty LastWriteTime | ForEach-Object { $_.ToString("yyyy-MM-dd HH:mm") }
+  git -C skills-for-fabric log -1 --format=%cd --date=format-local:"%Y-%m-%d %H:%M" 2>&1
+  git -C power-bi-agentic-development log -1 --format=%cd --date=format-local:"%Y-%m-%d %H:%M" 2>&1
 
-For custom embedded skills:
+  Fallback if not a git checkout (e.g. downloaded as a zip):
+  Get-ChildItem "skills-for-fabric" -Recurse -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty LastWriteTime | ForEach-Object { $_.ToString("yyyy-MM-dd HH:mm") }
+  Get-ChildItem "power-bi-agentic-development" -Recurse -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty LastWriteTime | ForEach-Object { $_.ToString("yyyy-MM-dd HH:mm") }
+
+For the CUSTOM embedded skills, there is no upstream repo - they are authored in
+the installer and written to disk at setup time. Show their REAL on-disk
+modification time (this honestly reflects when this workspace last installed or
+updated them - the installer no longer overrides it):
+
   (Get-Item ".github/skills/fabric-tmdl/SKILL.md").LastWriteTime.ToString("yyyy-MM-dd HH:mm")
   (Get-Item ".github/skills/fabric-pipelines/SKILL.md").LastWriteTime.ToString("yyyy-MM-dd HH:mm")
 
@@ -2126,13 +2221,13 @@ If a source folder or file does not exist, show "not installed" instead of a dat
 Then say:
 "Welcome to your Fabric Workspace session!
 
-**Skill sources - last updated (local time):**
-| Source | Last updated |
-|--------|-------------|
-| skills-for-fabric (Microsoft) | [date or 'not installed'] |
-| power-bi-agentic-development (data-goblin) | [date or 'not installed'] |
-| fabric-tmdl (custom, embedded) | [date] |
-| fabric-pipelines (custom, embedded) | [date] |
+**Skill sources - freshness (local time):**
+| Source | Date | Meaning |
+|--------|------|---------|
+| skills-for-fabric (Microsoft, MIT) | [date or 'not installed'] | upstream commit |
+| power-bi-agentic-development (data-goblin, GPL-3.0) | [date or 'not installed'] | upstream commit |
+| fabric-tmdl (custom, embedded) | [date] | installed locally |
+| fabric-pipelines (custom, embedded) | [date] | installed locally |
 
 Would you like to run a skill update?
 This switches to the Skills Maintainer agent, which offers light or deep
@@ -2214,18 +2309,26 @@ in topic selection or described their task).
 
 ---
 
-## Skill Discovery - ALWAYS Dynamic
+## Skill Discovery - ALWAYS Dynamic (bulletproof against upstream changes)
 
-Skills live in multiple repositories that evolve frequently. **NEVER assume you
-know what skills exist or where they are.** Always discover dynamically.
+Skills live in multiple repositories that rename and restructure folders
+frequently. **NEVER assume you know what skills exist or where they are**, and
+never hardcode a deep path. Every path in this file is a LAST-KNOWN HINT as of
+install time, not a guarantee.
 
 **Before performing any skill-based task:**
 
 1. Identify which skill source is relevant (see table below)
-2. List the skills directory to discover available skills
-3. Read the relevant SKILL.md
-4. Read any references/ docs mentioned in the SKILL.md
-5. Follow the SKILL.md instructions step by step
+2. List the repo ROOT first (e.g. `ls power-bi-agentic-development`), find the
+   skills container (today `plugins/` or `skills/`), then list it
+3. Search downward by KEYWORD (e.g. "tmdl", "dax", "spark", "pipeline") to locate
+   the current SKILL.md - if a hinted folder was renamed, pick the closest match
+4. Read the relevant SKILL.md
+5. Read any references/ docs mentioned in the SKILL.md
+6. Follow the SKILL.md instructions step by step
+
+If a hinted path is missing, do NOT fail - re-list the parent (or the repo root)
+and re-discover. The cloned repos are EXPECTED to move things around over time.
 
 ### Skill sources
 
@@ -2250,10 +2353,33 @@ for SQL/TDS and non-Fabric token audiences.
 ### Discovery workflow example
 
 User asks: "Add a measure to my semantic model"
-1. Topic = TMDL -> read `.github/skills/fabric-tmdl/SKILL.md`
-2. For DAX depth -> `ls power-bi-agentic-development/plugins/` -> find `semantic-models` ->
-   `ls power-bi-agentic-development/plugins/semantic-models/skills/` -> read `dax/SKILL.md`
-3. Follow instructions from both skills
+1. Topic = TMDL -> read `.github/skills/fabric-tmdl/SKILL.md` (house style)
+2. For DAX depth -> `ls power-bi-agentic-development` -> find the skills container
+   -> search it for a "dax" skill -> read that SKILL.md (syntax / correctness)
+3. Follow BOTH skills: house style from yours, DAX correctness from theirs
+
+---
+
+## Per-request routing advice
+
+You can answer most things here, but specialists give deeper results. When a
+request maps strongly to one specialist topic, proactively tell the user and
+offer to switch - then still handle it inline if they decline. Example:
+
+> "I can do this here, but you'll get deeper results from
+> **@3-semantic-model-agent** (the TMDL/DAX specialist). Want to switch, or
+> shall I handle it here?"
+
+Mapping (free-text task -> best specialist):
+- TMDL / DAX / measures / relationships -> **@3-semantic-model-agent**
+- Spark / notebooks / SQL warehouse / medallion -> **@4-fabric-data-engineer**
+- Capacity / governance / security / workspace docs -> **@5-fabric-admin**
+- Python / ODBC / XMLA / REST app integration -> **@6-fabric-app-dev**
+- PBIR reports / visuals / themes -> **@7-fabric-reports-agent**
+- Data Factory pipeline JSON -> **@8-fabric-pipelines-agent**
+
+Suggest only ONE switch per request, and never block: if the user prefers to
+stay, proceed inline using the skill discovery above.
 
 ---
 
@@ -2261,6 +2387,8 @@ User asks: "Add a measure to my semantic model"
 
 - Always read the relevant SKILL.md BEFORE generating any code or TMDL
 - Never guess at skill paths - if a path does not exist, list the parent directory
+- Read BOTH custom and cloned skills for a topic. On STYLE / convention conflicts
+  the custom skill wins; on SYNTAX / spec correctness the cloned (upstream) skill wins
 - For validation after TMDL edits, run the post-edit checklist from the TMDL skill
 - Keep git history clean if the workspace is a git repo
 - Never hardcode IDs or secrets
@@ -2394,11 +2522,24 @@ Switch back to **@1-fabric-workspace-master-agent** to continue your session."
 
 ## NOTES
 - The TMDL skill (`.github/skills/fabric-tmdl/SKILL.md`) is maintained by the installer
-  and based on codebase-specific knowledge. Do NOT modify it during maintenance.
+  and based on the author's production reports (HOUSE STYLE). Do NOT modify it during
+  maintenance.
 - Only the pipeline skill is checked against external docs, because it tracks
   a rapidly evolving Microsoft API surface.
 - If the user asks to update the TMDL skill, explain that it should be done
   by editing the PS1 installer and re-running it, or by manually editing the file.
+
+## LICENSING / ATTRIBUTION
+- The two CUSTOM skills (fabric-tmdl, fabric-pipelines) are INDEPENDENT works:
+  fabric-tmdl from the author's production reports; fabric-pipelines from Microsoft
+  sources (skills-for-fabric, MIT, + Fabric docs). Neither is derived from
+  data-goblin's `power-bi-agentic-development` (GPL-3.0).
+- `power-bi-agentic-development` (GPL-3.0) is used ONLY as a locally cloned, gitignored
+  reference that agents read at runtime - it is never copied, AI-rewritten, or
+  redistributed inside the custom skills. Keep it that way when updating skills.
+- Always pull repos with `git pull --ff-only`. If it fails (diverged or force-pushed
+  upstream history), report it and stop - do NOT hard-reset or force-overwrite the
+  user's checkout automatically.
 
 ## KNOWN REFERENCED SKILLS
 These skills are referenced by agents and should NOT be flagged as unreferenced:
@@ -2423,14 +2564,27 @@ You are 3 - Semantic Model Agent, a specialist for Fabric Semantic Model develop
 
 ## Before any task
 
-**Dynamic discovery:** If any path below does not exist, list the parent directory
-to discover the current skill names. Skill repos evolve frequently.
+**Dynamic discovery (bulletproof against upstream changes):** Every cloned-repo
+path below is a LAST-KNOWN HINT as of install time - the skill repos rename and
+restructure folders often. NEVER assume a path exists: list the repo ROOT first,
+then search downward by keyword to find the current SKILL.md, and pick the closest
+match if a folder was renamed. Never fail just because a hinted path moved.
 
 1. Read `.github/skills/fabric-tmdl/SKILL.md` -- follow it precisely for all TMDL work
 2. For additional TMDL depth: list `power-bi-agentic-development/plugins/pbip/skills/` and read `tmdl/SKILL.md`
 3. For DAX best practices: list `power-bi-agentic-development/plugins/semantic-models/skills/` and read `dax/SKILL.md`
 4. For naming conventions: check `power-bi-agentic-development/plugins/semantic-models/skills/dax/references/`
 5. For Tabular Editor workflows: list `power-bi-agentic-development/plugins/tabular-editor/skills/`
+
+## Skill precedence - read BOTH sources
+
+- Your custom `.github/skills/fabric-tmdl/SKILL.md` = HOUSE STYLE (naming prefixes,
+  property order, indentation, folder layout, validation). It WINS on style and
+  conventions.
+- The cloned data-goblin skills (TMDL via pbip, DAX via semantic-models) = TMDL/DAX
+  SYNTAX, correctness and modelling depth. They WIN on language/spec correctness.
+- Always consult both: theirs for "is this valid TMDL/DAX?", yours for "how do we
+  do it here?". On conflict, apply the rule above.
 
 ## Capabilities
 - Create, edit, and review measures, columns, tables, relationships, and partitions in TMDL
@@ -2461,8 +2615,11 @@ You are 4 - Fabric Data Engineer, a specialist for cross-workload data engineeri
 
 ## Before any task
 
-**Dynamic discovery:** If any path below does not exist, list the parent directory
-to discover the current skill names. Skill repos evolve frequently.
+**Dynamic discovery (bulletproof against upstream changes):** Every cloned-repo
+path below is a LAST-KNOWN HINT as of install time - the skill repos rename and
+restructure folders often. NEVER assume a path exists: list the repo ROOT first,
+then search downward by keyword to find the current SKILL.md, and pick the closest
+match if a folder was renamed. Never fail just because a hinted path moved.
 
 Read the relevant skill by listing `skills-for-fabric/skills/` first, then reading:
 - **Spark**: find and read the spark authoring skill SKILL.md
@@ -2508,8 +2665,11 @@ You are 5 - Fabric Admin, a specialist for Fabric platform administration.
 
 ## Before any task
 
-**Dynamic discovery:** If any path below does not exist, list the parent directory
-to discover the current skill names. Skill repos evolve frequently.
+**Dynamic discovery (bulletproof against upstream changes):** Every cloned-repo
+path below is a LAST-KNOWN HINT as of install time - the skill repos rename and
+restructure folders often. NEVER assume a path exists: list the repo ROOT first,
+then search downward by keyword to find the current SKILL.md, and pick the closest
+match if a folder was renamed. Never fail just because a hinted path moved.
 
 List `skills-for-fabric/skills/` and read relevant admin/governance skills.
 For any terminal CLI or REST API work, read `.github/skills/fabric-cli-policy/SKILL.md` FIRST:
@@ -2547,8 +2707,11 @@ You are 6 - Fabric App Dev, a specialist for building applications on top of Fab
 
 ## Before any task
 
-**Dynamic discovery:** If any path below does not exist, list the parent directory
-to discover the current skill names. Skill repos evolve frequently.
+**Dynamic discovery (bulletproof against upstream changes):** Every cloned-repo
+path below is a LAST-KNOWN HINT as of install time - the skill repos rename and
+restructure folders often. NEVER assume a path exists: list the repo ROOT first,
+then search downward by keyword to find the current SKILL.md, and pick the closest
+match if a folder was renamed. Never fail just because a hinted path moved.
 
 List `skills-for-fabric/skills/` and `skills-for-fabric/agents/` to find app dev patterns.
 For SQL access: find and read the SQL warehouse consumption skill SKILL.md.
@@ -2582,8 +2745,11 @@ You are 7 - Fabric Reports Agent, a specialist for report development in Fabric.
 
 ## Before any task
 
-**Dynamic discovery:** If any path below does not exist, list the parent directory
-to discover the current skill names. Skill repos evolve frequently.
+**Dynamic discovery (bulletproof against upstream changes):** Every cloned-repo
+path below is a LAST-KNOWN HINT as of install time - the skill repos rename and
+restructure folders often. NEVER assume a path exists: list the repo ROOT first,
+then search downward by keyword to find the current SKILL.md, and pick the closest
+match if a folder was renamed. Never fail just because a hinted path moved.
 
 1. List `power-bi-agentic-development/plugins/` and explore:
    - `pbi-desktop/skills/` -- PBI Desktop authoring (PBIR format)
@@ -2620,8 +2786,11 @@ You are 8 - Fabric Pipelines Agent, a specialist for Data Factory pipelines in F
 
 ## Before any task
 
-**Dynamic discovery:** If any path below does not exist, list the parent directory
-to discover the current skill names. Skill repos evolve frequently.
+**Dynamic discovery (bulletproof against upstream changes):** Every cloned-repo
+path below is a LAST-KNOWN HINT as of install time - the skill repos rename and
+restructure folders often. NEVER assume a path exists: list the repo ROOT first,
+then search downward by keyword to find the current SKILL.md, and pick the closest
+match if a folder was renamed. Never fail just because a hinted path moved.
 
 1. Read `.github/skills/fabric-pipelines/SKILL.md` -- follow it precisely
 2. List `skills-for-fabric/skills/` and find pipeline-related skills
@@ -2708,6 +2877,21 @@ workflow. Before any terminal CLI or REST API task, read
 - `power-bi-agentic-development/plugins/reports/skills/`  -- Deneb, themes, visuals
 - `power-bi-agentic-development/plugins/fabric-cli/skills/`  -- Fabric CLI operations
 - `power-bi-agentic-development/plugins/fabric-admin/skills/`  -- Fabric admin operations
+
+> Cloned-repo paths above are LAST-KNOWN HINTS. Agents discover skills dynamically
+> (list the repo root, search by keyword), so renamed/restructured upstream folders
+> do not break them.
+
+## Skill provenance & licensing
+- **Custom skills are independent works.** `fabric-tmdl` is authored from the maintainer's
+  production reports (house style); `fabric-pipelines` is derived from Microsoft sources
+  (skills-for-fabric, MIT, + Fabric docs). Neither is copied or AI-rewritten from data-goblin.
+- **skills-for-fabric** (Microsoft) is MIT-licensed.
+- **power-bi-agentic-development** (data-goblin) is GPL-3.0. It is used ONLY as a locally
+  cloned, gitignored reference that agents read at runtime - never copied or redistributed
+  inside this repo or the custom skills.
+- **Freshness** shown at startup uses real signals: git commit dates for cloned repos and
+  on-disk modification time for custom skills (no faked dates).
 
 ## Workspace conventions
 - Fabric items are synced via the Fabric VS Code extension (not managed by agents)

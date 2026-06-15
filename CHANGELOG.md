@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.2.0-pre-release] - 2026-06-15
+
+### Changed
+
+- Skill freshness display now uses **real signals** — git commit dates for the cloned repos and honest on-disk modification time for the custom skills (the installer no longer overrides/fakes file dates)
+- Specialist agents and the master working-flow are now **resilient to upstream folder renames/restructuring** — skills are discovered dynamically from the repo root by keyword instead of relying on hardcoded deep paths
+- Master agent can now **proactively recommend the best specialist** for a free-text request (per-request routing advice), while still offering to handle it inline
+- Semantic Model Agent now applies **explicit skill precedence** — the custom fabric-tmdl skill wins on house style/conventions, the cloned data-goblin skills win on TMDL/DAX syntax and correctness
+
+### Added
+
+- **House modelling decisions** section in the fabric-tmdl skill (storage-mode choices, measure home, folder taxonomy, naming, formatting, hygiene)
+- **Provenance & licensing notes** across the custom skills, the Skills Maintainer, and `copilot-instructions.md` — the custom skills are independent works (`fabric-tmdl` from production reports; `fabric-pipelines` from Microsoft sources, MIT), and data-goblin's GPL-3.0 repo is used only as a locally cloned reference, never copied or redistributed
+- **fabric-pipelines skill refreshed against Microsoft docs (review 2026-06-15)** — added the `RefreshMaterializedLakeView` and `Approval` activities now listed in the [Fabric Data Factory activity overview](https://learn.microsoft.com/en-us/fabric/data-factory/activity-overview); recorded a "last reviewed" date in the skill's provenance block
+
 ## [v0.1.0-pre-release] - 2026-05-04
 
 ### Added
