@@ -1114,6 +1114,11 @@ description: "Use when: editing or creating Data Factory pipeline JSON files (pi
 - **Last reviewed against Microsoft docs**: 2026-06-15 (against
   https://learn.microsoft.com/en-us/fabric/data-factory/activity-overview, updated 2026-06-07).
   Added `RefreshMaterializedLakeView` and `Approval` activities at that review.
+- **In-house operational addendum**: 2026-06-17 - added "Operational practices
+  (battle-tested)" section (RefreshSQLEndpoint placement, Direct Lake freshness,
+  Variable Library endpoint/item-id discipline, Wait-buffer smell, pipeline auditing).
+  Generalized from production work with all environment-specific identifiers removed;
+  no proprietary data - redistributable.
 - **To update this skill**: check `skills-for-fabric/common/ITEM-DEFINITIONS-CORE.md` for new
   activity types, and review https://learn.microsoft.com/en-us/fabric/data-factory/
   for updated typeProperties. Then re-run the installer or edit this file directly.
@@ -1660,6 +1665,9 @@ Valid conditions: `Succeeded`, `Failed`, `Skipped`, `Completed`
 }
 ```
 - Refreshes a Lakehouse SQL endpoint to reflect the latest data
+- **Frequently mis-placed.** Only benefits a reader that reads *this* lakehouse over its
+  SQL analytics endpoint - see "Operational practices -> RefreshSQLEndpoint: when it
+  actually does something" below before adding or keeping one
 
 ### Webhook (call endpoint and wait for callback)
 ```json
@@ -1966,6 +1974,85 @@ Common patterns:
   }
 }
 ```
+
+---
+
+## Operational practices (battle-tested)
+
+> In-house, field-tested guidance generalized from production Fabric pipelines.
+> Contains no environment-specific identifiers (no workspace/lakehouse/model names
+> or GUIDs) - safe to redistribute.
+
+### RefreshSQLEndpoint: when it actually does something
+
+`RefreshSQLEndpoint` forces a Lakehouse SQL analytics endpoint to sync its metadata
+view to the latest Delta commit. It is easy to add in the wrong place. Before adding
+or keeping one, confirm **who reads that endpoint**:
+
+- A `RefreshSQLEndpoint` only benefits a downstream reader that reads **that same
+  lakehouse over its SQL analytics endpoint** - e.g. a Dataflow / Script / Lookup, or a
+  semantic model whose source is `Sql.Database(<server>, <thisLakehouseEndpointId>)`.
+- Refreshing lakehouse **A**'s endpoint does **nothing** for a reader that reads
+  lakehouse **B**. A refresh with no matching SQL-endpoint reader downstream is an
+  **orphaned no-op** - safe to remove.
+- A Spark **notebook** write does **not** trigger SQL-endpoint sync on its own. If a
+  later activity reads that table over SQL, a `RefreshSQLEndpoint` between them makes
+  the write visible deterministically.
+- A **Dataflow Gen2** with a Lakehouse destination **can** sync the endpoint itself
+  (the destination's update-metadata option), which can remove the need for a separate
+  refresh step after it.
+
+### Direct Lake freshness is not the same as refreshing an upstream lakehouse
+
+A common mistake is to refresh an upstream / "gold" lakehouse endpoint expecting a
+**Direct Lake** model to pick up new data. It will not, unless that lakehouse **is the
+model's own** lakehouse.
+
+- A Direct Lake model reads Delta from **one specific lakehouse** - the one its source
+  expression points at (`Sql.Database(..., <endpointId>)`, "Direct Lake on OneLake").
+- When ETL writes Delta into **that** lakehouse, the model reframes on the next query
+  and serves new data, usually within seconds, with **no explicit refresh required**.
+- The SQL analytics endpoint has a background metadata-sync that can briefly lag a
+  write. For **deterministic** freshness, `RefreshSQLEndpoint` on the **model's own
+  lakehouse** (not an upstream layer), or trigger a model reframe, then read.
+- Refreshing a *different* lakehouse's endpoint (e.g. an intermediate layer the model
+  does not read) has **zero** effect on the model.
+
+**Verify before trusting a refresh:** map variable -> lakehouse item -> endpoint id,
+then confirm a downstream activity actually reads that endpoint. The SQL **endpoint id
+is not the lakehouse item id** - resolve both when auditing.
+
+### Centralize environment-specific GUIDs in a Variable Library
+
+Hold per-environment lakehouse / SQL-endpoint / item GUIDs in a Variable Library with
+Test/Prod value sets and reference them via `@pipeline().libraryVariables.x`. This keeps
+one pipeline definition working across environments.
+
+- Mind the **endpoint id vs item id** distinction: store whichever the consumer needs.
+  A `RefreshSQLEndpoint` needs the **lakehouse item id**; a Direct Lake model source
+  needs the **SQL endpoint id**. Mixing them silently targets the wrong object.
+- Pipelines parameterize cleanly, but the **notebooks / dataflows they call may hardcode
+  absolute lakehouse GUIDs** (abfss paths, `default_lakehouse` metadata). Those do not
+  rebind across Test/Prod automatically. When promoting, audit the **called ETL items**
+  for embedded GUIDs, not just the pipeline.
+
+### Prefer dependencies over fixed Wait buffers
+
+Small fixed `Wait` activities inserted only to "space out" steps (e.g. between
+`ExecutePipeline` calls) are brittle - they neither guarantee upstream completion nor
+adapt to load. Order work with explicit `dependsOn` chains and `waitOnCompletion: true`
+on `ExecutePipeline`. Reserve `Wait` for genuine external-latency situations.
+
+### Auditing an existing pipeline (review-first)
+
+When asked to optimize, trace before touching anything:
+1. For each activity, note what it **reads** and **writes**, and the access path:
+   SQL endpoint vs Spark/abfss vs `Lakehouse.Contents` (direct).
+2. Resolve every variable to a **physical lakehouse item id + endpoint id**.
+3. For each refresh / `RefreshSQLEndpoint`, confirm a downstream activity actually
+   consumes that endpoint. No consumer -> candidate for removal.
+4. Confirm whether Direct Lake models read the same lakehouse the ETL writes. If so,
+   upstream endpoint refreshes are usually unnecessary for the model.
 
 ---
 

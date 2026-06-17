@@ -363,7 +363,7 @@ The `.gitignore` keeps skill repos and VS Code settings clean.
 
 ---
 
-## Current status (v0.2.0-pre-release)
+## Current status (v0.3.0-pre-release)
 
 | Area | Status |
 |---|---|

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.3.0-pre-release] - 2026-06-17
+
+### Changed
+
+- **fabric-pipelines skill enhanced after real-world usage** — added a "Operational practices (battle-tested)" section generalized from production pipeline work: `RefreshSQLEndpoint` placement semantics (when it is an orphaned no-op), Direct Lake freshness vs upstream lakehouse refresh, the SQL endpoint-id vs lakehouse item-id distinction, Variable Library environment-promotion caveats, the fixed-`Wait`-buffer anti-pattern, and a review-first pipeline-auditing checklist. All environment-specific identifiers removed — no proprietary data, redistributable
+
 ## [v0.2.0-pre-release] - 2026-06-15
 
 ### Changed
