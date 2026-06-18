@@ -5,7 +5,7 @@
 Pre-release — functional and tested, evolving fast.
 Contributions and feedback welcome.
 
-**Zero to fully configured in under 60 seconds.**
+**Zero to fully configured in under 2 minutes.**
 
 Double-click the `.bat` file, answer a few questions, and you have a complete
 Microsoft Fabric agentic development environment with eight AI
@@ -44,7 +44,7 @@ Then I thought: *this should be replicable*. Not just for me — for anyone who 
 >
 > **Third-party skill dependencies:** This workspace clones and depends on two external repositories — [microsoft/skills-for-fabric](https://github.com/microsoft/skills-for-fabric) and [data-goblin/power-bi-agentic-development](https://github.com/data-goblin/power-bi-agentic-development). These are independent open-source projects maintained by their respective owners. This project has no control over their content, availability, or future changes. The agents are **resilient to these repos restructuring or renaming their internal folders** — skills are discovered dynamically at runtime (list the repo root, search by keyword) rather than from fixed paths. However, if a whole repository is **renamed, moved, or removed** at the GitHub level, or its history diverges so `git pull --ff-only` fails, the clone/update step will break until the references are updated.
 >
-> **Licensing & provenance:** `skills-for-fabric` is MIT-licensed; `power-bi-agentic-development` is **GPL-3.0** and is used **only as a locally cloned, gitignored reference** that agents read at runtime — it is never copied, AI-rewritten, or redistributed inside this project. The custom embedded skills are **independent works** (`fabric-tmdl` written from my best practices; `fabric-pipelines` derived from Microsoft sources combined with my working experience). Always check those repos directly for their own licensing terms and usage conditions.
+> **Licensing & provenance:** `skills-for-fabric` is MIT-licensed; `power-bi-agentic-development` is **GPL-3.0** and is used **only as a locally cloned, gitignored reference** that agents read at runtime — it is never copied, AI-rewritten, or redistributed inside this project. The custom embedded skills (`fabric-tmdl`, `fabric-pipelines`, and `fabric-cli-policy`) are **independent, proprietary works original to this repository** — written from scratch (`fabric-tmdl` and `fabric-cli-policy` from my own best practices; `fabric-pipelines` derived from Microsoft sources combined with my working experience) and owned by this project. Always check those repos directly for their own licensing terms and usage conditions.
 >
 > That said — it is a genuinely interesting starting point, and I hope it saves you time and sparks ideas. Feedback, bug reports, and contributions are very welcome.
 
@@ -70,15 +70,16 @@ the community, and custom embedded knowledge.
 | Component | Description |
 |---|---|
 | **Fabric Workspace Master Agent** | Routing hub — handles session startup (skill check, Azure identity, topic menu), then routes to the right specialist or handles tasks directly with dynamic skill discovery. Can also proactively recommend the best specialist for a free-text request |
-| **Fabric Skills Maintainer** | Light (quick pull) or deep (pull + MS docs freshness check + unreferenced skill scan) maintenance of all skill sources |
+| **Fabric Skills Maintainer Agent** | Light (quick pull) or deep (pull + MS docs freshness check + unreferenced skill scan) maintenance of all skill sources |
 | **Semantic Model Agent** | TMDL editing, DAX measures, columns, relationships, partitions — house style from the custom fabric-tmdl skill, syntax/DAX depth from data-goblin (explicit precedence) |
-| **Fabric Data Engineer** | Spark notebooks, SQL warehouse, pipelines, medallion architecture — guided by Microsoft's skills-for-fabric |
-| **Fabric Admin** | Capacity management, governance, security, workspace documentation |
-| **Fabric App Dev** | Python apps, ODBC, XMLA, REST API integration with Fabric data |
+| **Fabric Data Engineer Agent** | Spark notebooks, SQL warehouse, pipelines, medallion architecture — guided by Microsoft's skills-for-fabric |
+| **Fabric Admin Agent** | Capacity management, governance, security, workspace documentation |
+| **Fabric App Dev Agent** | Python apps, ODBC, XMLA, REST API integration with Fabric data |
 | **Fabric Reports Agent** | PBIR report editing, visuals, themes — guided by data-goblin report skills |
 | **Fabric Pipelines Agent** | Data Factory pipeline JSON authoring — guided by the custom fabric-pipelines skill |
-| **Custom TMDL Skill** | Comprehensive embedded skill covering TMDL syntax, indentation rules, property ordering, Direct Lake patterns, lineageTag rules, and post-edit validation |
-| **Custom Pipelines Skill** | Full pipeline activity type reference with typeProperties, expression syntax, Variable Library integration, and validation checklist |
+| **Custom TMDL Skill** *(proprietary — original to this repo)* | Comprehensive embedded skill covering TMDL syntax, indentation rules, property ordering, Direct Lake patterns, lineageTag rules, and post-edit validation. Written from scratch for this project. |
+| **Custom Pipelines Skill** *(proprietary — original to this repo)* | Full pipeline activity type reference with typeProperties, expression syntax, Variable Library integration, and validation checklist. Authored for this project. |
+| **Custom CLI Policy Skill** *(proprietary — original to this repo)* | Embedded decision policy that tells the agents to prefer the Fabric CLI (`fab`) and fall back to `az`/`sqlcmd` only where needed — with `az rest` → `fab api` translation, a fallback matrix for SQL/TDS and non-Fabric tokens, and guardrails. Written from scratch for this project. |
 | **Microsoft skills-for-fabric** | Git-cloned from [microsoft/skills-for-fabric](https://github.com/microsoft/skills-for-fabric) — Spark, SQL, Eventhouse, medallion, and more |
 | **Data-goblin skills** | Git-cloned from [data-goblin/power-bi-agentic-development](https://github.com/data-goblin/power-bi-agentic-development) by [Kurt Buhler](https://www.linkedin.com/in/kurtbuhler/) — PBIP, DAX, reports, Fabric CLI, Fabric admin |
 | **Git Version Control** | Repository initialised with a clean `.gitignore` and first commit out of the box |
@@ -92,18 +93,19 @@ Before running the installer, make sure you have:
 
 | Tool | Required? | How to get it |
 |---|---|---|
-| **VS Code 1.117.0+** | Yes | [code.visualstudio.com](https://code.visualstudio.com) — older versions have known bugs that break Copilot agent tools |
-| **GitHub Copilot + Agent Mode** | Yes | Install from VS Code Extensions marketplace. Agent mode must be enabled (`chat.agent.enabled`). Note: org tenants may need admin to enable this. |
-| **Git** | Yes | [git-scm.com](https://git-scm.com) |
-| **[Microsoft Fabric Extension](https://marketplace.visualstudio.com/items?itemName=fabric.vscode-fabric)** | Yes | Required for the pull/push workflow with Fabric. Install from VS Code marketplace or `code --install-extension fabric.vscode-fabric` |
-| **[TMDL Extension](https://marketplace.visualstudio.com/items?itemName=analysis-services.tmdl)** | Recommended | Provides syntax highlighting and validation for `.tmdl` files |
-| **[Fabric Data Engineer Remote](https://marketplace.visualstudio.com/items?itemName=synapsevscode.vscode-synapse-remote)** | Nice to have | Execute notebook cells against remote Spark directly from VS Code |
-| **Fabric CLI (`fab`)** | Auto-installed where possible | Primary CLI the agents use for Fabric API, jobs, export/import, OneLake & table ops. If no real Python 3 is found, the installer attempts Python 3.12 first, then installs `fab` with `pip install ms-fabric-cli` and a `--user` retry. It continues if corporate policy, network, or Python/pip blocks it. [Repo](https://github.com/microsoft/fabric-cli) |
-| **az CLI** | Auto-installed where possible (fallback tool) | Only needed for SQL/TDS (`sqlcmd -G`) and non-Fabric token audiences; `fab` covers the rest. The installer tries winget `Microsoft.AzureCLI` first, then pip / `--user` pip if Python is available. The winget path may be blocked or require elevation depending on company policy; failure is non-blocking. [Install](https://aka.ms/installazurecli) |
-| **Fabric MCP server** | Auto-installed where possible (full-live / hybrid) | VS Code extension `fabric.vscode-fabric-mcp-server` that gives the agents structured Fabric operations — create/list items, OneLake files & tables, read item definitions. The installer attempts `code --install-extension ... --force`. Not needed for full-local mode. |
-| **Power BI semantic-model MCP server** | Auto-installed where possible (full-live / hybrid) | VS Code extension `analysis-services.powerbi-modeling-mcp` providing a live XMLA connection to running models — run DAX (`EVALUATE`) for live data comparison and make transactional model edits. The installer attempts `code --install-extension ... --force`. Not needed for full-local mode. |
+| **VS Code 1.117.0+** | Required | **You install it** — [code.visualstudio.com](https://code.visualstudio.com). The installer checks the version and **stops** if it's missing; older versions have known bugs that break Copilot agent tools. |
+| **GitHub Copilot + Agent Mode** | Required | **You install it** — from the VS Code Extensions marketplace. Agent mode must be enabled (`chat.agent.enabled`). The installer does not install or check this; org tenants may need admin to enable it. |
+| **Git** | Required | **You install it** — [git-scm.com](https://git-scm.com). The installer checks for Git and **stops** if it's missing; it does not install Git. |
+| **[Microsoft Fabric Extension](https://marketplace.visualstudio.com/items?itemName=fabric.vscode-fabric)** | Required | **You install it** — VS Code marketplace or `code --install-extension fabric.vscode-fabric`. Required for the pull/push workflow with Fabric. The installer **checks and warns** if it's missing, but does not install it. |
+| **[TMDL Extension](https://marketplace.visualstudio.com/items?itemName=analysis-services.tmdl)** | Recommended | **You install it** — `code --install-extension analysis-services.tmdl`. Syntax highlighting and validation for `.tmdl` files. The installer **checks and reminds you**, but does not install it. |
+| **[Fabric Data Engineer Remote](https://marketplace.visualstudio.com/items?itemName=synapsevscode.vscode-synapse-remote)** | Nice to have | **You install it** — run notebook cells against remote Spark from VS Code. The installer mentions it as a tip but does not install it. |
+| **Python 3.10–3.13** | Installer auto-installs (if needed) | **Installer installs it where possible** — only if no real Python 3 is found. It attempts Python 3.12 via winget `Python.Python.3.12 --scope user`, then the python.org 3.12.10 per-user installer. Skipped entirely if you already have Python (e.g. Anaconda). Needed only for the `fab`/`az` CLIs. [python.org](https://www.python.org) |
+| **Fabric CLI (`fab`)** | Installer auto-installs (recommended) | **Installer installs it where possible** — primary CLI the agents use for Fabric API, jobs, export/import, OneLake & table ops. Once a real Python is available it runs `pip install ms-fabric-cli` with a `--user` retry. Continues if corporate policy, network, or Python/pip blocks it. [Repo](https://github.com/microsoft/fabric-cli) |
+| **az CLI** | Installer auto-installs (fallback) | **Installer installs it where possible** — only needed for SQL/TDS (`sqlcmd -G`) and non-Fabric token audiences; `fab` covers the rest. Tries winget `Microsoft.AzureCLI` first, then pip / `--user` pip if Python is available. The winget path may be blocked or require elevation depending on company policy; failure is non-blocking. [Install](https://aka.ms/installazurecli) |
+| **Fabric MCP server** | Installer auto-installs (full-live / hybrid) | **Installer installs it where possible** — VS Code extension `fabric.vscode-fabric-mcp-server`, giving agents structured Fabric operations (create/list items, OneLake files & tables, read item definitions). Attempts `code --install-extension ... --force`. Not needed for full-local mode. |
+| **Power BI semantic-model MCP server** | Installer auto-installs (full-live / hybrid) | **Installer installs it where possible** — VS Code extension `analysis-services.powerbi-modeling-mcp`, a live XMLA connection to running models (run DAX `EVALUATE` for live comparison, make transactional model edits). Attempts `code --install-extension ... --force`. Not needed for full-local mode. |
 
-> **CLIs and MCP servers are optional power-ups.** The core full-local workflow — the Fabric extension plus agents editing local files — needs no CLI or MCP server at all. They add terminal, control-plane/data-plane and live-workspace power on top, and are what unlock the **full-live** and **hybrid** ways of working (see [Three ways of working](#three-ways-of-working)). The installer **attempts to install** Python, `fab` (recommended), `az` (fallback), and the two MCP server extensions where possible — and if your environment blocks an optional install (corporate policy, no winget, no network, no Python/pip, or VS Code extension restrictions), it continues and prints recovery guidance. For a deep dive into what you can do once a CLI is installed, see [CLI-FUNCTIONALITIES.md](CLI-FUNCTIONALITIES.md).
+> **CLIs and MCP servers are optional power-ups.** The core full-local workflow — the Fabric extension plus agents editing local files — needs no CLI or MCP server at all. They add terminal, control-plane/data-plane and live-workspace power on top, and are what unlock the **full-live** and **hybrid** ways of working (see [Three ways of working](#three-ways-of-working)). The installer **attempts to install** Python, `fab` (recommended), `az` (fallback), and the two MCP server extensions where possible — and if your environment blocks an optional install (corporate policy, no winget, no network, no Python/pip, or VS Code extension restrictions), it shows a warning for that item and continues. For a deep dive into what you can do once a CLI is installed, see [CLI-FUNCTIONALITIES.md](CLI-FUNCTIONALITIES.md).
 
 ---
 
@@ -134,6 +136,35 @@ Before running the installer, make sure you have:
 > **In short:** the installer attempts to bring the niche pieces that power CLI/live-agent scenarios (Python if needed, `fab`, `az`, and the two MCP server extensions), but it does not force them if your company environment blocks them. The mainstream authoring extensions remain your choice: the script checks and warns, but does not install them.
 >
 > **Update mode:** if you point it at an existing folder, it refreshes installer-managed files (agents, embedded skills, configs) and updates the cloned skill repositories when possible. Your Fabric item folders, workspace folders, and personal files are left untouched.
+
+#### ⚠️⚠️⚠️ Corporate / locked-down PCs — if tools "install but aren't recognized"
+
+On managed machines you may see optional tools (Python, `fab`, `az`, the MCP extensions) **get installed but still reported as "not found"** in the same run — often with a `pip` line ending in `exit code: -1` or a `WARNING: The script … is installed in '…\Scripts' which is not on PATH`. **This is expected, not a failure.** A freshly installed command isn't on `PATH` yet, and corporate security scanners (EDR/antivirus) add a delay or interrupt the install partway, so it finishes across a couple of runs.
+
+The installer is **idempotent and self-healing**: on every run it refreshes `PATH` from the registry and re-scans the Python Scripts folders, so each run *recognizes what the previous run installed*. Do this, in order:
+
+1. **Close the window and double-click the installer again — 2 to 4 times.** Each run picks up what the last one installed, so the "not found" list shrinks until it clears. (Re-running is safe: it's update mode — your files are never touched.)
+2. **If an optional tool is still missing after 3–4 runs**, open the workspace in VS Code, select **1 - Fabric Workspace Master Agent** in Copilot Chat, and paste the prompt below. It covers exactly the optional tools the installer tries to install — the agent re-checks them and installs only the missing ones (per-user, no admin). *(Required tools — Git, VS Code, the Fabric extension — and the recommended TMDL extension you install yourself; see the table above.)*
+
+```text
+Please finish setting up this Fabric agentic workspace. The one-click installer already
+tried to install a small set of OPTIONAL tools for me, but one or more may have failed on
+this corporate PC. Check ONLY the tools listed below, tell me which are present vs missing,
+then install ONLY the missing ones. Prefer per-user, no-admin installs and never force
+anything that needs elevation.
+
+  1. Python 3.10-3.13 (only if no real Python exists) -> winget install Python.Python.3.12 --scope user
+  2. Fabric CLI "fab"            -> python -m pip install --user ms-fabric-cli
+  3. Azure CLI "az" (fallback)   -> python -m pip install --user azure-cli
+  4. Fabric MCP server           -> code --install-extension fabric.vscode-fabric-mcp-server
+  5. Power BI model MCP server   -> code --install-extension analysis-services.powerbi-modeling-mcp
+
+For the Python packages, add the user Scripts folder to PATH if needed, then verify each
+tool resolves (run: fab --version, az version). Finish with a clear checklist of what is
+now installed and what still needs manual or IT action. Do not run anything destructive.
+```
+
+> During its prerequisite step the installer shows each tool's status and a plain warning for anything optional it couldn't install — it does **not** print this prompt. Use the steps above if an optional tool is still missing. None of these optional tools block setup: the full-local workflow runs fine without them.
 
 ### 1. Get the files
 
@@ -242,7 +273,7 @@ The skills come from three sources:
 
 | Source | What it covers | Updated |
 |---|---|---|
-| **Custom embedded** (`.github/skills/`) | TMDL syntax, pipeline JSON | Re-run installer or edit directly |
+| **Custom embedded** (`.github/skills/`) | TMDL syntax, pipeline JSON, CLI policy — *proprietary, original to this repo* | Re-run installer or edit directly |
 | **Microsoft** (`skills-for-fabric/`) | Spark, SQL, Eventhouse, medallion, CLI | Auto on session start |
 | **Data-goblin** — [Kurt Buhler](https://www.linkedin.com/in/kurtbuhler/) (`power-bi-agentic-development/`) | PBIP, DAX, reports, Fabric CLI/admin | Auto on session start |
 

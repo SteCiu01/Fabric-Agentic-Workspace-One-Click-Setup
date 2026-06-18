@@ -113,6 +113,178 @@ function Add-DirToPath {
     } catch { }
 }
 
+# -- Helper: make tools installed by THIS or a PREVIOUS run discoverable -
+# The #1 reason a freshly-installed CLI still reports "not found" is that its
+# folder is not on the in-memory PATH yet. This refreshes PATH from the registry
+# (Machine + User) and proactively adds the Python user/script dirs where pip
+# drops console scripts (fab.exe, az.exe). Idempotent; safe to call repeatedly.
+# Calling it at the START of the prerequisite step is what lets run N recognise
+# what run N-1 actually installed -- so the "not found" list shrinks each run.
+function Sync-ToolPaths {
+    # 1. Pull the persisted PATH (a previous run may have appended to User scope).
+    $machine = [System.Environment]::GetEnvironmentVariable('Path', 'Machine')
+    $user    = [System.Environment]::GetEnvironmentVariable('Path', 'User')
+    $env:Path = (@($machine, $user) | Where-Object { $_ }) -join ';'
+
+    # 2. Ask a real Python where it drops scripts and add those dirs.
+    $py = Find-RealPython
+    if ($py) {
+        try {
+            $dirs = & $py -c "import site,sys,os; print(os.path.join(sys.prefix,'Scripts')); print(os.path.join(site.getuserbase(),'Scripts'))" 2>$null
+            foreach ($d in @($dirs)) { if ($d -and (Test-Path $d)) { Add-DirToPath $d } }
+        } catch { }
+    }
+
+    # 3. Sweep the common per-user Python Scripts locations -- covers the case
+    #    where the interpreter that installed the package is no longer on PATH.
+    foreach ($root in @("$env:APPDATA\Python", "$env:LOCALAPPDATA\Programs\Python")) {
+        if (Test-Path $root) {
+            Get-ChildItem $root -Recurse -Directory -Filter 'Scripts' -ErrorAction SilentlyContinue |
+                ForEach-Object { Add-DirToPath $_.FullName }
+        }
+    }
+}
+
+# -- Helper: resilient "is this CLI on PATH yet?" check ---------------------
+# A just-installed CLI often fails a single Get-Command because its Scripts
+# folder is not on the in-memory PATH yet. This re-syncs PATH and retries a few
+# times, and as a last resort probes the known Python Scripts dirs on disk for
+# the executable directly -- so a tool installed by this OR a previous run is
+# recognised in the SAME run, without forcing the user to re-launch the installer.
+function Test-CliResilient {
+    param([string]$Name, [int]$Retries = 4)
+    for ($i = 0; $i -lt $Retries; $i++) {
+        if (Get-Command $Name -ErrorAction SilentlyContinue) { return $true }
+        Sync-ToolPaths
+        if (Get-Command $Name -ErrorAction SilentlyContinue) { return $true }
+        # Direct on-disk probe: pip drops <name>.exe/.cmd/.bat into a Scripts dir.
+        foreach ($root in @("$env:APPDATA\Python", "$env:LOCALAPPDATA\Programs\Python")) {
+            if (Test-Path $root) {
+                $hit = Get-ChildItem $root -Recurse -File -ErrorAction SilentlyContinue `
+                         -Include "$Name.exe", "$Name.cmd", "$Name.bat" | Select-Object -First 1
+                if ($hit) {
+                    Add-DirToPath $hit.DirectoryName
+                    if (Get-Command $Name -ErrorAction SilentlyContinue) { return $true }
+                }
+            }
+        }
+        if ($i -lt $Retries - 1) { Start-Sleep -Milliseconds 400 }
+    }
+    return $false
+}
+
+# -- Helper: read VS Code's installed-extension list, resiliently -----------
+# `code --list-extensions` can return empty/partial on the first call right
+# after an install or on a slow/locked-down machine. Retry until it returns
+# something rather than trusting a single (possibly empty) result.
+function Get-InstalledVsCodeExtensions {
+    param([string]$VsCode, [int]$Retries = 4)
+    if (-not $VsCode) { return @() }
+    for ($i = 0; $i -lt $Retries; $i++) {
+        $list = & $VsCode --list-extensions 2>$null
+        if ($list) { return @($list) }
+        if ($i -lt $Retries - 1) { Start-Sleep -Milliseconds 400 }
+    }
+    return @()
+}
+
+# -- Helper: is a given VS Code extension present? --------------------------
+# Authoritative source is the CLI's --list-extensions output. When that list is
+# NON-EMPTY we trust it completely: an id that is absent means the extension is
+# genuinely not installed. We deliberately do NOT fall back to a folder scan in
+# that case, because an extension uninstalled via the CLI leaves its folder in
+# .vscode\extensions (flagged in .obsolete) until VS Code restarts -- scanning
+# would then report a removed extension as still installed (a false positive).
+# Only when the CLI returns NOTHING (a transient failure on a slow/locked-down
+# PC) do we scan on disk, and even then we skip folders marked obsolete.
+function Test-VsCodeExtension {
+    param([string]$Id, $List)
+    if ($List -and @($List).Count -gt 0) {
+        return (@($List) -contains $Id)
+    }
+    $pattern = '^' + [regex]::Escape($Id) + '-\d'
+    foreach ($extRoot in @("$env:USERPROFILE\.vscode\extensions", "$env:USERPROFILE\.vscode-insiders\extensions")) {
+        if (-not (Test-Path $extRoot)) { continue }
+        # Build the set of folders VS Code has marked for removal (.obsolete is a
+        # JSON map like { "publisher.id-1.2.3": true }).
+        $obsolete = @{}
+        $obsoleteFile = Join-Path $extRoot '.obsolete'
+        if (Test-Path $obsoleteFile) {
+            try {
+                (Get-Content $obsoleteFile -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json).PSObject.Properties |
+                    ForEach-Object { $obsolete[$_.Name] = $true }
+            } catch { }
+        }
+        $dirs = Get-ChildItem $extRoot -Directory -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match $pattern -and -not $obsolete[$_.Name] }
+        if ($dirs) { return $true }
+    }
+    return $false
+}
+
+# -- Helper: export the Windows trusted-root store to a PEM bundle ----------
+# Locked-down corporate networks run TLS inspection (Zscaler / Netskope / etc.)
+# that re-signs HTTPS with an internal root CA. VS Code's CLI downloads
+# extensions through Node, which uses its OWN bundled CA list and therefore
+# rejects that root with "self signed certificate in certificate chain" -- so
+# `code --install-extension` fails even though browsers and pip (which use
+# different trust stores) work fine. Exporting the Windows trusted roots (which
+# DO include the corporate CA) to a PEM file and pointing Node at it via
+# NODE_EXTRA_CA_CERTS lets the download validate. Reading the cert store needs
+# no admin. Cached for the run; returns the bundle path or $null.
+$script:CaBundlePath = $null
+function Get-WindowsCaBundle {
+    if ($script:CaBundlePath -and (Test-Path $script:CaBundlePath)) { return $script:CaBundlePath }
+    try {
+        $certs = Get-ChildItem Cert:\LocalMachine\Root, Cert:\CurrentUser\Root -ErrorAction SilentlyContinue
+        if (-not $certs) { return $null }
+        $sb = New-Object System.Text.StringBuilder
+        foreach ($c in $certs) {
+            $b64 = [Convert]::ToBase64String($c.RawData, 'InsertLineBreaks')
+            [void]$sb.AppendLine('-----BEGIN CERTIFICATE-----')
+            [void]$sb.AppendLine($b64)
+            [void]$sb.AppendLine('-----END CERTIFICATE-----')
+        }
+        $path = Join-Path $env:LOCALAPPDATA 'fabric-agentic-ca-bundle.pem'
+        Set-Content -Path $path -Value $sb.ToString() -Encoding ascii
+        $script:CaBundlePath = $path
+        return $path
+    } catch { return $null }
+}
+
+# -- Helper: force-install a VS Code extension, robustly --------------------
+# Replaces a bare `code --install-extension --force` call, fixing the two ways
+# it silently fails on a locked-down corporate PC:
+#   1. Under $ErrorActionPreference='Stop', the native command's progress text on
+#      stderr (merged via 2>&1) is turned into a TERMINATING error -- so even a
+#      successful install lands in the catch block and is reported as failed.
+#      We run with a function-scoped EAP='Continue' and judge success by the
+#      exit code + a --list-extensions check instead.
+#   2. A TLS-inspection proxy makes the marketplace download fail the Node cert
+#      check; we set NODE_EXTRA_CA_CERTS to the Windows trusted roots up front
+#      (harmless off such networks -- it only ADDS already-trusted roots).
+# Retries a few times. Returns $true only on a confirmed install.
+function Install-VsCodeExtension {
+    param([string]$VsCode, [string]$Id, [int]$Retries = 3)
+    $ErrorActionPreference = 'Continue'   # function-scoped; native stderr won't throw
+    if (-not $VsCode -or -not $Id) { return $false }
+
+    if (-not $env:NODE_EXTRA_CA_CERTS) {
+        $bundle = Get-WindowsCaBundle
+        if ($bundle) { $env:NODE_EXTRA_CA_CERTS = $bundle }
+    }
+
+    for ($i = 0; $i -lt $Retries; $i++) {
+        & $VsCode --install-extension $Id --force 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0 -and
+            (Test-VsCodeExtension -Id $Id -List (Get-InstalledVsCodeExtensions -VsCode $VsCode))) {
+            return $true
+        }
+        Start-Sleep -Milliseconds 600
+    }
+    return (Test-VsCodeExtension -Id $Id -List (Get-InstalledVsCodeExtensions -VsCode $VsCode))
+}
+
 # -- Helper: ensure a REAL Python is available, installing if missing ----
 # The Fabric CLI (fab) is a Python package, so without Python it cannot install.
 # This force-installs Python (mirroring the Power Platform twin's pac/.NET
@@ -246,6 +418,69 @@ function Try-InstallOptionalTool {
     Write-Host "    Install it later when convenient -- either manually ($ManualUrl)," -ForegroundColor DarkGray
     Write-Host "    or just open the workspace and ask the Fabric agent to walk you through it." -ForegroundColor DarkGray
     Write-Host "    Continuing without $Name (the workspace works fine without it)." -ForegroundColor DarkGray
+    return $false
+}
+
+# -- Helper: install Azure CLI into a dedicated venv at a SHORT path --------
+# azure-cli has a very deep package tree (e.g.
+#   azure\mgmt\recoveryservicesbackup\activestamp\aio\operations\_..._operations.py)
+# that overflows the Windows 260-char MAX_PATH limit when pip unpacks it into the
+# Microsoft Store Python's long site-packages path -- the install dies with
+# "OSError: [Errno 2] No such file or directory". The fix is a virtual env whose
+# base path is short. Crucially the venv must live in the USER-PROFILE ROOT, not
+# under %LOCALAPPDATA%: the Store Python virtualizes AppData\Local and silently
+# redirects a venv created there back into its long sandbox path, re-triggering
+# MAX_PATH. A profile-root folder (%USERPROFILE%\.fabric-az) is not virtualized,
+# stays short, and installs cleanly. Idempotent: re-uses an existing venv. Puts
+# the venv's Scripts dir on PATH (persisted) so `az` resolves now and later.
+# Returns $true if `az` is available afterwards; never throws.
+function Install-AzCliViaVenv {
+    param([string]$Python)
+    $ErrorActionPreference = 'Continue'   # function-scoped; native stderr won't throw
+    if (-not $Python) { $Python = Find-RealPython }
+    if (-not $Python) { return $false }
+
+    $venv    = Join-Path $env:USERPROFILE '.fabric-az'
+    $scripts = Join-Path $venv 'Scripts'
+    $venvPy  = Join-Path $scripts 'python.exe'
+
+    # Append the venv Scripts dir to PATH (NOT prepend): the venv carries its own
+    # python/pip and an unrelated `fab` (pyinvoke), so prepending would shadow the
+    # user's real Python / Fabric CLI. Appending exposes only `az`, which lives
+    # nowhere else. Persists to User scope so it survives into VS Code / new shells.
+    $addAzToPath = {
+        if ($env:Path -notlike "*$scripts*") { $env:Path = "$env:Path;$scripts" }
+        try {
+            $up = [System.Environment]::GetEnvironmentVariable('Path', 'User')
+            if ($up -notlike "*$scripts*") {
+                [System.Environment]::SetEnvironmentVariable(
+                    'Path', ((@($up, $scripts) | Where-Object { $_ }) -join ';'), 'User')
+            }
+        } catch { }
+    }
+
+    # Already installed by a previous run? Re-use it (fast + idempotent).
+    $azExisting = Get-ChildItem $scripts -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Name -match '^az\.(cmd|bat|exe)$' } | Select-Object -First 1
+    if ($azExisting) { & $addAzToPath; return $true }
+
+    Write-Host "    Installing Azure CLI into an isolated environment (sidesteps the Windows" -ForegroundColor White
+    Write-Host "    260-char path limit that breaks a normal pip install)... this can take a few minutes." -ForegroundColor White
+
+    if (-not (Test-Path $venvPy)) {
+        try { & $Python -m venv $venv 2>&1 | Out-Null } catch { }
+    }
+    if (-not (Test-Path $venvPy)) {
+        Write-Host "    Could not create the isolated environment for Azure CLI." -ForegroundColor Yellow
+        return $false
+    }
+
+    try { & $venvPy -m pip install --upgrade pip --quiet 2>&1 | Out-Null } catch { }
+    try { & $venvPy -m pip install --upgrade --retries 5 --timeout 120 azure-cli 2>&1 | Out-Null } catch { }
+
+    $azWrapper = Get-ChildItem $scripts -ErrorAction SilentlyContinue |
+                 Where-Object { $_.Name -match '^az\.(cmd|bat|exe)$' } | Select-Object -First 1
+    if ($azWrapper) { & $addAzToPath; return $true }
     return $false
 }
 
@@ -457,6 +692,11 @@ Show-Step 2 $totalSteps "Checking Prerequisites"
 $missing = @()
 $warnings = @()
 
+# Recognise anything a PREVIOUS run already installed (refresh PATH from the
+# registry + re-add Python Scripts dirs) so we do not re-attempt tools that are
+# in fact present. This is the fix for "installs but shows not found" on locked PCs.
+Sync-ToolPaths
+
 # Git
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     $missing += "git (https://git-scm.com)"
@@ -497,15 +737,10 @@ if ($vscodeCmd) {
 }
 
 # Fabric VS Code Extension check
-$fabricExtFound = $false
-if ($vscodeCmd) {
-    try {
-        $installedExts = & $vscodeCmd --list-extensions 2>$null
-        if ($installedExts -match 'fabric\.vscode-fabric') {
-            Write-Host "  Fabric Extension: found" -ForegroundColor Green
-            $fabricExtFound = $true
-        }
-    } catch { }
+$installedExts = Get-InstalledVsCodeExtensions -VsCode $vscodeCmd
+$fabricExtFound = Test-VsCodeExtension -Id 'fabric.vscode-fabric' -List $installedExts
+if ($fabricExtFound) {
+    Write-Host "  Fabric Extension: found" -ForegroundColor Green
 }
 if (-not $fabricExtFound) {
     Write-Host "" 
@@ -526,20 +761,7 @@ if (-not $fabricExtFound) {
 }
 
 # TMDL extension (optional -- provides syntax highlighting & validation for .tmdl files)
-$tmdlExtFound = $false
-if ($vscodeCmd) {
-    try {
-        if (-not $installedExts) { $installedExts = & $vscodeCmd --list-extensions 2>$null }
-        # Check both the --list-extensions output and the extensions folder on disk
-        if ($installedExts -match 'analysis-services\.tmdl') {
-            $tmdlExtFound = $true
-        } elseif (Test-Path "$env:USERPROFILE\.vscode\extensions") {
-            $tmdlDirs = Get-ChildItem "$env:USERPROFILE\.vscode\extensions" -Directory -ErrorAction SilentlyContinue |
-                        Where-Object { $_.Name -match '^analysis-services\.tmdl-' }
-            if ($tmdlDirs) { $tmdlExtFound = $true }
-        }
-    } catch { }
-}
+$tmdlExtFound = Test-VsCodeExtension -Id 'analysis-services.tmdl' -List $installedExts
 if ($tmdlExtFound) {
     Write-Host "  TMDL Extension: found" -ForegroundColor Green
 } else {
@@ -552,7 +774,7 @@ if ($tmdlExtFound) {
 # Fabric CLI (fab) -- RECOMMENDED (optional). Primary CLI for Fabric control-plane:
 # item lifecycle, jobs, export/import, OneLake file ops, table ops. Not required --
 # the core workflow (Fabric extension + agents editing local files) needs no CLI.
-if (-not (Get-Command fab -ErrorAction SilentlyContinue)) {
+if (-not (Test-CliResilient -Name 'fab')) {
     Write-Host "  Fabric CLI (fab): not found (recommended)" -ForegroundColor Yellow
     Write-Host "         Primary CLI for Fabric API, jobs, export/import, OneLake and table ops." -ForegroundColor DarkGray
     Write-Host "         Needs Python 3.10-3.13. Reference: https://github.com/microsoft/fabric-cli" -ForegroundColor DarkGray
@@ -579,23 +801,31 @@ if (-not (Get-Command fab -ErrorAction SilentlyContinue)) {
 
 # az CLI -- OPTIONAL (fallback). Only needed for SQL/TDS (sqlcmd -G) and non-Fabric
 # token audiences (Storage, database.windows.net). fab covers the rest.
-if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
+if (-not (Test-CliResilient -Name 'az')) {
     Write-Host "  az CLI: not found (optional, fallback)" -ForegroundColor Yellow
     Write-Host "         Only needed for SQL/TDS (sqlcmd) and non-Fabric token audiences; fab covers the rest." -ForegroundColor DarkGray
-    Write-Host "         Reference: https://aka.ms/installazurecli" -ForegroundColor DarkGray
-    # Prefer winget (system MSI); if it is blocked (common 1603 in locked-down
-    # environments), fall back to a user-scoped pip install -- but only if a real
-    # Python exists. Build attempts dynamically so we never run the Store stub.
-    $realPy = Find-RealPython
-    $azAttempts = @(
-        @{ Exe = "winget"; Args = @("install", "--silent", "--accept-package-agreements", "--accept-source-agreements", "-e", "--id", "Microsoft.AzureCLI") }
-    )
-    if ($realPy) {
-        $azAttempts += @{ Exe = $realPy; Args = @("-m", "pip", "install", "--upgrade", "--retries", "5", "--timeout", "60", "azure-cli") }
-        $azAttempts += @{ Exe = $realPy; Args = @("-m", "pip", "install", "--user", "--upgrade", "--retries", "5", "--timeout", "60", "azure-cli") }
+    Write-Host "    Installing az CLI automatically..." -ForegroundColor White
+
+    # 1) winget (per-machine MSI). Silent, no admin where allowed; commonly
+    #    blocked with exit 1603 on locked-down PCs, in which case we fall through.
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Write-Host "    Trying winget: Microsoft.AzureCLI ..." -ForegroundColor White
+        try { & winget install --silent --accept-package-agreements --accept-source-agreements -e --id Microsoft.AzureCLI 2>$null | Out-Null } catch { }
+        Sync-ToolPaths
     }
-    Try-InstallOptionalTool -Name "az CLI" -CheckCmd "az" -Attempts $azAttempts `
-        -ManualUrl "https://aka.ms/installazurecli" | Out-Null
+
+    # 2) Isolated-venv pip install -- the reliable no-admin route. A plain
+    #    `pip install azure-cli` overflows the Windows 260-char MAX_PATH limit on
+    #    the Microsoft Store Python (azure-cli has a very deep package tree); a
+    #    venv at a short profile-root path sidesteps it (see Install-AzCliViaVenv).
+    if (Test-CliResilient -Name 'az' -Retries 1) {
+        Write-Host "  az CLI: installed (via winget)." -ForegroundColor Green
+    } elseif (Install-AzCliViaVenv) {
+        Write-Host "  az CLI: installed (isolated environment)." -ForegroundColor Green
+    } else {
+        Write-Host "  az CLI: could not be installed automatically (optional -- the workspace works without it)." -ForegroundColor Yellow
+        Write-Host "         Install it later if you need SQL/TDS or non-Fabric tokens: https://aka.ms/installazurecli" -ForegroundColor DarkGray
+    }
 } else {
     Write-Host "  az CLI: found" -ForegroundColor Green
 }
@@ -613,32 +843,21 @@ if (-not $vscodeCmd) {
     Write-Host "  MCP: skipped (VS Code CLI not found)." -ForegroundColor Yellow
     $warnings += "MCP server extensions not checked (VS Code CLI not found) -- needed for full-live/hybrid modes"
 } else {
-    if (-not $installedExts) { $installedExts = & $vscodeCmd --list-extensions 2>$null }
+    $installedExts = Get-InstalledVsCodeExtensions -VsCode $vscodeCmd
     foreach ($mcp in $mcpExtensions) {
-        $mcpFound = $false
-        if ($installedExts -match [regex]::Escape($mcp.Id)) {
-            $mcpFound = $true
-        } elseif (Test-Path "$env:USERPROFILE\.vscode\extensions") {
-            $mcpDirs = Get-ChildItem "$env:USERPROFILE\.vscode\extensions" -Directory -ErrorAction SilentlyContinue |
-                       Where-Object { $_.Name -like ($mcp.Id + '-*') }
-            if ($mcpDirs) { $mcpFound = $true }
-        }
+        $mcpFound = Test-VsCodeExtension -Id $mcp.Id -List $installedExts
         if ($mcpFound) {
             Write-Host "  $($mcp.Name): found" -ForegroundColor Green
         } else {
             Write-Host "  $($mcp.Name): not found -- installing ($($mcp.Desc))..." -ForegroundColor Yellow
-            try {
-                & $vscodeCmd --install-extension $mcp.Id --force 2>&1 | Out-Null
-                $installedExts = & $vscodeCmd --list-extensions 2>$null
-                if ($installedExts -match [regex]::Escape($mcp.Id)) {
-                    Write-Host "  $($mcp.Name): installed" -ForegroundColor Green
-                } else {
-                    Write-Host "  $($mcp.Name): install attempted -- verify in the Extensions view" -ForegroundColor Yellow
-                    $warnings += "$($mcp.Name) ($($mcp.Id)) could not be confirmed -- install it for full-live/hybrid modes"
-                }
-            } catch {
+            if (Install-VsCodeExtension -VsCode $vscodeCmd -Id $mcp.Id) {
+                Write-Host "  $($mcp.Name): installed" -ForegroundColor Green
+                $installedExts = Get-InstalledVsCodeExtensions -VsCode $vscodeCmd
+            } else {
                 Write-Host "  $($mcp.Name): auto-install failed -- install manually:" -ForegroundColor Yellow
                 Write-Host "         code --install-extension $($mcp.Id)" -ForegroundColor DarkGray
+                Write-Host "         (On a corporate network this is usually a TLS/proxy certificate" -ForegroundColor DarkGray
+                Write-Host "          issue -- installing from the VS Code Extensions view works.)" -ForegroundColor DarkGray
                 $warnings += "$($mcp.Name) ($($mcp.Id)) auto-install failed -- run: code --install-extension $($mcp.Id)"
             }
         }
