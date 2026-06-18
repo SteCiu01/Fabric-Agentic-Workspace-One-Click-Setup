@@ -334,59 +334,75 @@ Write-Host "`n  Workspace target: $rootPath" -ForegroundColor White
 # -- Workflow explanation & workspace prompts ---------------------------
 Write-Host ""
 Write-Host "  ================================================================" -ForegroundColor Cyan
-Write-Host "       HOW THE FABRIC GIT INTEGRATION WORKFLOW WORKS" -ForegroundColor Cyan
+Write-Host "       HOW THIS WORKSPACE WORKS -- ONE LIFECYCLE, THREE WAYS" -ForegroundColor Cyan
 Write-Host "  ================================================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  This local folder is your main working directory for Fabric" -ForegroundColor White
-Write-Host "  development. Here's the end-to-end workflow:" -ForegroundColor White
+Write-Host "  This local folder is your main working directory for Fabric." -ForegroundColor White
+Write-Host "  All work shares ONE safe lifecycle, and you can edit on top of" -ForegroundColor White
+Write-Host "  it in THREE ways. Pick whichever fits the task." -ForegroundColor White
 Write-Host ""
-Write-Host "     Microsoft Fabric Online Portal (https://app.powerbi.com)" -ForegroundColor Yellow
-Write-Host "            |" -ForegroundColor DarkGray
-Write-Host "            |  (1) Connected to Fabric extension through VS Code" -ForegroundColor DarkGray
-Write-Host "            v" -ForegroundColor DarkGray
-Write-Host "     Fabric VS Code Extension" -ForegroundColor Yellow
-Write-Host "            |" -ForegroundColor DarkGray
-Write-Host "            |  (2) Pull / Clone items to local folders" -ForegroundColor DarkGray
-Write-Host "            v" -ForegroundColor DarkGray
-Write-Host "     Local Agentic Workspace Folder  <-- YOU ARE HERE" -ForegroundColor Green
-Write-Host "            |" -ForegroundColor DarkGray
-Write-Host "            |  (3) Edit with AI agents & skills in VS Code" -ForegroundColor DarkGray
-Write-Host "            v" -ForegroundColor DarkGray
-Write-Host "     Fabric VS Code Extension" -ForegroundColor Yellow
-Write-Host "            |" -ForegroundColor DarkGray
-Write-Host "            |  (4) Push changes back to Fabric" -ForegroundColor DarkGray
-Write-Host "            v" -ForegroundColor DarkGray
-Write-Host "     Microsoft Fabric Portal  (live & updated, ready to be tested)" -ForegroundColor Yellow
+Write-Host "  THE SHARED LIFECYCLE (common to all three ways):" -ForegroundColor White
 Write-Host ""
-Write-Host "  Step-by-step:" -ForegroundColor White
-Write-Host "    * Use the Fabric extension in VS Code to connect to your" -ForegroundColor DarkGray
-Write-Host "      Fabric workspaces and select which items to download" -ForegroundColor DarkGray
-Write-Host "      (Semantic Models, Notebooks, Pipelines, Dataflows, etc.)" -ForegroundColor DarkGray
-Write-Host "    * Items are cloned into sub-folders under this workspace" -ForegroundColor DarkGray
-Write-Host "    * You edit locally using Copilot agents and skills" -ForegroundColor DarkGray
-Write-Host "    * When ready, use the Fabric extension to push changes" -ForegroundColor DarkGray
-Write-Host "      back to the Fabric portal -- they go live immediately" -ForegroundColor DarkGray
+Write-Host "     Fabric DEV Workspace        <- your changes land here" -ForegroundColor Yellow
+Write-Host "            |  commit (Fabric Portal > Git Integration)" -ForegroundColor DarkGray
+Write-Host "            v" -ForegroundColor DarkGray
+Write-Host "     Azure DevOps (DEV branch)   <- safety net: revert anytime" -ForegroundColor Yellow
+Write-Host "            |  Pull Request (DEV -> PROD)" -ForegroundColor DarkGray
+Write-Host "            v" -ForegroundColor DarkGray
+Write-Host "     Azure DevOps (PROD branch)" -ForegroundColor Yellow
+Write-Host "            |  sync" -ForegroundColor DarkGray
+Write-Host "            v" -ForegroundColor DarkGray
+Write-Host "     Fabric PROD Workspace       <- stable production" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "  Git versioning:" -ForegroundColor White
-Write-Host "    * This workspace is initialized with Git, so every change" -ForegroundColor DarkGray
-Write-Host "      you make is tracked locally with full commit history" -ForegroundColor DarkGray
-Write-Host "    * You can revert to any previous version at any time" -ForegroundColor DarkGray
+Write-Host "  Whatever editing method you use, changes land in the same DEV" -ForegroundColor White
+Write-Host "  workspace and are captured by the same DevOps commit -- so a" -ForegroundColor White
+Write-Host "  revert always restores it. That is why all three ways are" -ForegroundColor White
+Write-Host "  equally safe." -ForegroundColor White
+Write-Host ""
+Write-Host "  ----------------------------------------------------------------" -ForegroundColor Cyan
+Write-Host "  THE THREE WAYS OF WORKING" -ForegroundColor Cyan
+Write-Host "  ----------------------------------------------------------------" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  A) FULL LOCAL  (file-first -- the default)" -ForegroundColor Green
+Write-Host "       Fabric Portal --(extension: pull)--> local files" -ForegroundColor DarkGray
+Write-Host "       --> edit with AI agents or by hand --(push)--> Fabric DEV." -ForegroundColor DarkGray
+Write-Host "       * Pull items (Semantic Models, Notebooks, Pipelines, ...)" -ForegroundColor DarkGray
+Write-Host "         into sub-folders here using the Fabric extension." -ForegroundColor DarkGray
+Write-Host "       * Edit locally with Copilot agents & skills (TMDL, DAX," -ForegroundColor DarkGray
+Write-Host "         pipeline JSON, notebooks); push back and test in portal." -ForegroundColor DarkGray
+Write-Host "       Best for bulk/structured edits, diffs, offline work." -ForegroundColor DarkGray
+Write-Host "       Needs only: Fabric extension + Git." -ForegroundColor DarkGray
+Write-Host ""
+Write-Host "  B) FULL LIVE  (in-workspace -- no local round-trip)" -ForegroundColor Green
+Write-Host "       Agents act directly on the live DEV workspace via Fabric" -ForegroundColor DarkGray
+Write-Host "       REST (updateDefinition) + the two MCP servers." -ForegroundColor DarkGray
+Write-Host "       * Run DAX (EVALUATE) on running models: compare TEST vs PROD." -ForegroundColor DarkGray
+Write-Host "       * Read real deployed GUIDs / SQL endpoints; edit in place;" -ForegroundColor DarkGray
+Write-Host "         create items." -ForegroundColor DarkGray
+Write-Host "       Needs: Fabric MCP + Power BI model MCP servers, plus fab/az." -ForegroundColor DarkGray
+Write-Host ""
+Write-Host "  C) HYBRID  (local + live)" -ForegroundColor Green
+Write-Host "       Mix both in one session -- some items as files, others live." -ForegroundColor DarkGray
+Write-Host "       GOLDEN RULE: keep local = live workspace. Each session pull" -ForegroundColor DarkGray
+Write-Host "       only what you need, do your mixed work, then re-pull (or" -ForegroundColor DarkGray
+Write-Host "       clean up local) before a new job so local = live workspace" -ForegroundColor DarkGray
+Write-Host "       and you avoid drift." -ForegroundColor DarkGray
+Write-Host ""
+Write-Host "  Diagrams: assets\workflow-mode-local|live|hybrid.svg  (see README)." -ForegroundColor DarkGray
+Write-Host ""
+Write-Host "  Git versioning: this workspace is initialized with Git, so every" -ForegroundColor White
+Write-Host "  local change is tracked with full history and can be reverted." -ForegroundColor White
 Write-Host ""
 Write-Host "  PRO TIP:" -ForegroundColor Magenta
-Write-Host "    Connect your Fabric workspaces to Azure DevOps (or GitHub)" -ForegroundColor DarkGray
-Write-Host "    for an extra layer of backup and version control. This lets you:" -ForegroundColor DarkGray
-Write-Host "    * Revert any push that went wrong in Fabric" -ForegroundColor DarkGray
-Write-Host "    * Promote changes through dev stages (DEV -> TEST -> PROD)" -ForegroundColor DarkGray
-Write-Host "    * Keep a centralized backup of all your Fabric items" -ForegroundColor DarkGray
-Write-Host "    Set this up in Fabric Portal > Workspace Settings > Git Integration" -ForegroundColor DarkGray
+Write-Host "    Connect your Fabric workspaces to Azure DevOps (or GitHub) for" -ForegroundColor DarkGray
+Write-Host "    backup + gated DEV -> TEST -> PROD promotion. Set this up in" -ForegroundColor DarkGray
+Write-Host "    Fabric Portal > Workspace Settings > Git Integration." -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "  PRO TIP:" -ForegroundColor Magenta
-Write-Host "    Install the 'Fabric Data Engineer Remote' extension to execute" -ForegroundColor DarkGray
-Write-Host "    notebook cells directly against remote Spark from VS Code." -ForegroundColor DarkGray
-Write-Host "    This enables a powerful agentic loop: the AI agent can run code," -ForegroundColor DarkGray
-Write-Host "    inspect the output, and iteratively refine -- all without leaving" -ForegroundColor DarkGray
-Write-Host "    VS Code or pushing to the portal first." -ForegroundColor DarkGray
-Write-Host "    Install via: code --install-extension synapsevscode.vscode-synapse-remote" -ForegroundColor DarkGray
+Write-Host "    Install the 'Fabric Data Engineer Remote' extension to run" -ForegroundColor DarkGray
+Write-Host "    notebook cells against remote Spark from VS Code (agentic" -ForegroundColor DarkGray
+Write-Host "    run/inspect loop without leaving the editor)." -ForegroundColor DarkGray
+Write-Host "    Install: code --install-extension synapsevscode.vscode-synapse-remote" -ForegroundColor DarkGray
 Write-Host ""
 
 # -- Ask how many workspaces to scaffold ---------------------------------
@@ -582,6 +598,52 @@ if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
         -ManualUrl "https://aka.ms/installazurecli" | Out-Null
 } else {
     Write-Host "  az CLI: found" -ForegroundColor Green
+}
+
+# -- MCP server extensions for full-live / hybrid modes (auto-installed) ------
+# These two VS Code extensions provide the MCP servers the agents use for the
+# full-live and hybrid ways of working. They are optional for full-LOCAL mode.
+Write-Host ""
+Write-Host "  Checking MCP server extensions (for full-live / hybrid modes)..." -ForegroundColor Cyan
+$mcpExtensions = @(
+    @{ Id = 'fabric.vscode-fabric-mcp-server';        Name = 'Fabric MCP server';                  Desc = 'items, OneLake, tables, definitions' },
+    @{ Id = 'analysis-services.powerbi-modeling-mcp';  Name = 'Power BI semantic-model MCP server';  Desc = 'live XMLA DAX + model edits' }
+)
+if (-not $vscodeCmd) {
+    Write-Host "  MCP: skipped (VS Code CLI not found)." -ForegroundColor Yellow
+    $warnings += "MCP server extensions not checked (VS Code CLI not found) -- needed for full-live/hybrid modes"
+} else {
+    if (-not $installedExts) { $installedExts = & $vscodeCmd --list-extensions 2>$null }
+    foreach ($mcp in $mcpExtensions) {
+        $mcpFound = $false
+        if ($installedExts -match [regex]::Escape($mcp.Id)) {
+            $mcpFound = $true
+        } elseif (Test-Path "$env:USERPROFILE\.vscode\extensions") {
+            $mcpDirs = Get-ChildItem "$env:USERPROFILE\.vscode\extensions" -Directory -ErrorAction SilentlyContinue |
+                       Where-Object { $_.Name -like ($mcp.Id + '-*') }
+            if ($mcpDirs) { $mcpFound = $true }
+        }
+        if ($mcpFound) {
+            Write-Host "  $($mcp.Name): found" -ForegroundColor Green
+        } else {
+            Write-Host "  $($mcp.Name): not found -- installing ($($mcp.Desc))..." -ForegroundColor Yellow
+            try {
+                & $vscodeCmd --install-extension $mcp.Id --force 2>&1 | Out-Null
+                $installedExts = & $vscodeCmd --list-extensions 2>$null
+                if ($installedExts -match [regex]::Escape($mcp.Id)) {
+                    Write-Host "  $($mcp.Name): installed" -ForegroundColor Green
+                } else {
+                    Write-Host "  $($mcp.Name): install attempted -- verify in the Extensions view" -ForegroundColor Yellow
+                    $warnings += "$($mcp.Name) ($($mcp.Id)) could not be confirmed -- install it for full-live/hybrid modes"
+                }
+            } catch {
+                Write-Host "  $($mcp.Name): auto-install failed -- install manually:" -ForegroundColor Yellow
+                Write-Host "         code --install-extension $($mcp.Id)" -ForegroundColor DarkGray
+                $warnings += "$($mcp.Name) ($($mcp.Id)) auto-install failed -- run: code --install-extension $($mcp.Id)"
+            }
+        }
+    }
+    Write-Host "  (MCP servers power full-live / hybrid modes; full-local mode does not need them.)" -ForegroundColor DarkGray
 }
 
 if ($missing.Count -gt 0) {
@@ -2467,6 +2529,42 @@ Mapping (free-text task -> best specialist):
 
 Suggest only ONE switch per request, and never block: if the user prefers to
 stay, proceed inline using the skill discovery above.
+
+---
+
+## Working modes (local / live / hybrid)
+
+This workspace can change Fabric in three ways. They are EQUALLY SAFE: the Azure
+DevOps commit captures workspace state regardless of how an edit was made, so a
+revert always restores it. Choose per task; default to file-first.
+
+- **A. Full local (file-first, default).** Pull items to local files, edit them,
+  push back via the Fabric extension. Prefer this for versioned items and for bulk
+  or structured edits.
+- **B. Full live (in-workspace).** Act directly on the live DEV workspace via
+  Fabric REST (`fab api ... updateDefinition`) and MCP servers. Use this for live
+  DAX data comparison (TEST vs PROD), reading real deployed GUIDs / SQL endpoints,
+  quick in-place fixes, and creating items. Requires the Fabric MCP server and the
+  Power BI semantic-model MCP server (plus `fab`/`az`); if they are not configured,
+  say so and fall back to mode A.
+- **C. Hybrid (local + live).** Mix both in one session.
+
+### Hybrid discipline (avoid drift)
+
+- Default to FILE-FIRST for any item that is versioned locally.
+- Before a live edit, ANNOUNCE it (which item, which mechanism) so the user knows
+  the change is not yet reflected in local files.
+- After live edits, RE-PULL the affected items (or tell the user to) so local = live workspace.
+- At the start of a NEW job, ensure local = live workspace first: re-pull, or clean up local.
+- Never silently edit live an item the user is also editing as local files.
+
+### Live-mode tools
+
+- `fab` CLI: control plane + OneLake/data plane (read the CLI policy skill first).
+- `az` CLI: fallback for SQL/TDS and non-Fabric token audiences.
+- Fabric MCP server: items, OneLake files/tables, item definitions.
+- Power BI semantic-model MCP server: live XMLA - run DAX (`EVALUATE`) and make
+  transactional model edits on running models.
 
 ---
 
