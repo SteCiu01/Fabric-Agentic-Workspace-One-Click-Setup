@@ -7,10 +7,10 @@ Contributions and feedback welcome.
 
 **Zero to fully configured in under 5 minutes.**
 
-Double-click the `.bat` file, answer a few questions, and you have a complete
-Microsoft Fabric agentic development environment with eight AI
-agents, custom skills for TMDL and pipeline authoring, and integration with
-two open-source skill repositories — all inside VS Code.
+Double-click the `.bat` file, answer a few questions, and get an opinionated
+Microsoft Fabric agentic workspace in VS Code — with eight Copilot agents,
+three embedded Fabric skills, two curated open-source skill sources, optional
+CLI/MCP live tooling, and a governed DEV-to-PROD workflow.
 
 ---
 
