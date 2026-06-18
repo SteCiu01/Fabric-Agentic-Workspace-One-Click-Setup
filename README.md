@@ -5,7 +5,7 @@
 Pre-release — functional and tested, evolving fast.
 Contributions and feedback welcome.
 
-**Zero to fully configured in under 2 minutes.**
+**Zero to fully configured in under 5 minutes.**
 
 Double-click the `.bat` file, answer a few questions, and you have a complete
 Microsoft Fabric agentic development environment with eight AI
