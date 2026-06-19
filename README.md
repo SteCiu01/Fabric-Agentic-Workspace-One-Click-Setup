@@ -18,6 +18,26 @@ CLI/MCP live tooling, and a governed DEV-to-PROD workflow.
   <img src="assets/architecture-overview.png" alt="Fabric Agentic Workspace — Architecture Overview" width="100%"/>
 </p>
 
+## Installation demo
+
+The video below demonstrates the one-click installation flow: launch the
+installer, answer the setup prompts, let the workspace scaffold, and open the
+configured VS Code environment with agents, skills, and optional live tooling
+ready to use.
+
+<p align="center">
+  <video src="assets/Installation-Video.mp4" controls width="100%">
+    Your browser does not support the video tag. You can watch the demo at <a href="assets/Installation-Video.mp4">assets/Installation-Video.mp4</a>.
+  </video>
+</p>
+
+In this recording, the main requirements are already installed. If they are not
+present on your machine, the installer will attempt to install them
+automatically. 
+
+⚠️ The Azure CLI (`az`) is the dependency most likely to take longer
+when it needs to be installed from scratch.
+
 ---
 
 ## Why this exists
@@ -354,7 +374,7 @@ personal files completely untouched.
 Everything in this workspace sits on top of one lifecycle. It's the **shared backbone for all [three ways of working](#three-ways-of-working)** — only the *editing* step differs between them; everything from the DEV workspace onward is identical. The lifecycle uses Fabric's native Git integration plus Azure DevOps to take a change safely from idea to production.
 
 <p align="center">
-  <img src="assets/fabric-git-workflow.svg" alt="Fabric development lifecycle — edit the DEV workspace (3 ways) → commit to Azure DevOps → PR → Azure DevOps PROD → sync → Fabric PROD" width="100%"/>
+  <img src="assets/fabric-git-workflow.png" alt="Fabric development lifecycle — edit the DEV workspace (3 ways) → commit to Azure DevOps → PR → Azure DevOps PROD → sync → Fabric PROD" width="100%"/>
 </p>
 
 **The lifecycle, end to end:**
@@ -395,7 +415,7 @@ Edit Fabric items as files on disk, then push them back. Best for bulk/structure
 4. **Test in the Fabric portal**, making any manual portal amendments if needed, then commit to Azure DevOps (lifecycle step 2 above).
 
 <p align="center">
-  <img src="assets/workflow-mode-local.svg" alt="Mode A — Full Local: VS Code local files ↔ Fabric DEV via the Fabric extension, committed to Azure DevOps, promoted to PROD" width="100%"/>
+  <img src="assets/workflow-mode-local.png" alt="Mode A — Full Local: VS Code local files ↔ Fabric DEV via the Fabric extension, committed to Azure DevOps, promoted to PROD" width="100%"/>
 </p>
 
 #### B — Full live (in-workspace — no local round-trip)
@@ -408,7 +428,7 @@ Agents act directly on the running DEV workspace, with no files pulled down. Bes
 4. **Test in the portal**, then commit to Azure DevOps as usual (lifecycle step 2).
 
 <p align="center">
-  <img src="assets/workflow-mode-live.svg" alt="Mode B — Full Live: VS Code agents read/write the live Fabric DEV workspace via REST, XMLA and MCP, committed to Azure DevOps, promoted to PROD" width="100%"/>
+  <img src="assets/workflow-mode-live.png" alt="Mode B — Full Live: VS Code agents read/write the live Fabric DEV workspace via REST, XMLA and MCP, committed to Azure DevOps, promoted to PROD" width="100%"/>
 </p>
 
 #### C — Hybrid (local + live)
@@ -422,7 +442,7 @@ Mix both in one session — some items edited as local files, others touched liv
 > **Golden rule — keep local = live workspace.** Each session, pull locally **only** the items you need, do your work, then **re-pull (or clean up local) before a new job** so your local folder exactly matches live and you avoid drift.
 
 <p align="center">
-  <img src="assets/workflow-mode-hybrid.svg" alt="Mode C — Hybrid: VS Code local files and live tools both converge on Fabric DEV, committed to Azure DevOps, promoted to PROD, with a keep-local-equals-live golden rule" width="100%"/>
+  <img src="assets/workflow-mode-hybrid.png" alt="Mode C — Hybrid: VS Code local files and live tools both converge on Fabric DEV, committed to Azure DevOps, promoted to PROD, with a keep-local-equals-live golden rule" width="100%"/>
 </p>
 
 ---
