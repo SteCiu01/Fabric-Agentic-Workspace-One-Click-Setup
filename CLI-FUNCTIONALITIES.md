@@ -6,15 +6,34 @@
 > (`fab`)**; **Azure CLI (`az`)** is a documented **fallback** for the few things
 > `fab` does not cover (SQL/TDS queries and non-Fabric token audiences).
 
-This document is an extensive, categorised catalogue of what you can do once a CLI
-is installed, with a small example for each item. Prefer the `fab` example; the
-`az` / `sqlcmd` examples are shown only where they are the right (or only) tool.
+This document is a practical, opinionated catalogue of the CLI actions that are
+most useful in this workspace. It focuses on the commands a Fabric developer is
+most likely to reach for during local, live, or hybrid agent-assisted work:
+identity checks, item export/import, job runs, REST calls, OneLake/table
+operations, Git/ALM tasks, and the few fallback cases where `az` or `sqlcmd` are
+still the better tool.
+
+It is not intended to be a permanent exhaustive reference for every Fabric,
+Power BI, Azure, or SQL command. Command groups and flags evolve, especially
+around newer Fabric APIs and preview features. Treat the examples here as the
+high-value working set, then confirm exact syntax with `fab --help`,
+`fab <group> --help`, the Azure CLI help, or the official Microsoft references
+linked below.
 
 - **Install `fab`** (recommended): `pip install ms-fabric-cli` (Python 3.10–3.13). Repo: https://github.com/microsoft/fabric-cli
 - **Install `az`** (fallback): https://aka.ms/installazurecli
 
+Official references:
+
+- Microsoft Fabric CLI: https://github.com/microsoft/fabric-cli
+- Microsoft Fabric REST API: https://learn.microsoft.com/en-us/rest/api/fabric/
+- Microsoft Fabric Git integration: https://learn.microsoft.com/en-us/fabric/cicd/git-integration/intro-to-git-integration
+- Microsoft Fabric Data Factory activity overview: https://learn.microsoft.com/en-us/fabric/data-factory/activity-overview
+- Microsoft Fabric VS Code extension: https://marketplace.visualstudio.com/items?itemName=fabric.vscode-fabric
+- Azure CLI reference: https://learn.microsoft.com/en-us/cli/azure/
+
 The agents read `.github/skills/fabric-cli-policy/SKILL.md` for the decision rule
-before any CLI/REST task. This file is the human-readable companion to that skill. 
+before any CLI/REST task. This file is the human-readable companion to that skill.
 
 ---
 

@@ -2,15 +2,16 @@
 
 [![Latest Release](https://img.shields.io/github/v/release/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup?include_prereleases&label=version)](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/releases)
 
-Pre-release — functional and tested, evolving fast.
+Pre-release — used regularly by the maintainer in real Fabric work, evolving fast.
 Contributions and feedback welcome.
 
-**Zero to fully configured in under 5 minutes.**
+**Bootstrap a Fabric-ready Copilot agent workspace for VS Code.**
 
-Double-click the `.bat` file, answer a few questions, and get an opinionated
-Microsoft Fabric agentic workspace in VS Code — with eight Copilot agents,
-three embedded Fabric skills, two curated open-source skill sources, optional
-CLI/MCP live tooling, and a governed DEV-to-PROD workflow.
+Double-click the `.bat` file, answer a few questions, and scaffold an
+opinionated Microsoft Fabric development workspace in VS Code — with eight
+Copilot agents, three embedded Fabric skills, two curated open-source skill
+sources, optional CLI/MCP live tooling, and guidance for a governed DEV-to-PROD
+workflow.
 
 ---
 
@@ -20,10 +21,9 @@ CLI/MCP live tooling, and a governed DEV-to-PROD workflow.
 
 ## Installation demo
 
-The demo video demonstrates the one-click installation flow: launch the
-installer, answer the setup prompts, let the workspace scaffold, and open the
-configured VS Code environment with agents, skills, and optional live tooling
-ready to use.
+The demo video demonstrates the guided installation flow: launch the installer,
+answer the setup prompts, let the workspace scaffold, and open the configured
+VS Code environment with agents, skills, and optional live tooling ready to use.
 
 <p align="center">
   <img src="assets/Installation-Demo.gif" alt="Installation demo showing the one-click setup flow" width="100%"/>
@@ -64,13 +64,18 @@ Then I thought: *this should be replicable*. Not just for me — for anyone who 
 >
 > **Licensing & provenance:** `skills-for-fabric` is MIT-licensed; `power-bi-agentic-development` is **GPL-3.0** and is used **only as a locally cloned, gitignored reference** that agents read at runtime — it is never copied, AI-rewritten, or redistributed inside this project. The custom embedded skills (`fabric-tmdl`, `fabric-pipelines`, and `fabric-cli-policy`) are **independent, proprietary works original to this repository** — written from scratch (`fabric-tmdl` and `fabric-cli-policy` from my own best practices; `fabric-pipelines` derived from Microsoft sources combined with my working experience) and owned by this project. Always check those repos directly for their own licensing terms and usage conditions.
 >
-> That said — it is a genuinely interesting starting point, and I hope it saves you time and sparks ideas. Feedback, bug reports, and contributions are very welcome.
+> This project is used regularly by the maintainer in real Microsoft Fabric work,
+> including local, live, and hybrid workflows on a locked-down corporate Windows
+> machine. It is still pre-release: validation is currently manual and
+> experience-based rather than backed by a formal automated test suite.
+>
+> That said — it is a practical starting point, and I hope it saves you time and sparks ideas. Feedback, bug reports, and contributions are very welcome.
 
 ---
 
 ## What is this?
 
-This is a **one-click workspace bootstrapper and multi-agent Copilot configuration**
+This is a **guided workspace bootstrapper and multi-agent Copilot configuration**
 for Microsoft Fabric development in VS Code. Instead of manually setting up
 folders, config files, agent definitions, skill references, and cloning
 repositories, you run a single script and everything is ready.
@@ -80,6 +85,22 @@ a **Master Agent** that coordinates session startup and routing, a **Skills
 Maintainer** that keeps everything up to date, and **six specialist agents**
 covering every major Fabric workload — all guided by skills from Microsoft,
 the community, and custom embedded knowledge.
+
+### What this is / is not
+
+This project is:
+
+- A VS Code workspace bootstrapper for Microsoft Fabric developers
+- A Copilot agent and skill configuration bundle
+- A local-first Fabric development accelerator with optional live tooling
+- A repeatable way to package the maintainer's real-world Fabric workflow
+
+This project is not:
+
+- An official Microsoft product
+- A hosted service or SaaS application
+- A replacement for Fabric Git integration, deployment review, or workspace governance
+- A guarantee that AI-generated edits are correct without human review and testing
 
 ---
 
@@ -256,9 +277,9 @@ That's it. Reopen the workspace in VS Code and you're on the latest version.
 
 ## What the agents can do
 
-### Automated session startup
+### Guided session startup
 
-You don't configure anything manually. On your **first message** each session, the master agent automatically:
+You don't configure anything manually. On your **first message** each session, the master agent is instructed to:
 
 1. **Checks skill freshness** — shows when each skill source was last updated locally
 2. **Offers maintenance** — optionally switches to the Skills Maintainer for a light or deep update
@@ -401,7 +422,12 @@ This workspace uses the final layer: **AI agents** that natively understand TMDL
 
 ### Three ways of working
 
-You now have **three ways** to make changes to your Fabric DEV environment. They all share the lifecycle above and are **equally safe** — the safety anchor is the Azure DevOps commit at the **workspace level** (not your local files), so whichever way you edit, edits land in the same DEV workspace and a revert always restores workspace state. Pick whichever fits the task.
+You now have **three ways** to make changes to your Fabric DEV environment.
+They all share the same promotion path: validate in DEV, commit the workspace
+state through Fabric Git integration, review via PR, and sync PROD deliberately.
+That shared lifecycle is the safety anchor. Live and hybrid work still require
+normal engineering discipline: review the generated changes, test in the portal,
+and keep local files aligned with the live workspace.
 
 #### A — Full local (file-first — the default)
 
@@ -483,9 +509,10 @@ The `.gitignore` keeps skill repos and VS Code settings clean.
 **Q: Do I have to edit local files, or can the agents work live in the workspace?**
 A: Both. There are [three ways of working](#three-ways-of-working) — full local
 (file-first), full live (agents act on the running DEV workspace via REST/XMLA +
-MCP), and hybrid. They are equally safe because the Azure DevOps commit captures
-workspace state regardless of how the edit was made. For hybrid, follow the
-golden rule: re-pull (or clean up local) before a new job so local = live workspace.
+MCP), and hybrid. They share the same DEV-to-PROD promotion lifecycle, but live
+and hybrid work still need review, portal testing, and drift discipline. For
+hybrid, follow the golden rule: re-pull (or clean up local) before a new job so
+local = live workspace.
 
 **Q: What do I need for full-live / hybrid mode?**
 A: The two MCP servers (Fabric MCP + Power BI semantic-model MCP), plus `fab`/`az`.
@@ -499,18 +526,19 @@ alongside `fab`/`az`. Full-local mode needs none of these.
 
 | Area | Status |
 |---|---|
-| One-click setup (.bat + .ps1) | **Working** — tested on Windows 10/11 |
-| Master Agent session startup flow | **Working** — skill freshness (real upstream commit dates), `fab`/`az` identity, topic routing, advisory specialist recommendations |
-| Specialist agent routing | **Working** — all 6 specialist agents functional, bulletproof against upstream repo restructuring |
-| Skills Maintainer (light + deep) | **Working** — pull, MS-docs freshness check, unreferenced scan |
-| Custom TMDL skill | **Working** — comprehensive syntax and validation rules |
-| Custom Pipelines skill | **Working** — full activity type reference |
-| Three ways of working (local / live / hybrid) | **Working** — documented with diagrams; installer prints guidance + soft MCP check |
-| Microsoft skills-for-fabric integration | **Working** — cloned and auto-updated |
-| Data-goblin skills integration | **Working** — cloned and auto-updated |
-| Idempotent re-run (update mode) | **Working** — managed files refreshed, user files untouched |
+| One-click setup (.bat + .ps1) | **Battle-tested manually** — used by the maintainer on Windows 10/11, including a locked-down corporate laptop |
+| Master Agent session startup flow | **Implemented as agent instructions** — skill freshness, `fab`/`az` identity, topic routing, advisory specialist recommendations |
+| Specialist agent routing | **Implemented and used regularly** — all 6 specialist agents are configured with dynamic skill discovery for upstream repo restructuring |
+| Skills Maintainer (light + deep) | **Implemented as agent workflow** — pull, MS-docs freshness check, unreferenced scan |
+| Custom TMDL skill | **Used in real work** — comprehensive syntax and validation rules, maintained from practical modelling experience |
+| Custom Pipelines skill | **Used in real work** — activity reference plus operational practices from production pipeline work |
+| Three ways of working (local / live / hybrid) | **Documented and maintainer-used** — diagrams, installer guidance, and soft MCP checks; still requires human review/testing |
+| Microsoft skills-for-fabric integration | **Implemented** — cloned and updated locally when network/Git access allows |
+| Data-goblin skills integration | **Implemented** — cloned and updated locally when network/Git access allows |
+| Idempotent re-run (update mode) | **Implemented** — managed files refreshed, user files untouched |
+| Automated regression tests | **Not yet** — validation is currently manual and experience-based |
 
-This is a pre-release. Expect rough edges. If something breaks, [open an issue](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/issues).
+This is a pre-release. It is genuinely useful today, but expect rough edges. If something breaks, [open an issue](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/issues).
 
 ---
 
