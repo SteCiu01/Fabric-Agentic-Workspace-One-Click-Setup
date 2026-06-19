@@ -20,15 +20,13 @@ CLI/MCP live tooling, and a governed DEV-to-PROD workflow.
 
 ## Installation demo
 
-The video below demonstrates the one-click installation flow: launch the
+The demo video demonstrates the one-click installation flow: launch the
 installer, answer the setup prompts, let the workspace scaffold, and open the
 configured VS Code environment with agents, skills, and optional live tooling
 ready to use.
 
 <p align="center">
-  <video src="assets/Installation-Video.mp4" controls width="100%">
-    Your browser does not support the video tag. You can watch the demo at <a href="assets/Installation-Video.mp4">assets/Installation-Video.mp4</a>.
-  </video>
+  <a href="assets/Installation-Video.mp4"><strong>Watch the installation demo video</strong></a>
 </p>
 
 In this recording, the main requirements are already installed. If they are not
