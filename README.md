@@ -26,7 +26,7 @@ configured VS Code environment with agents, skills, and optional live tooling
 ready to use.
 
 <p align="center">
-  <a href="assets/Installation-Video.mp4"><strong>Watch the installation demo video</strong></a>
+  <img src="assets/Installation-Demo.gif" alt="Installation demo showing the one-click setup flow" width="100%"/>
 </p>
 
 In this recording, the main requirements are already installed. If they are not
