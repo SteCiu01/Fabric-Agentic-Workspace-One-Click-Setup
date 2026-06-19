@@ -14,7 +14,7 @@ is installed, with a small example for each item. Prefer the `fab` example; the
 - **Install `az`** (fallback): https://aka.ms/installazurecli
 
 The agents read `.github/skills/fabric-cli-policy/SKILL.md` for the decision rule
-before any CLI/REST task. This file is the human-readable companion to that skill.
+before any CLI/REST task. This file is the human-readable companion to that skill. 
 
 ---
 
