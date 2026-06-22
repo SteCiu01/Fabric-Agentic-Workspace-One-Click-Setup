@@ -1239,6 +1239,102 @@ Multi-line DAX is enclosed in **triple backticks** after `=`:
 
 ---
 
+## Direct Lake: re-pointing a table to a different source -- `sourceLineageTag` MUST follow `entityName`
+
+A Direct Lake model table has **two independent identities**:
+
+1. **Model/display name** -- e.g. `'Table One'`. What DAX, relationships, and report
+   visuals reference. Pure label; safe to rename without touching the source.
+2. **Source binding** -- the partition's `source.entityName`, e.g. `TABLE_ONE`. The
+   physical Lakehouse/Warehouse object the table actually reads.
+
+There is also a **lineage anchor** at table level: `sourceLineageTag: [dbo].[Table One]`.
+This is what the web **"Edit tables" / "Manage tables"** dialog uses to reconcile
+"is this physical object already in my model?" -- it matches by lineage, **NOT** by the
+model name and **NOT** by `entityName`.
+
+### The trap
+
+You have `Table One` in the Lakehouse and `'Table One'` in the model. You then re-point
+the model table to a NEW physical object `TABLE_ONE` (rename in LH, or swap to a new
+table/view) by editing only the partition:
+
+```tmdl
+	partition 'Table One' = entity
+		mode: directLake
+		source
+			entityName: TABLE_ONE        <- changed
+			schemaName: dbo
+			expressionSource: DatabaseQuery
+```
+
+...but you leave the table header stale:
+
+```tmdl
+table 'Table One'
+	sourceLineageTag: [dbo].[Table One]   <- STILL the OLD physical name -> MISMATCH
+```
+
+Now `entityName` (`TABLE_ONE`) and `sourceLineageTag` (`[dbo].[Table One]`) disagree.
+The model still queries fine, **but the Edit tables dialog breaks**: it reconciles your
+table to the old `[dbo].[Table One]` anchor and lists the real `TABLE_ONE` as a
+separate, **unchecked "not added"** entry -- a phantom duplicate. If you then
+**uncheck your real table** there you **DELETE it** (its curated/renamed columns AND
+every relationship that points at it); **checking the phantom `TABLE_ONE`** adds a bare
+table with raw source column names -> every measure/relationship referencing
+`'Table One'` (or its friendly column names) **breaks**.
+
+### The fix -- change BOTH, not just the connection source
+
+When you rebind a Direct Lake table to a different physical object, update **all** of:
+
+1. Partition `source.entityName` (and `schemaName`) -> the new physical object.
+2. Table-level `sourceLineageTag` -> `[<schema>].[<NEW_PHYSICAL_NAME>]`.
+3. Any renamed columns' `sourceColumn` + `sourceLineageTag` -> the new physical
+   column names (the friendly `column 'Name'` stays as-is; only the source pointers move).
+
+```tmdl
+table 'Table One'
+	sourceLineageTag: [dbo].[TABLE_ONE]   <- aligned to entityName
+	...
+	partition 'Table One' = entity
+		mode: directLake
+		source
+			entityName: TABLE_ONE
+			schemaName: dbo
+			expressionSource: DatabaseQuery
+```
+
+After alignment the dialog recognises `TABLE_ONE` as already-checked and the phantom
+duplicate disappears -- while the model keeps the friendly name `'Table One'`.
+
+> **WARNING -- alignment can trigger a silent rename.** Once `sourceLineageTag`
+> matches the physical name, the Edit tables dialog reconciles by that anchor and, on
+> the next **apply/confirm**, will **rename the model table's display name to the raw
+> physical name** (`'Table One'` -> `TABLE_ONE`). The curated columns survive, but every
+> measure/relationship that references the **friendly** name now reports
+> **`Missing_References`** (e.g. *"(Table One) SomeColumn ... Missing_References"*).
+> This is a *rename*, not a delete -- diagnose it with
+> `EVALUATE INFO.TABLES()` (look for raw names where friendly ones should be).
+> **Fix:** rename the table back to the friendly name in TMDL or via XMLA
+> (`table_operations Rename`, `currentName: TABLE_ONE` -> `newName: Table One`);
+> `entityName` and `sourceLineageTag` stay on the physical object. After the rename all
+> references resolve again. Then **stop using the Edit tables dialog** on these tables.
+
+### Rules of thumb
+
+- **Manage renamed/rebound Direct Lake tables via TMDL, not the Edit tables dialog.**
+  That dialog is a blunt add/remove tool; with a friendly-named table whose source was
+  swapped it will always offer the raw physical object as "new".
+- If you must add a genuinely new LH table, add it via the dialog FIRST, then rename it
+  in TMDL afterwards -- never uncheck an existing renamed one.
+- `sourceLineageTag` is metadata only (lineage/refresh mapping); editing it does NOT
+  change data or DAX, so re-aligning it is a safe, reversible fix.
+- A leftover SQL view literally named `[dbo].[Table One]` can still appear unchecked in
+  the dialog after alignment -- harmless; just don't tick it.
+
+---
+
 ## Relationships (relationships.tmdl)
 
 ### Standard (many-to-one)
@@ -1330,6 +1426,7 @@ docs - this skill intentionally does not duplicate that depth.
 6. Never wrap DAX in string quotes
 7. Never omit the partition block
 8. Single-quote names with spaces: `'My Table'`
+9. Never change a Direct Lake table's partition `entityName` without also updating its table-level `sourceLineageTag` (see "Direct Lake: re-pointing a table to a different source")
 
 ---
 
@@ -1363,6 +1460,7 @@ docs - this skill intentionally does not duplicate that depth.
 - [ ] **lineageTags unchanged** -- existing tags not modified
 - [ ] **New table?** -> `ref table` added to `model.tmdl`
 - [ ] **New relationship?** -> in `relationships.tmdl` only
+- [ ] **Rebound a Direct Lake source?** -> table `sourceLineageTag` aligned to the new `entityName` (`[schema].[PHYSICAL_NAME]`)
 - [ ] **Annotations preserved**
 - [ ] **changedProperty preserved**
 - [ ] **File not in do-not-edit list**

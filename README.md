@@ -13,6 +13,9 @@ Copilot agents, three embedded Fabric skills, two curated open-source skill
 sources, optional CLI/MCP live tooling, and guidance for a governed DEV-to-PROD
 workflow.
 
+> Windows installer (PowerShell + `.bat`); the workspace itself is OS-agnostic
+> once created.
+
 ---
 
 <p align="center">
@@ -119,6 +122,17 @@ upstream projects directly:
 - [microsoft/skills-for-fabric](https://github.com/microsoft/skills-for-fabric)
 - [data-goblin/power-bi-agentic-development](https://github.com/data-goblin/power-bi-agentic-development)
 
+> **Tool vs runtime — don't conflate them.** The **Fabric CLI (`fab`)** is a
+> *tool* the agents actively call (including from Copilot Chat) to work live
+> against a Fabric workspace — it is central to the live and hybrid modes, not an
+> add-on. **GitHub Copilot CLI** and **Claude Code** are something else:
+> alternative *runtimes* to VS Code Copilot Chat. This project targets **Copilot
+> Chat / Agent Mode** and is intentionally a lean, curated workspace — its
+> `.github` holds only the maintainer's agents and skills, with **no plugin
+> hooks, manifests, or bundled plugin items**. That curated shape is exactly why
+> it fits Chat / Agent Mode rather than a hook-based Copilot CLI plugin
+> distribution.
+
 Practical advice: if you work in Copilot CLI or Claude Code plugin mode, avoid
 installing every available plugin into one crowded workspace. Plugins can bring
 their own agents, skills, hooks, and instructions; too many unrelated plugins can
@@ -182,7 +196,7 @@ Before running the installer, make sure you have:
 | **Fabric MCP server** | Installer auto-installs (full-live / hybrid) | **Installer installs it where possible** — VS Code extension `fabric.vscode-fabric-mcp-server`, giving agents structured Fabric operations (create/list items, OneLake files & tables, read item definitions). Attempts `code --install-extension ... --force`. Not needed for full-local mode. |
 | **Power BI semantic-model MCP server** | Installer auto-installs (full-live / hybrid) | **Installer installs it where possible** — VS Code extension `analysis-services.powerbi-modeling-mcp`, a live XMLA connection to running models (run DAX `EVALUATE` for live comparison, make transactional model edits). Attempts `code --install-extension ... --force`. Not needed for full-local mode. |
 
-> **CLIs and MCP servers are optional power-ups.** The core full-local workflow — the Fabric extension plus agents editing local files — needs no CLI or MCP server at all. They add terminal, control-plane/data-plane and live-workspace power on top, and are what unlock the **full-live** and **hybrid** ways of working (see [Three ways of working](#three-ways-of-working)). The installer **attempts to install** Python, `fab` (recommended), `az` (fallback), and the two MCP server extensions where possible — and if your environment blocks an optional install (corporate policy, no winget, no network, no Python/pip, or VS Code extension restrictions), it shows a warning for that item and continues. For a deep dive into what you can do once a CLI is installed, see [CLI-FUNCTIONALITIES.md](CLI-FUNCTIONALITIES.md).
+> **CLIs and MCP servers — optional for full-local, required for live & hybrid.** The core full-local workflow — the Fabric extension plus agents editing local files — needs no CLI or MCP server at all. But the **full-live** and **hybrid** ways of working genuinely run on them: the agents call `fab`/`az` and the two MCP servers to read and edit the running workspace (see [Three ways of working](#three-ways-of-working)). The installer **attempts to install** Python, `fab` (recommended), `az` (fallback), and the two MCP server extensions where possible — and if your environment blocks an optional install (corporate policy, no winget, no network, no Python/pip, or VS Code extension restrictions), it shows a warning for that item and continues. For a deep dive into what you can do once a CLI is installed, see [CLI-FUNCTIONALITIES.md](CLI-FUNCTIONALITIES.md).
 
 ---
 
@@ -319,10 +333,10 @@ That's it. Reopen the workspace in VS Code and you're on the latest version.
 
 You don't configure anything manually. On your **first message** each session, the master agent is instructed to:
 
-1. **Checks skill freshness** — shows when each skill source was last updated locally
-2. **Offers maintenance** — optionally switches to the Skills Maintainer for a light or deep update
-3. **Checks identity** — runs `fab auth status` (falling back to `az account show`) to verify your login
-4. **Presents topic selection** — routes you to the specialist agent for your task
+1. **Check skill freshness** — show when each skill source was last updated locally
+2. **Offer maintenance** — optionally switch to the Skills Maintainer for a light or deep update
+3. **Check identity** — run `fab auth status` (falling back to `az account show`) to verify your login
+4. **Present topic selection** — route you to the specialist agent for your task
 
 ### Specialist agents
 
