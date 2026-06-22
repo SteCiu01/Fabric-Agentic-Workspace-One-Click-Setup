@@ -62,7 +62,7 @@ Then I thought: *this should be replicable*. Not just for me — for anyone who 
 >
 > **Third-party skill dependencies:** This workspace clones and depends on two external repositories — [microsoft/skills-for-fabric](https://github.com/microsoft/skills-for-fabric) and [data-goblin/power-bi-agentic-development](https://github.com/data-goblin/power-bi-agentic-development). These are independent open-source projects maintained by their respective owners. This project has no control over their content, availability, or future changes. The agents are **resilient to these repos restructuring or renaming their internal folders** — skills are discovered dynamically at runtime (list the repo root, search by keyword) rather than from fixed paths. However, if a whole repository is **renamed, moved, or removed** at the GitHub level, or its history diverges so `git pull --ff-only` fails, the clone/update step will break until the references are updated.
 >
-> **Licensing & provenance:** `skills-for-fabric` is MIT-licensed; `power-bi-agentic-development` is **GPL-3.0** and is used **only as a locally cloned, gitignored reference** that agents read at runtime — it is never copied, AI-rewritten, or redistributed inside this project. The custom embedded skills (`fabric-tmdl`, `fabric-pipelines`, and `fabric-cli-policy`) are **independent, proprietary works original to this repository** — written from scratch (`fabric-tmdl` and `fabric-cli-policy` from my own best practices; `fabric-pipelines` derived from Microsoft sources combined with my working experience) and owned by this project. Always check those repos directly for their own licensing terms and usage conditions.
+> **Licensing & provenance:** `skills-for-fabric` is MIT-licensed; `power-bi-agentic-development` is **GPL-3.0** and is used **only as a locally cloned, gitignored reference** that agents read at runtime — it is never copied, AI-rewritten, or redistributed inside this project. The custom embedded skills (`fabric-tmdl`, `fabric-pipelines`, and `fabric-cli-policy`) are **original maintainer-authored works in this repository** — written from scratch (`fabric-tmdl` and `fabric-cli-policy` from my own best practices; `fabric-pipelines` derived from Microsoft sources combined with my working experience). Always check those repos directly for their own licensing terms and usage conditions.
 >
 > This project is used regularly by the maintainer in real Microsoft Fabric work,
 > including local, live, and hybrid workflows on a locked-down corporate Windows
@@ -91,7 +91,7 @@ the community, and custom embedded knowledge.
 This project is:
 
 - A VS Code workspace bootstrapper for Microsoft Fabric developers
-- A Copilot agent and skill configuration bundle
+- A GitHub Copilot Chat / Agent Mode workspace configuration bundle
 - A local-first Fabric development accelerator with optional live tooling
 - A repeatable way to package the maintainer's real-world Fabric workflow
 
@@ -99,8 +99,46 @@ This project is not:
 
 - An official Microsoft product
 - A hosted service or SaaS application
+- A GitHub Copilot CLI or Claude Code plugin distribution
 - A replacement for Fabric Git integration, deployment review, or workspace governance
 - A guarantee that AI-generated edits are correct without human review and testing
+
+### Copilot Chat vs CLI/plugin workflows
+
+This workspace is designed first for **VS Code GitHub Copilot Chat / Agent
+Mode**. In that mode, the installer creates local custom agents and embedded
+skills, then clones Microsoft and data-goblin repositories as local reference
+sources that those agents can search and read at runtime.
+
+The upstream repositories also provide plugin-oriented workflows for GitHub
+Copilot CLI, Claude Code, or compatible agent runtimes. This project does not
+redistribute, copy, or install those upstream plugin bundles into its own
+`.github` structure. If you want those CLI/plugin workflows, install and use the
+upstream projects directly:
+
+- [microsoft/skills-for-fabric](https://github.com/microsoft/skills-for-fabric)
+- [data-goblin/power-bi-agentic-development](https://github.com/data-goblin/power-bi-agentic-development)
+
+Practical advice: if you work in Copilot CLI or Claude Code plugin mode, avoid
+installing every available plugin into one crowded workspace. Plugins can bring
+their own agents, skills, hooks, and instructions; too many unrelated plugins can
+compete for context and make the agent less focused. Create or open a
+task-specific project folder and install only the plugins that match that work.
+For example, this is how I would scope a CLI environment, while still deferring
+to the upstream documentation for exact install commands and current behavior:
+
+| Project scope | Consider installing |
+|---|---|
+| PBIP / source-controlled Power BI project | [pbip](https://github.com/data-goblin/power-bi-agentic-development/tree/main/plugins/pbip) |
+| Semantic model / DAX / TMDL-heavy work | [semantic-models](https://github.com/data-goblin/power-bi-agentic-development/tree/main/plugins/semantic-models), optionally [tabular-editor](https://github.com/data-goblin/power-bi-agentic-development/tree/main/plugins/tabular-editor) |
+| Power BI Desktop live-model work | [pbi-desktop](https://github.com/data-goblin/power-bi-agentic-development/tree/main/plugins/pbi-desktop) |
+| Report / PBIR / visual work | [reports](https://github.com/data-goblin/power-bi-agentic-development/tree/main/plugins/reports), optionally [pbip](https://github.com/data-goblin/power-bi-agentic-development/tree/main/plugins/pbip) |
+| Fabric CLI / service operations | [fabric-cli](https://github.com/data-goblin/power-bi-agentic-development/tree/main/plugins/fabric-cli) |
+| Fabric admin / governance work | [fabric-admin](https://github.com/data-goblin/power-bi-agentic-development/tree/main/plugins/fabric-admin) |
+
+In short: use this installer for the VS Code Copilot Chat / Agent Mode
+workspace. For CLI/plugin workflows, use a focused project folder and install
+only the upstream plugins that fit the project.
 
 ---
 
@@ -116,9 +154,9 @@ This project is not:
 | **Fabric App Dev Agent** | Python apps, ODBC, XMLA, REST API integration with Fabric data |
 | **Fabric Reports Agent** | PBIR report editing, visuals, themes — guided by data-goblin report skills |
 | **Fabric Pipelines Agent** | Data Factory pipeline JSON authoring — guided by the custom fabric-pipelines skill |
-| **Custom TMDL Skill** *(proprietary — original to this repo)* | Comprehensive embedded skill covering TMDL syntax, indentation rules, property ordering, Direct Lake patterns, lineageTag rules, and post-edit validation. Written from scratch for this project. |
-| **Custom Pipelines Skill** *(proprietary — original to this repo)* | Full pipeline activity type reference with typeProperties, expression syntax, Variable Library integration, and validation checklist. Authored for this project. |
-| **Custom CLI Policy Skill** *(proprietary — original to this repo)* | Embedded decision policy that tells the agents to prefer the Fabric CLI (`fab`) and fall back to `az`/`sqlcmd` only where needed — with `az rest` → `fab api` translation, a fallback matrix for SQL/TDS and non-Fabric tokens, and guardrails. Written from scratch for this project. |
+| **Custom TMDL Skill** *(original to this repo)* | Comprehensive embedded skill covering TMDL syntax, indentation rules, property ordering, Direct Lake patterns, lineageTag rules, and post-edit validation. Written from scratch for this project. |
+| **Custom Pipelines Skill** *(original to this repo)* | Full pipeline activity type reference with typeProperties, expression syntax, Variable Library integration, and validation checklist. Authored for this project. |
+| **Custom CLI Policy Skill** *(original to this repo)* | Embedded decision policy that tells the agents to prefer the Fabric CLI (`fab`) and fall back to `az`/`sqlcmd` only where needed — with `az rest` → `fab api` translation, a fallback matrix for SQL/TDS and non-Fabric tokens, and guardrails. Written from scratch for this project. |
 | **Microsoft skills-for-fabric** | Git-cloned from [microsoft/skills-for-fabric](https://github.com/microsoft/skills-for-fabric) — Spark, SQL, Eventhouse, medallion, and more |
 | **Data-goblin skills** | Git-cloned from [data-goblin/power-bi-agentic-development](https://github.com/data-goblin/power-bi-agentic-development) by [Kurt Buhler](https://www.linkedin.com/in/kurtbuhler/) — PBIP, DAX, reports, Fabric CLI, Fabric admin |
 | **Git Version Control** | Repository initialised with a clean `.gitignore` and first commit out of the box |
@@ -312,9 +350,9 @@ The skills come from three sources:
 
 | Source | What it covers | Updated |
 |---|---|---|
-| **Custom embedded** (`.github/skills/`) | TMDL syntax, pipeline JSON, CLI policy — *proprietary, original to this repo* | Re-run installer or edit directly |
-| **Microsoft** (`skills-for-fabric/`) | Spark, SQL, Eventhouse, medallion, CLI | Auto on session start |
-| **Data-goblin** — [Kurt Buhler](https://www.linkedin.com/in/kurtbuhler/) (`power-bi-agentic-development/`) | PBIP, DAX, reports, Fabric CLI/admin | Auto on session start |
+| **Custom embedded** (`.github/skills/`) | TMDL syntax, pipeline JSON, CLI policy — original to this repo | Re-run installer or edit directly |
+| **Microsoft** (`skills-for-fabric/`) | Spark, SQL, Eventhouse, medallion, CLI | Offered on session start / via Skills Maintainer |
+| **Data-goblin** — [Kurt Buhler](https://www.linkedin.com/in/kurtbuhler/) (`power-bi-agentic-development/`) | PBIP, DAX, reports, Fabric CLI/admin | Offered on session start / via Skills Maintainer |
 
 > **Why git clone instead of npm install?** Corporate environments typically
 > block npm global installs and require admin approval. This workspace clones
@@ -347,8 +385,10 @@ Fabric Workspaces/
 │   └── skills/
 │       ├── fabric-tmdl/
 │       │   └── SKILL.md                               ← TMDL syntax & rules
-│       └── fabric-pipelines/
-│           └── SKILL.md                               ← pipeline activity reference
+│       ├── fabric-pipelines/
+│       │   └── SKILL.md                               ← pipeline activity reference
+│       └── fabric-cli-policy/
+│           └── SKILL.md                               ← fab-first / az-fallback policy
 ├── .gitignore
 ├── .vscode/
 │   ├── settings.json
@@ -404,7 +444,7 @@ Everything in this workspace sits on top of one lifecycle. It's the **shared bac
 4. **PROD-branch overrides** — the PROD branch holds prod-specific parameters (pipeline schedules turned ON, production connection endpoints, semantic-model parameters). These **persist across merges**, so each new PR brings only the item-logic changes without resetting production configuration.
 5. **Sync to the Fabric PROD workspace** — after the PR is approved and merged, sync the PROD branch via Git Integration. Production is now updated.
 
-**Why it's safe:** the Azure DevOps commit captures workspace state **regardless of how the edit was made**, so you can always revert DEV — and PROD is only ever updated through a deliberate PR + sync.
+**Shared safety anchor:** Fabric Git commits capture the validated DEV workspace state. You can review history and revert DEV when needed; PROD is updated only through a deliberate PR + sync.
 
 ### A bit of history: how Fabric/Power BI work used to flow
 

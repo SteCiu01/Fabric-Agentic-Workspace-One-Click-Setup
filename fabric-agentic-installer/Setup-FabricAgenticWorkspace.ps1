@@ -2,7 +2,7 @@
 .SYNOPSIS
     Fabric Agentic Workspace  -- One-click bootstrap
 .DESCRIPTION
-    Run this script to set up a fully configured Fabric agentic workspace
+    Run this script to set up a guided Fabric agentic workspace
     with a Fabric Master Agent, specialist agents, Microsoft & data-goblin skills,
     custom TMDL and Pipeline skills, and copilot instructions.
     Once complete it opens the folder in VS Code  -- select Fabric Master Agent
@@ -2677,7 +2677,7 @@ in topic selection or described their task).
 
 ---
 
-## Skill Discovery - ALWAYS Dynamic (bulletproof against upstream changes)
+## Skill Discovery - ALWAYS Dynamic (resilient to upstream changes)
 
 Skills live in multiple repositories that rename and restructure folders
 frequently. **NEVER assume you know what skills exist or where they are**, and
@@ -2968,7 +2968,7 @@ You are 3 - Semantic Model Agent, a specialist for Fabric Semantic Model develop
 
 ## Before any task
 
-**Dynamic discovery (bulletproof against upstream changes):** Every cloned-repo
+**Dynamic discovery (resilient to upstream changes):** Every cloned-repo
 path below is a LAST-KNOWN HINT as of install time - the skill repos rename and
 restructure folders often. NEVER assume a path exists: list the repo ROOT first,
 then search downward by keyword to find the current SKILL.md, and pick the closest
@@ -3019,7 +3019,7 @@ You are 4 - Fabric Data Engineer, a specialist for cross-workload data engineeri
 
 ## Before any task
 
-**Dynamic discovery (bulletproof against upstream changes):** Every cloned-repo
+**Dynamic discovery (resilient to upstream changes):** Every cloned-repo
 path below is a LAST-KNOWN HINT as of install time - the skill repos rename and
 restructure folders often. NEVER assume a path exists: list the repo ROOT first,
 then search downward by keyword to find the current SKILL.md, and pick the closest
@@ -3069,7 +3069,7 @@ You are 5 - Fabric Admin, a specialist for Fabric platform administration.
 
 ## Before any task
 
-**Dynamic discovery (bulletproof against upstream changes):** Every cloned-repo
+**Dynamic discovery (resilient to upstream changes):** Every cloned-repo
 path below is a LAST-KNOWN HINT as of install time - the skill repos rename and
 restructure folders often. NEVER assume a path exists: list the repo ROOT first,
 then search downward by keyword to find the current SKILL.md, and pick the closest
@@ -3111,7 +3111,7 @@ You are 6 - Fabric App Dev, a specialist for building applications on top of Fab
 
 ## Before any task
 
-**Dynamic discovery (bulletproof against upstream changes):** Every cloned-repo
+**Dynamic discovery (resilient to upstream changes):** Every cloned-repo
 path below is a LAST-KNOWN HINT as of install time - the skill repos rename and
 restructure folders often. NEVER assume a path exists: list the repo ROOT first,
 then search downward by keyword to find the current SKILL.md, and pick the closest
@@ -3149,7 +3149,7 @@ You are 7 - Fabric Reports Agent, a specialist for report development in Fabric.
 
 ## Before any task
 
-**Dynamic discovery (bulletproof against upstream changes):** Every cloned-repo
+**Dynamic discovery (resilient to upstream changes):** Every cloned-repo
 path below is a LAST-KNOWN HINT as of install time - the skill repos rename and
 restructure folders often. NEVER assume a path exists: list the repo ROOT first,
 then search downward by keyword to find the current SKILL.md, and pick the closest
@@ -3190,7 +3190,7 @@ You are 8 - Fabric Pipelines Agent, a specialist for Data Factory pipelines in F
 
 ## Before any task
 
-**Dynamic discovery (bulletproof against upstream changes):** Every cloned-repo
+**Dynamic discovery (resilient to upstream changes):** Every cloned-repo
 path below is a LAST-KNOWN HINT as of install time - the skill repos rename and
 restructure folders often. NEVER assume a path exists: list the repo ROOT first,
 then search downward by keyword to find the current SKILL.md, and pick the closest
@@ -3353,8 +3353,8 @@ Called from Master Agent or directly.
 | Source | Location | Updated |
 |--------|----------|---------|
 | Custom (TMDL, Pipelines, CLI policy) | `.github/skills/` | Re-run installer |
-| Microsoft skills-for-fabric | `skills-for-fabric/` | Auto on session start |
-| Data-goblin plugins | `power-bi-agentic-development/` | Auto on session start |
+| Microsoft skills-for-fabric | `skills-for-fabric/` | Offered on session start / via Skills Maintainer |
+| Data-goblin plugins | `power-bi-agentic-development/` | Offered on session start / via Skills Maintainer |
 '@
 Write-ManagedFile "$rootPath\AGENTS.md" $agentsReadme
 Write-Host "  Written: AGENTS.md" -ForegroundColor Green
