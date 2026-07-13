@@ -7,11 +7,11 @@ Contributions and feedback welcome.
 
 **Bootstrap a Fabric-ready Copilot agent workspace for VS Code.**
 
-Double-click the `.bat` file, answer a few questions, and scaffold an
-opinionated Microsoft Fabric development workspace in VS Code — with eight
-Copilot agents, three embedded Fabric skills, two curated open-source skill
-sources, optional CLI/MCP live tooling, and guidance for a governed DEV-to-PROD
-workflow.
+> **The 30-second version**
+> - **What** — a one-click installer that scaffolds an opinionated Microsoft Fabric development workspace in VS Code.
+> - **Who it's for** — anyone working in Fabric (semantic models, data engineering, reports, pipelines, admin, app dev, DevOps) who wants Copilot agents that already know the right tools and house conventions.
+> - **How to run** — double-click `Setup-FabricAgenticWorkspace.bat`, answer a few prompts, and let it scaffold.
+> - **What you get** — nine Copilot agents, three embedded Fabric skills plus two curated open-source skill sources, optional CLI/MCP live tooling, and guidance for a governed DEV→PROD workflow.
 
 > Windows installer (PowerShell + `.bat`); the workspace itself is OS-agnostic
 > once created.
@@ -41,6 +41,40 @@ when it needs to be installed from scratch.
 
 ---
 
+## Contents
+
+- [Why this exists](#why-this-exists)
+- [What is this?](#what-is-this)
+  - [What this is / is not](#what-this-is--is-not)
+  - [Copilot Chat vs CLI/plugin workflows](#copilot-chat-vs-cliplugin-workflows)
+- [What you get](#what-you-get)
+- [Agent → tools → skills matrix](#agent--tools--skills-matrix)
+  - [Tool coverage](#tool-coverage)
+- [Agentic design principles](#agentic-design-principles)
+- [Prerequisites](#prerequisites)
+- [Quick start](#quick-start)
+  - [1. Get the files](#1-get-the-files)
+  - [2. Run the installer](#2-run-the-installer)
+  - [3. Start working](#3-start-working)
+  - [4. Keeping it up to date](#4-keeping-it-up-to-date)
+- [What the agents can do](#what-the-agents-can-do)
+  - [Guided session startup](#guided-session-startup)
+  - [Specialist agents](#specialist-agents)
+  - [Skill-based development](#skill-based-development)
+- [Workspace structure](#workspace-structure)
+- [How it works under the hood](#how-it-works-under-the-hood)
+  - [The Fabric development lifecycle (the backbone)](#the-fabric-development-lifecycle-the-backbone)
+  - [A bit of history: how Fabric/Power BI work used to flow](#a-bit-of-history-how-fabricpower-bi-work-used-to-flow)
+  - [Three ways of working](#three-ways-of-working)
+- [FAQ](#faq)
+- [Current status (v0.5.0-pre-release)](#current-status-v050-pre-release)
+- [Contributing](#contributing)
+- [Files in this repository](#files-in-this-repository)
+- [License](#license)
+- [Third-party notices](#third-party-notices)
+
+---
+
 ## Why this exists
 
 This is a personal project — and like most personal projects, it started from a real need.
@@ -49,7 +83,11 @@ I was doing a lot of work across **Microsoft Fabric**: building semantic models,
 
 The **[Microsoft Fabric](https://marketplace.visualstudio.com/items?itemName=fabric.vscode-fabric)** and **[Fabric Data Engineering - Remote](https://marketplace.visualstudio.com/items?itemName=SynapseVSCode.vscode-synapse-remote)** VS Code extensions are great for syncing items locally and running notebooks against remote Spark. But the AI-assisted development experience felt like it could be improved: GitHub Copilot didn't know about my TMDL and DAX best practices — particularly my own conventions around table naming, measure structures, and folder organization. Furthermore data pipeline JSON authoring wasn't really covered anywhere I looked.
 
-So I built a multi-agent workspace that brings everything together. A **master agent** coordinates session startup and routes to **specialist agents** — each focused on a specific Fabric workload (semantic models, data engineering, admin, reports, pipelines, app dev). They all read from what I consider the best skill repositories from the community — Microsoft's [skills-for-fabric](https://github.com/microsoft/skills-for-fabric) and data-goblin's [power-bi-agentic-development](https://github.com/data-goblin/power-bi-agentic-development) — plus **custom embedded skills** for TMDL and data pipeline authoring that I wrote from scratch and keep updating, based on my job and the problems I face there.
+So I built a multi-agent workspace that brings everything together. A **master agent** coordinates session startup and routes to **specialist agents** — each focused on a specific Fabric workload (semantic models, data engineering, admin, reports, pipelines, app dev, and DevOps/ALM). They all read from what I consider the best skill repositories from the community — Microsoft's [skills-for-fabric](https://github.com/microsoft/skills-for-fabric) and data-goblin's [power-bi-agentic-development](https://github.com/data-goblin/power-bi-agentic-development) — plus **custom embedded skills** for TMDL and data pipeline authoring that I wrote from scratch and keep updating, based on my job and the problems I face there.
+
+As I went deeper I realised the **agent → tools → skills** chain matters as much as the agents themselves. So each agent now owns a **minimum, deterministic set of tools** — the right CLI for its workload (`fab`, `az`, `sqlcmd`, `pbir`, Tabular Editor CLI, `pbi-tools`, `gh`, `az devops`) and the MCP servers where they help — instead of a vague "all tools to everyone" pile. Tool availability is discovered once and recorded in a machine-specific `tool-status.json` inventory. An agent then checks what's actually installed, uses it if present, and **falls back cleanly when it isn't** — which is what keeps the whole thing working on locked-down corporate PCs. A custom **`fabric-cli-policy`** skill encodes the decision rule: prefer `fab`, with `az` as a documented fallback. And each agent loads **only the skills its current subtask needs** rather than eagerly reading everything.
+
+This is a **starting point, not a finished system.** This release adds the tools layer (the `tool-status.json` inventory and the per-tool opt-in installer), tightens every agent around its minimum tools and the existing `fabric-cli-policy` skill, and introduces a dedicated **DevOps/ALM agent** (Git Integration, Deployment Pipelines, Azure DevOps & GitHub). More is planned — for example a custom `fabric-devops-policy` skill capturing my real DEV→PROD promotion workflow, and continued tuning of which skills each agent reads. The architecture is deliberately additive so new tools, skills, and agents slot in without breaking the existing ones.
 
 Then I thought: *this should be replicable*. Not just for me — for anyone who works with Fabric and wants an AI-powered development workflow. So I packaged everything into a one-click installer and a shareable agent configuration.
 
@@ -85,7 +123,7 @@ repositories, you run a single script and everything is ready.
 
 Once set up, a team of custom Copilot agents lives inside your workspace:
 a **Master Agent** that coordinates session startup and routing, a **Skills
-Maintainer** that keeps everything up to date, and **six specialist agents**
+Maintainer** that keeps everything up to date, and **seven specialist agents**
 covering every major Fabric workload — all guided by skills from Microsoft,
 the community, and custom embedded knowledge.
 
@@ -161,13 +199,14 @@ only the upstream plugins that fit the project.
 | Component | Description |
 |---|---|
 | **Fabric Workspace Master Agent** | Routing hub — handles session startup (skill check, Azure identity, topic menu), then routes to the right specialist or handles tasks directly with dynamic skill discovery. Can also proactively recommend the best specialist for a free-text request |
-| **Fabric Skills Maintainer Agent** | Light (quick pull) or deep (pull + MS docs freshness check + unreferenced skill scan) maintenance of all skill sources |
+| **Fabric Skills Maintainer Agent** | Light (quick pull + tool-inventory refresh) or deep (pull + tool-inventory refresh + MS docs freshness check + unreferenced skill scan) maintenance of all skill sources |
 | **Semantic Model Agent** | TMDL editing, DAX measures, columns, relationships, partitions — house style from the custom fabric-tmdl skill, syntax/DAX depth from data-goblin (explicit precedence) |
 | **Fabric Data Engineer Agent** | Spark notebooks, SQL warehouse, pipelines, medallion architecture — guided by Microsoft's skills-for-fabric |
 | **Fabric Admin Agent** | Capacity management, governance, security, workspace documentation |
 | **Fabric App Dev Agent** | Python apps, ODBC, XMLA, REST API integration with Fabric data |
 | **Fabric Reports Agent** | PBIR report editing, visuals, themes — guided by data-goblin report skills |
 | **Fabric Pipelines Agent** | Data Factory pipeline JSON authoring — guided by the custom fabric-pipelines skill |
+| **Fabric DevOps Agent** | ALM/DevOps coordination — Fabric Git Integration, Deployment Pipelines, Azure DevOps & GitHub PRs/CI-CD, branch & PR workflows, and conflict resolution on text-based Fabric definitions (not artifact authoring) |
 | **Custom TMDL Skill** *(original to this repo)* | Comprehensive embedded skill covering TMDL syntax, indentation rules, property ordering, Direct Lake patterns, lineageTag rules, and post-edit validation. Written from scratch for this project. |
 | **Custom Pipelines Skill** *(original to this repo)* | Full pipeline activity type reference with typeProperties, expression syntax, Variable Library integration, and validation checklist. Authored for this project. |
 | **Custom CLI Policy Skill** *(original to this repo)* | Embedded decision policy that tells the agents to prefer the Fabric CLI (`fab`) and fall back to `az`/`sqlcmd` only where needed — with `az rest` → `fab api` translation, a fallback matrix for SQL/TDS and non-Fabric tokens, and guardrails. Written from scratch for this project. |
@@ -175,6 +214,107 @@ only the upstream plugins that fit the project.
 | **Data-goblin skills** | Git-cloned from [data-goblin/power-bi-agentic-development](https://github.com/data-goblin/power-bi-agentic-development) by [Kurt Buhler](https://www.linkedin.com/in/kurtbuhler/) — PBIP, DAX, reports, Fabric CLI, Fabric admin |
 | **Git Version Control** | Repository initialised with a clean `.gitignore` and first commit out of the box |
 | **VS Code Configuration** | Settings and tasks pre-configured for the agentic workflow |
+
+---
+
+## Agent → tools → skills matrix
+
+The workspace is **not skill soup**. Each agent has a **bounded purpose**, owns a
+**minimum set of deterministic tools**, and reads **only the skills its current subtask
+needs**. CLIs and MCP servers are *not* listed as Copilot frontmatter tools — they are
+binaries/servers invoked through `execute`, gated on `.github/agent-docs/tool-status.json`
+(a machine-specific, gitignored inventory written by the installer). If a tool is missing,
+the agent degrades gracefully; routing is by **topic**, never by tool availability.
+
+| Agent | Capabilities | Tools used (via `execute`, gated on `tool-status.json`) | Skills / docs used (selective) |
+| ----- | ------------ | ------------------------------------------------------- | ------------------------------ |
+| **1 — Fabric Workspace Master** | Session startup, task classification, routing to specialists, direct handling only when the user stays with Master, anti-soup orchestration | No specialist tool execution by default; reads `tool-status.json` only to inform an inline CLI task | `.github/copilot-instructions.md` + `AGENTS.md` (startup), `agent-docs/starting-flow.md` (startup), `agent-docs/working-flow-reference.md` (direct handling), `fabric-cli-policy` only if handling a CLI task inline |
+| **2 — Fabric Skills Maintainer** | Pull/update external skill repos, check freshness, detect new upstream skills, maintain the local tool inventory | `git` (pulls `skills-for-fabric` + `power-bi-agentic-development`); regenerates `tool-status.json`; tool detection only | No domain skills for delivery; reads `skills-for-fabric/skills/check-updates/` for guidance |
+| **3 — Semantic Model** | TMDL editing, DAX writing/debugging, naming/audit, model validation/BPA/automation | Tabular Editor CLI (`tabularEditor.found`); Power BI semantic-model MCP server (`powerBiModelMcpServer.found`) | `fabric-tmdl` always; data-goblin `dax` only for DAX; `pbip`/`semantic-model` for extra depth; `standardize-naming-conventions` for naming/audit; `tabular-editor` skills only for TE/BPA tasks |
+| **4 — Fabric Data Engineer** | Spark notebooks, SQL warehouse, Eventhouse/KQL, Lakehouse/OneLake/table ops, medallion, pipeline coordination | `fab` (jobs, items, export/import, OneLake); `sqlcmd` (`sqlcmd.found`); `az` non-Fabric fallback; **Fabric MCP server** (`fabricMcpServer.found`) for live item/OneLake reads | `fabric-cli-policy` before any CLI task; **one** relevant `skills-for-fabric` skill per subtask (Spark/SQL/Eventhouse/Medallion); never all at once |
+| **5 — Fabric Admin** | Workspace admin, capacity/governance/security, tenant/admin API ops, inventory & docs | `fab api` (workspace/capacity/admin); `az` non-Fabric fallback | `fabric-cli-policy` before any CLI task; one relevant MS admin/governance skill; data-goblin `fabric-admin` selectively |
+| **6 — Fabric App Dev** | Fabric REST/API integration, SQL endpoint connectivity, XMLA/live-model integration, Python/ODBC patterns | `fab api`; `sqlcmd` (`sqlcmd.found`); Power BI semantic-model MCP server (`powerBiModelMcpServer.found`); `az`/DefaultAzureCredential | `fabric-cli-policy` before REST/API tasks; `skills-for-fabric` SQL consumption skill for endpoint patterns |
+| **7 — Fabric Reports** | PBIR report editing, visual/page/layout changes, binding, themes, design review, report-level DAX, custom visuals | `pbir` CLI (`pbir.found`) for visual/layout/binding/validation; `fab` for report lifecycle (export/import/rebind/clone) | data-goblin `pbir-cli` only with `pbir`; `pbir-format` (in the `pbip` plugin) only for direct JSON edits; `modifying-theme-json` for themes; `pbi-report-design`/`review-report` for design/review; `custom-visuals` for the specific visual; `dax` for report-level DAX |
+| **8 — Fabric Pipelines** | Data Factory pipeline JSON authoring, activity editing, expressions/variables/parameters, run/status/export/import | `fab` (run, status, export, import) | `fabric-pipelines` always; `ITEM-DEFINITIONS-CORE.md` only for deep schema validation, not by default |
+| **9 — Fabric DevOps** | Fabric Git Integration, Deployment Pipelines, Azure DevOps PRs/CI-CD/boards, GitHub PRs/Actions/releases, PBIP DevOps, ALM conflict/PR review of text-based definitions | `fab` (Git Integration / Deployment Pipelines); **Fabric MCP server** (`fabricMcpServer.found`) for live item GUIDs/inspection; `az devops` (`azureDevOpsCliExtension.found`); `gh` (`gh.found`); `pbi-tools` (`pbiTools.found`); `git` | `fabric-cli-policy` before any tool choice; **read-only** selective use of `fabric-tmdl` / `pbir-format` / `fabric-pipelines` **only** to understand structure when resolving conflicts or reviewing PRs — never to author |
+
+### Tool coverage
+
+Every installed/checked tool has a clear agent-level owner — no orphans:
+
+| Tool | Covered by | Status |
+| ---- | ---------- | ------ |
+| `fab` | Agents 4, 5, 6, 7, 8, 9 | Covered |
+| `az` | Agents 4, 5, 6 | Covered |
+| `pbir` | Agent 7 | Covered |
+| Tabular Editor CLI (`TabularEditor*.exe`) | Agent 3 | Covered |
+| `pbi-tools` | Agent 9 | Covered |
+| `sqlcmd` | Agents 4, 6 | Covered |
+| `gh` | Agent 9 | Covered |
+| Azure DevOps CLI extension (`az devops`) | Agent 9 | Covered |
+| Power BI semantic-model MCP server | Agents 3, 6 | Covered |
+| Fabric MCP server | Agents 4, 9 | Covered |
+| `git` | Agents 2, 9 | Covered |
+
+> **Note on `tool-status.json`:** the installer detects each tool (honoring real command
+> names / aliases, e.g. Tabular Editor is `TabularEditor.exe` / `TabularEditor2.exe` /
+> `TabularEditor3.exe`, not `te`) and records `found`, `version`, `command`, `path`,
+> `category`, `installMode`, and a `reason` when missing. Core tools (Python, `fab`, `az`,
+> the two MCP servers) are auto-installed best-effort; the specialist tools (`pbir`,
+> Tabular Editor, `pbi-tools`, `sqlcmd`, `gh`, `az devops`) are **detect → explain
+> provider/purpose → ask Y/N → best-effort install only on Yes**, so nothing heavy is
+> installed silently.
+
+#### Keeping the tool inventory current (auto-detection)
+
+You don't hand-edit `tool-status.json` — it stays current automatically through three
+complementary paths, so a tool you install **after** setup is picked up without fuss:
+
+1. **Re-run the installer (update mode).** Detection runs on every run *before* the
+   "previously declined" check, so a tool you installed yourself is found and flipped to
+   `found: true` on the very next run — even if you'd earlier answered "No" to installing
+   it. Re-running is safe (it never touches your Fabric items) and the recommended way to
+   refresh the whole inventory.
+2. **Ask the Skills Maintainer agent to "refresh the tool inventory".** This re-detects
+   every tool live (`Get-Command` / `--version`, `code --list-extensions`,
+   `az extension list`) and rewrites `tool-status.json` — a lightweight refresh with no
+   full installer run. It only **detects**; it never installs (that stays opt-in).
+3. **Runtime self-correction.** If the JSON is momentarily stale, a specialist agent may
+   do a single live re-check (`Get-Command` / `--version`) for the one tool it needs
+   before falling back — so a freshly installed tool can be used the same session.
+
+---
+
+## Agentic design principles
+
+The agents aren't just prompts with a job title — they're built on a small set of
+**agent-design best practices**, and every one of the nine is held to all of them. This
+is what keeps the workspace effective on real (often locked-down) machines instead of
+falling over the first time a tool is missing or a skill folder gets renamed upstream.
+
+| Principle | What it means | How all nine agents apply it |
+| --------- | ------------- | ---------------------------- |
+| **Bounded scope, single responsibility** | One agent owns one workload; no two agents fight over the same work | Each specialist has a narrow charter; explicit handoffs (e.g. Agent 4 coordinates pipeline *execution* but hands JSON *authoring* to Agent 8; Agent 9 reviews ALM but hands artifact *design* back to Agents 3/7/8) |
+| **Deterministic tool gating** | Never assume a CLI/MCP exists — check first, then use it or fall back | Every agent reads `.github/agent-docs/tool-status.json` and uses a tool only when `<key>.found` is true |
+| **Graceful degradation** | A missing tool slows you down, it never blocks you | Every owned tool has a **documented fallback** (e.g. Tabular Editor → fabric-tmdl checklist; `fab` admin → portal + `az rest`; `pbir` → direct PBIR JSON edit) |
+| **Minimum-necessary context (anti-soup)** | Load only what the current subtask needs, never "read all skills" | Each specialist has a "Skill loading — minimum necessary" block: identify the subtask, load its **one** skill, act |
+| **Topic-based routing** | The right specialist is chosen by *task type*, never by what happens to be installed | Master routes by topic; a missing tool never changes the owner — the specialist falls back instead |
+| **Deterministic startup with self-correction** | Initialization is mandatory, repeatable, and recovers from tool errors | Master runs a **mandatory init protocol** (read instructions → self-check every turn → bottom reminder) and a tool warm-up + retry with a clear VS Code-version recovery message |
+| **Safety guardrails** | Irreversible actions get a confirmation; secrets never get hardcoded | Confirm-before-destructive on capacity/deploy/Git ops; IDs & secrets externalized; Agent 9 reviews others' definitions **read-only** and never force-pushes |
+| **Skill precedence on conflict** | When two sources disagree, the tie-break is explicit | House style (`fabric-tmdl`) wins on *"how we do it here"*; upstream skills win on *"is this valid?"* |
+| **Resilient discovery** | Don't fail just because an upstream folder moved | Cloned-repo paths are treated as **last-known hints**: list the repo root, search by keyword for the current `SKILL.md`, pick the closest match |
+
+> **The standout: the Master's startup protocol.** The Master agent assumes the failure
+> mode LLMs actually have — *skipping initialization when the user's first message already
+> contains a task*. So it wraps init in three reinforcing layers: an **unconditional**
+> "read these files first," a **self-check repeated before every response**, and a
+> **bottom-of-prompt reminder** that explicitly names the skip-initialization tendency.
+> A task in the first message is saved, setup runs to completion, and only then is the
+> task answered. This is the single most important reason sessions start consistently.
+
+These principles are deliberately enforced *inside the agent bodies* (the
+[Agent → tools → skills matrix](#agent--tools--skills-matrix) above shows the per-agent
+result), so they hold no matter which agent you land on.
 
 ---
 
@@ -195,8 +335,16 @@ Before running the installer, make sure you have:
 | **az CLI** | Installer auto-installs (fallback) | **Installer installs it where possible** — only needed for SQL/TDS (`sqlcmd -G`) and non-Fabric token audiences; `fab` covers the rest. Tries winget `Microsoft.AzureCLI` first, then pip / `--user` pip if Python is available. The winget path may be blocked or require elevation depending on company policy; failure is non-blocking. [Install](https://aka.ms/installazurecli) |
 | **Fabric MCP server** | Installer auto-installs (full-live / hybrid) | **Installer installs it where possible** — VS Code extension `fabric.vscode-fabric-mcp-server`, giving agents structured Fabric operations (create/list items, OneLake files & tables, read item definitions). Attempts `code --install-extension ... --force`. Not needed for full-local mode. |
 | **Power BI semantic-model MCP server** | Installer auto-installs (full-live / hybrid) | **Installer installs it where possible** — VS Code extension `analysis-services.powerbi-modeling-mcp`, a live XMLA connection to running models (run DAX `EVALUATE` for live comparison, make transactional model edits). Attempts `code --install-extension ... --force`. Not needed for full-local mode. |
+| **`sqlcmd`** | Optional — installer detects, asks **Y/N** | Query Fabric Warehouse / SQL endpoints over TDS (Agents 4 & 6). No clean unattended install on locked-down PCs, so on **Yes** the installer points you to the manual download. [go-sqlcmd](https://aka.ms/go-sqlcmd) |
+| **Tabular Editor CLI** | Optional — installer detects, asks **Y/N** | Semantic-model validation, Best Practice Analyzer, and automation (Agent 3). Detected as `TabularEditor.exe` / `TabularEditor2.exe` / `TabularEditor3.exe` (not `te`). TE2 is free, TE3 is paid; manual install on **Yes**. [tabulareditor.com](https://tabulareditor.com) |
+| **`pbir` CLI** | Optional — installer detects, asks **Y/N** | Explore, edit, format, validate and publish PBIR reports (Agent 7). From data-goblin / Kurt Buhler; manual install on **Yes**. [Repo](https://github.com/data-goblin/power-bi-agentic-development) |
+| **`pbi-tools`** | Optional — installer detects, asks **Y/N** | PBIP/PBIX extract-compile DevOps workflows (Agent 9). Manual install on **Yes**. [pbi.tools](https://pbi.tools) |
+| **GitHub CLI (`gh`)** | Optional — installer detects, asks **Y/N** | GitHub PRs, Actions, releases and tags (Agent 9). On **Yes**, best-effort `winget install --id GitHub.cli`. [cli.github.com](https://cli.github.com) |
+| **Azure DevOps CLI extension** | Optional — installer detects, asks **Y/N** | Azure DevOps PRs, pipelines and boards (Agent 9). An `az` extension (needs `az`); on **Yes**, best-effort `az extension add --name azure-devops`. |
 
-> **CLIs and MCP servers — optional for full-local, required for live & hybrid.** The core full-local workflow — the Fabric extension plus agents editing local files — needs no CLI or MCP server at all. But the **full-live** and **hybrid** ways of working genuinely run on them: the agents call `fab`/`az` and the two MCP servers to read and edit the running workspace (see [Three ways of working](#three-ways-of-working)). The installer **attempts to install** Python, `fab` (recommended), `az` (fallback), and the two MCP server extensions where possible — and if your environment blocks an optional install (corporate policy, no winget, no network, no Python/pip, or VS Code extension restrictions), it shows a warning for that item and continues. For a deep dive into what you can do once a CLI is installed, see [CLI-FUNCTIONALITIES.md](CLI-FUNCTIONALITIES.md).
+> **Optional specialist tools are opt-in, never silent.** The six tools above power the new specialist agents (Reports, Semantic Model validation, DevOps). The installer **detects** each one, and if it's missing it **explains the tool's provider and purpose and asks Y/N** before any best-effort install — decline and it records that choice and stays quiet on later runs; accept and it installs per-user where it can or shows a manual link. Every result (present or not) is written to the tool inventory below, so the agents know what they can use and how to fall back.
+
+> **CLIs and MCP servers — optional for full-local, required for live & hybrid.** The core full-local workflow — the Fabric extension plus agents editing local files — needs no CLI or MCP server at all. But the **full-live** and **hybrid** ways of working genuinely run on them: the agents call `fab`/`az` and the two MCP servers to read and edit the running workspace (see [Three ways of working](#three-ways-of-working)). The installer **attempts to install** Python, `fab` (recommended), `az` (fallback), and the two MCP server extensions where possible. If your environment blocks an optional install (corporate policy, no winget, no network, no Python/pip, or VS Code extension restrictions), it shows a warning for that item and continues. For a deep dive into what you can do once a CLI is installed — now a two-part catalogue covering `fab`/`az` **and** a chapter for each specialist CLI (`pbir`, Tabular Editor CLI, `pbi-tools`, `sqlcmd`, `gh`, `az devops`) — see [CLI-FUNCTIONALITIES.md](CLI-FUNCTIONALITIES.md).
 
 ---
 
@@ -207,7 +355,7 @@ Before running the installer, make sure you have:
 >
 > **In your chosen workspace folder, it will:**
 > - Create the workspace folder and one sub-folder per Fabric workspace you choose to scaffold
-> - Write or refresh installer-managed files: agent definitions (8 agents), custom skills (TMDL, Pipelines, CLI policy), Copilot instructions, `AGENTS.md`, `.gitignore`, and VS Code settings/tasks
+> - Write or refresh installer-managed files: agent definitions (9 agents), custom skills (TMDL, Pipelines, CLI policy), Copilot instructions, `AGENTS.md`, `.gitignore`, and VS Code settings/tasks
 > - Initialise a Git repository if the folder is not already a repo; create the first commit only if Git `user.name` and `user.email` are configured
 > - Clone two public GitHub repositories into the folder if missing, or run `git pull --ff-only` if they already exist: [`microsoft/skills-for-fabric`](https://github.com/microsoft/skills-for-fabric) and [`data-goblin/power-bi-agentic-development`](https://github.com/data-goblin/power-bi-agentic-development). If cloning or pulling is blocked, the installer warns and continues.
 >
@@ -224,7 +372,9 @@ Before running the installer, make sure you have:
 > - **TMDL extension** `analysis-services.tmdl` — recommended for `.tmdl` syntax highlighting and validation. If missing, the installer reminds you and continues.
 > - **Fabric Data Engineer Remote** `synapsevscode.vscode-synapse-remote` — optional for running notebook cells against remote Spark. The installer mentions it as a tip; it does not install it.
 >
-> **In short:** the installer attempts to bring the niche pieces that power CLI/live-agent scenarios (Python if needed, `fab`, `az`, and the two MCP server extensions), but it does not force them if your company environment blocks them. The mainstream authoring extensions remain your choice: the script checks and warns, but does not install them.
+> **③ Optional specialist CLIs — detected, then installed only if you say yes** *(per-tool Y/N prompt; never silent):* for each of `pbir`, **Tabular Editor CLI**, `pbi-tools`, `sqlcmd`, `gh`, and the **Azure DevOps CLI extension** (`az devops`), the installer detects whether it is already present and, if not, explains the tool's provider and purpose and asks **Y/N** before any best-effort install. Decline and it records that choice (and stays quiet on re-runs); accept and it installs per-user where it can, or prints a manual link if the install is blocked. Every result is written to `.github/agent-docs/tool-status.json`, which the agents read to decide which tool to use or how to fall back.
+>
+> **In short:** the installer attempts to bring the niche pieces that power CLI/live-agent scenarios (Python if needed, `fab`, `az`, and the two MCP server extensions), asks per-tool before installing the optional specialist CLIs, and never forces anything your company environment blocks. The mainstream authoring extensions remain your choice: the script checks and warns, but does not install them.
 >
 > **Update mode:** if you point it at an existing folder, it refreshes installer-managed files (agents, embedded skills, configs) and updates the cloned skill repositories when possible. Your Fabric item folders, workspace folders, and personal files are left untouched.
 
@@ -256,6 +406,31 @@ now installed and what still needs manual or IT action. Do not run anything dest
 ```
 
 > During its prerequisite step the installer shows each tool's status and a plain warning for anything optional it couldn't install — it does **not** print this prompt. Use the steps above if an optional tool is still missing. None of these optional tools block setup: the full-local workflow runs fine without them.
+
+**Specialist CLIs (`pbir`, Tabular Editor CLI, `pbi-tools`, `sqlcmd`, `gh`, `az devops`) — if you declined them, or one failed.** These are the **opt-in** tools the installer asks about one at a time. Unlike the core tools above, they are **never installed silently** — so if you pressed **N**, or said **Y** but the install was blocked on your locked-down PC, the workspace simply records them as "not found" in `tool-status.json` and the owning agent falls back. You don't have to fix anything for the core workflow. When you *do* want one later — say `pbir` for report editing or `sqlcmd` for SQL queries — open the workspace, select **1 - Fabric Workspace Master Agent**, and paste the prompt below for just the tools you want. (The agent installs only what you list, per-user, then refreshes `tool-status.json` so every agent immediately knows the tool is available.)
+
+```text
+Please install the OPTIONAL specialist CLIs I list below for this Fabric agentic
+workspace, then refresh the tool inventory. These are opt-in tools I either declined
+or that failed to install on this corporate PC. Check each one first, tell me which are
+present vs missing, then install ONLY the missing ones I asked for. Prefer per-user,
+no-admin installs; if one genuinely needs a manual download (e.g. sqlcmd) or admin
+rights, give me the official link instead of forcing it.
+
+  - pbir              (Power BI report CLI, Agent 7)   -> provider: data-goblin pbir-cli
+  - Tabular Editor CLI (semantic-model BPA/deploy, Agent 3) -> https://docs.tabulareditor.com
+  - pbi-tools         (PBIX/PBIP source control, Agent 9) -> https://pbi.tools
+  - sqlcmd            (T-SQL over Fabric SQL, Agents 4 & 6) -> https://aka.ms/go-sqlcmd
+  - gh                (GitHub CLI, Agent 9)            -> https://cli.github.com
+  - az devops         (Azure DevOps CLI, Agent 9)      -> az extension add --name azure-devops
+
+After installing, update .github/agent-docs/tool-status.json so each tool's "found" flag
+reflects reality (you can also just re-run the one-click installer, which re-detects them).
+Finish with a checklist of what is now available and what still needs manual or IT action.
+Do not run anything destructive.
+```
+
+> Tip: simply **re-running the one-click installer** also picks up any specialist CLI you installed yourself — detection runs *before* the "previously declined" check, so a tool that's now present flips to `found: true` automatically, even if you said N the first time.
 
 ### 1. Get the files
 
@@ -291,12 +466,12 @@ Follow the prompts. The script will:
 1. Ask for your workspace folder (existing or new)
 2. Explain the Fabric development lifecycle and the three ways of working
 3. Ask how many Fabric workspaces to scaffold
-4. Check all prerequisites (git, VS Code, Fabric extension, TMDL extension) and automatically install Python, the `fab`/`az` CLIs, and the two MCP extensions where possible
+4. Check all prerequisites (git, VS Code, Fabric extension, TMDL extension), automatically install Python, the `fab`/`az` CLIs, and the two MCP extensions where possible, then detect the optional specialist CLIs (`pbir`, Tabular Editor, `pbi-tools`, `sqlcmd`, `gh`, `az devops`) and ask Y/N before installing any of them. It then offers an optional `y/N` check for newer versions of the tools you already have installed (per-tool Y/N; blocked/offline lookups are skipped)
 5. Create the folder structure
 6. Clone Microsoft's skills-for-fabric and data-goblin's power-bi-agentic-development
 7. Write custom skills (TMDL, Pipelines, CLI policy)
-8. Generate all agent definitions (8 agents)
-9. Write configuration files (Copilot instructions, AGENTS.md, .gitignore, VS Code settings)
+8. Generate all agent definitions (9 agents)
+9. Write configuration files (Copilot instructions, AGENTS.md, .gitignore, VS Code settings, and the `tool-status.json` tool inventory)
 10. Initialise a git repo with the first commit
 11. Open the workspace in VS Code
 
@@ -321,7 +496,8 @@ When a new version is released, updating is the same one step as installing:
 1. [Download the latest installer files](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/tree/main/fabric-agentic-installer)
 2. **Double-click `Setup-FabricAgenticWorkspace.bat`** and point to the **same folder** you used originally
 3. The installer detects the existing folder and switches to **update mode** — it refreshes agent definitions, custom skills, Copilot instructions, and VS Code configs, then pulls the latest skill repositories
-4. Your Fabric items, workspace folders, and any personal files are **not touched**
+4. It also offers an optional per-tool version check — answer **Y** at the `Check installed tools for updates now?` prompt and it upgrades any installed CLI/tool that's behind (best-effort; anything blocked on a locked-down network is skipped)
+5. Your Fabric items, workspace folders, and any personal files are **not touched**
 
 That's it. Reopen the workspace in VS Code and you're on the latest version.
 
@@ -340,16 +516,7 @@ You don't configure anything manually. On your **first message** each session, t
 
 ### Specialist agents
 
-Once routed, the specialist agents handle their domain:
-
-| Agent | What it handles |
-|---|---|
-| **Semantic Model Agent** | Create/edit TMDL files, write DAX measures, manage columns, relationships, partitions, Direct Lake models, Field Parameters. Reads the fabric-tmdl skill and data-goblin DAX conventions before every task. |
-| **Fabric Data Engineer** | Design medallion architecture, develop Spark notebooks, author SQL objects, create Data Factory pipelines. Reads skills-for-fabric and the fabric-pipelines skill. |
-| **Fabric Admin** | Capacity planning, governance validation, workspace inventory, RBAC, cost analysis. Prefers the Fabric CLI (`fab api`); falls back to `az rest` patterns from skills-for-fabric. |
-| **Fabric App Dev** | Connect apps to Fabric via ODBC/XMLA/REST, build data access layers in Python, set up local dev environments with DefaultAzureCredential. |
-| **Fabric Reports Agent** | Author PBIR report definitions, design visual layouts, apply themes, create report-level measures. Reads data-goblin report skills. |
-| **Fabric Pipelines Agent** | Author pipeline JSON, configure activities (Copy, Notebook, ForEach, IfCondition, Refresh, etc.), manage parameters and expressions. Reads the fabric-pipelines skill. |
+Once routed, each specialist handles its domain with a bounded tool set and selective skill loading. For the full breakdown — capabilities, owned CLIs/MCP servers, and which skills each agent reads — see the [Agent → tools → skills matrix](#agent--tools--skills-matrix) above.
 
 ### Skill-based development
 
@@ -391,10 +558,12 @@ Fabric Workspaces/
 │   │   ├── 5-fabric-admin.agent.md                    ← governance & capacity
 │   │   ├── 6-fabric-app-dev.agent.md                  ← apps & integrations
 │   │   ├── 7-fabric-reports-agent.agent.md            ← PBIR reports
-│   │   └── 8-fabric-pipelines-agent.agent.md          ← pipeline JSON
+│   │   ├── 8-fabric-pipelines-agent.agent.md          ← pipeline JSON
+│   │   └── 9-fabric-devops-agent.agent.md             ← ALM / Git / DevOps
 │   ├── agent-docs/
 │   │   ├── starting-flow.md                           ← session startup phases
-│   │   └── working-flow-reference.md                  ← skill discovery table
+│   │   ├── working-flow-reference.md                  ← skill discovery table
+│   │   └── tool-status.json                           ← tool inventory (gitignored)
 │   ├── copilot-instructions.md                        ← workspace-level context
 │   └── skills/
 │       ├── fabric-tmdl/
@@ -541,10 +710,7 @@ files exist. You'd just need to create the folder structure manually or adapt
 the script.
 
 **Q: Why does this clone skills via git instead of installing them?**
-A: The official way to install some skills is via npm global install, which
-requires admin/elevated rights on most corporate machines and often needs IT
-approval. By git-cloning the repos directly, this workspace avoids that
-entirely — you only need git, which is already a prerequisite.
+A: Cloning via git — which you already have as a prerequisite — sidesteps the npm global installs that typically need admin rights or IT approval on corporate machines.
 
 **Q: Can I add my own specialist agents?**
 A: Absolutely. Create a new `.agent.md` file in `.github/agents/` and it will
@@ -552,8 +718,9 @@ appear in the Copilot Chat dropdown. Follow the existing agent structure.
 
 **Q: How do I update the skills?**
 A: The master agent offers skill maintenance at session start. You can also
-select the Skills Maintainer directly for light (git pull) or deep (pull +
-freshness check) maintenance.
+select the Skills Maintainer directly for light (git pull + tool-inventory
+refresh) or deep (pull + freshness check + unreferenced scan + tool-inventory
+refresh) maintenance.
 
 **Q: Can multiple people share the same workspace via git?**
 A: Yes. Push the workspace to a shared repo. Each team member clones it,
@@ -574,22 +741,43 @@ They are VS Code extensions (`fabric.vscode-fabric-mcp-server` and
 `analysis-services.powerbi-modeling-mcp`) that the installer auto-installs for you,
 alongside `fab`/`az`. Full-local mode needs none of these.
 
+**Q: What are the optional specialist CLIs, and what happens if I don't install one?**
+A: They are the workload-specific tools individual agents can use — `pbir` (reports),
+Tabular Editor CLI (semantic-model BPA/deploy), `pbi-tools` (PBIX/PBIP source control),
+`sqlcmd` (T-SQL over the Fabric SQL endpoint), `gh` (GitHub) and `az devops` (Azure
+DevOps). The installer asks **Y/N** per tool — none is installed silently. If a tool is
+missing (you declined, or the install was blocked), nothing breaks: the owning agent
+sees `found: false` in `tool-status.json` and uses a documented fallback. You can add any
+of them later — the **Corporate / locked-down PCs** steps under [Quick start](#quick-start)
+include a ready-to-paste agent prompt for exactly these specialist CLIs.
+See [CLI-FUNCTIONALITIES.md](CLI-FUNCTIONALITIES.md) for a per-CLI deep dive.
+
+**Q: How does the workspace know which tools I have installed?**
+A: The installer writes `.github/agent-docs/tool-status.json` — a gitignored, machine-specific inventory. Agents read `<tool>.found` before invoking any CLI/MCP and fall back when absent. For how it stays current (re-run, Skills Maintainer, runtime re-check), see [Keeping the tool inventory current](#keeping-the-tool-inventory-current-auto-detection).
+
 ---
 
-## Current status (v0.4.0-pre-release)
+## Current status (v0.5.0-pre-release)
 
 | Area | Status |
 |---|---|
 | One-click setup (.bat + .ps1) | **Battle-tested manually** — used by the maintainer on Windows 10/11, including a locked-down corporate laptop |
 | Master Agent session startup flow | **Implemented as agent instructions** — skill freshness, `fab`/`az` identity, topic routing, advisory specialist recommendations |
-| Specialist agent routing | **Implemented and used regularly** — all 6 specialist agents are configured with dynamic skill discovery for upstream repo restructuring |
-| Skills Maintainer (light + deep) | **Implemented as agent workflow** — pull, MS-docs freshness check, unreferenced scan |
+| Specialist agent routing | **Implemented and used regularly** — all 7 specialist agents are configured with dynamic skill discovery for upstream repo restructuring |
+| Agent → tools → skills model | **Implemented (new in v0.5.0)** — each agent owns a bounded, deterministic toolset and loads only the skills its subtask needs; documented in the README agent/tool matrix and coverage table |
+| Tool inventory (`tool-status.json`) | **Implemented (new in v0.5.0)** — installer detects every tool (real aliases) and writes a gitignored, machine-specific inventory; agents read `<tool>.found` and fall back when absent; Skills Maintainer can refresh it (detect-only) |
+| Opt-in specialist CLIs | **Implemented (new in v0.5.0)** — `pbir`, Tabular Editor CLI, `pbi-tools`, `sqlcmd`, `gh`, `az devops` are detect → explain → Y/N → best-effort install; never silent; declined choices remembered |
+| Fabric DevOps Agent (Agent 9) | **Implemented (new in v0.5.0)** — ALM coordination (Git Integration, Deployment Pipelines, Azure DevOps & GitHub); reads artifact skills read-only for conflict/PR review, does not author artifacts |
+| Skills Maintainer (light + deep) | **Implemented as agent workflow** — pull, MS-docs freshness check, unreferenced scan, tool-inventory refresh |
 | Custom TMDL skill | **Used in real work** — comprehensive syntax and validation rules, maintained from practical modelling experience |
 | Custom Pipelines skill | **Used in real work** — activity reference plus operational practices from production pipeline work |
+| Custom CLI-policy skill | **Used in real work** — `fab`-first / `az`-fallback decision rule that every agent reads before a CLI/REST task |
+| CLI deep-dive (`CLI-FUNCTIONALITIES.md`) | **Expanded (new in v0.5.0)** — two-part mini-book: `fab`/`az` workload guide plus a chapter per specialist CLI |
 | Three ways of working (local / live / hybrid) | **Documented and maintainer-used** — diagrams, installer guidance, and soft MCP checks; still requires human review/testing |
 | Microsoft skills-for-fabric integration | **Implemented** — cloned and updated locally when network/Git access allows |
 | Data-goblin skills integration | **Implemented** — cloned and updated locally when network/Git access allows |
 | Idempotent re-run (update mode) | **Implemented** — managed files refreshed, user files untouched |
+| Custom `fabric-devops-policy` skill | **Planned** — will capture the maintainer's DEV→PROD promotion workflow (branch/PR discipline, rollback patterns); Agent 9 uses `fabric-cli-policy` + selective artifact-skill reads for now |
 | Automated regression tests | **Not yet** — validation is currently manual and experience-based |
 
 This is a pre-release. It is genuinely useful today, but expect rough edges. If something breaks, [open an issue](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/issues).

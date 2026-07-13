@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.5.1-pre-release] - 2026-07-13
+
+### Added
+
+- **Optional tool update check** — after building the tool inventory, the installer now asks a single `Check installed tools for updates now? (y/N)` gate (default No, so normal runs stay fast). On Yes it looks up the latest published version of every installed managed tool (PyPI for `fab`/`az`/`pbir`, the GitHub Releases API for `gh`/`sqlcmd`/Tabular Editor/`pbi-tools`, the `az` extension index for `az devops`) and, **only when the installed version is genuinely behind**, prompts a per-tool `Y/N` to upgrade. Upgrading re-runs the tool's normal install action; the refreshed version is written back to `tool-status.json`. Every lookup is best-effort — blocked or offline lookups (common on locked-down/proxied networks) are silently skipped, never nagging or erroring. GUI tools (Tabular Editor) are version-probed via file metadata and are never launched
+
+### Fixed
+
+- **Optional-tool downloads are more robust on locked-down machines** — the winget-download install path now enforces a timeout so a stalled corporate proxy can no longer hang the installer indefinitely; the direct-download fallback now forces TLS 1.2 (PowerShell 5.1 did not enable it by default, causing instant "connection closed" failures against modern CDNs); removed a dead Tabular Editor fallback URL that returned 404
+
+### Changed
+
+- **Specialist-CLI install-failure messages now point to the README** — when an optional specialist CLI (or the Azure DevOps extension) cannot be installed on a locked-down PC, the installer prints a pointer to the README **Corporate / locked-down PCs** section and its ready-to-paste agent prompt, so the tool can be finished via the Master agent
+
+## [v0.5.0-pre-release] - 2026-06-25
+
+### Added
+
+- **Agent → tools → skills optimization** — every agent now has a bounded purpose, owns a minimum set of deterministic tools, and loads **only the skills its current subtask needs** (no more eager "read all skills"). Each specialist body opens with a "Tool availability — read this FIRST" block and a "Skill loading — minimum necessary" block
+- **Canonical tool inventory `tool-status.json`** — the installer detects every tool (honoring real command names/aliases, e.g. `TabularEditor.exe`/`TabularEditor2.exe`/`TabularEditor3.exe` rather than `te`) and writes `.github/agent-docs/tool-status.json` (gitignored, machine-specific) with `found`, `version`, `command`, `path`, `category`, `installMode`, and a `reason` when missing. Agents read `<key>.found` before invoking any CLI/MCP and degrade gracefully when a tool is absent
+- **Per-specialist-tool opt-in install** — new specialist tools (`pbir`, Tabular Editor CLI, `pbi-tools`, `sqlcmd`, `gh`, `az devops`) are handled as **detect → explain provider/purpose/link → ask Y/N → best-effort install only on Yes → on failure warn + manual link + continue**. Core tools (Python, `fab`, `az`, the two MCP servers) keep their existing auto best-effort behaviour; nothing heavy is installed silently. All six are also listed in the README **Prerequisites** table
+- **Skills Maintainer refreshes the tool inventory** — the Fabric Skills Maintainer agent (light and deep modes) now re-detects installed tools live (`Get-Command`/`--version`, `code --list-extensions`, `az extension list`) and rewrites `tool-status.json` (detect-only; never installs). Combined with installer re-runs (detection precedes the "previously declined" check, so a tool you install yourself flips to `found: true` on the next run) and a per-agent runtime re-check, a tool installed after setup is picked up automatically
+- **New agent: 9 — Fabric DevOps Agent** — ALM/DevOps coordination for Fabric Git Integration, Deployment Pipelines, Azure DevOps & GitHub PRs/CI-CD/boards, branch & PR workflows, PBIP DevOps, and conflict/PR review of text-based Fabric definitions. It is explicitly **not** an artifact-authoring agent: it may read TMDL/PBIR/pipeline skills read-only to understand structure, then hands design decisions back to Agents 3/7/8
+- **README agent → tools → skills matrix and tool-coverage table** — documents each agent's bounded purpose, owned tools, and selective skills, plus a coverage table proving every checked tool has an agent-level owner
+- **README "Agentic design principles" section** — a best-practices scorecard (bounded scope, deterministic tool gating, graceful degradation, anti-soup context loading, topic-based routing, deterministic startup, safety guardrails, skill precedence, resilient discovery) showing how all nine agents satisfy each principle, plus a callout on the Master agent's mandatory startup/self-check protocol
+- **CLI-FUNCTIONALITIES.md is now a two-part "mini-book"** — Part I keeps the workload-first `fab`/`az` deep dive (sections 0–21); Part II adds an accurate, provider-sourced chapter for each specialist CLI (`pbir`, Tabular Editor CLI, `pbi-tools`, `sqlcmd`, `gh`, `az devops`) using a consistent template (purpose · owning agent · `tool-status.json` key/aliases · common commands · fallback when absent · provider link · caveats)
+
+### Changed
+
+- **Fabric MCP server ownership is now explicit and narrow** — Agents 4 (live OneLake/item reads) and 9 (live workspace item GUIDs/inspection during Git Integration / Deployment Pipeline setup); Power BI semantic-model MCP stays with Agents 3 and 6. MCP usage remains advisory body policy gated on `tool-status.json`, not hard-listed in frontmatter, for corporate-PC resilience
+- **Master routes by topic, not tool availability** — a missing tool never changes the correct specialist; the specialist reads `tool-status.json` and falls back. Topic menu and per-request routing now include the DevOps agent ([9])
+
 ## [v0.4.0-pre-release] - 2026-06-19
 
 ### Added
