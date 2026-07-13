@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Specialist-CLI install-failure messages now point to the README** — when an optional specialist CLI (or the Azure DevOps extension) cannot be installed on a locked-down PC, the installer prints a pointer to the README **Corporate / locked-down PCs** section and its ready-to-paste agent prompt, so the tool can be finished via the Master agent
 
-## [v0.5.0-pre-release] - 2026-06-25
+## [v0.5.0-pre-release] - 2026-07-13
 
 ### Added
 
