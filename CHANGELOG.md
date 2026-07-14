@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.6.0] - 2026-07-13
+
+### Added
+
+- **Numbered 47-agent organisation** — the original Master-led experience now expands into 2 executive reviewers, 7 Team Leads and 37 focused workers. The 10 user-facing agents are numbered `01`–`10` for stable dropdown order; workers are delegated by their leads
+- **Capability Maintenance team** — owns Microsoft/Kurt repository refresh, dynamic skill inventory and mapping, agent coverage, installer health, tool detection, explicitly approved installs/updates, PATH recovery and failed-install remediation on locked-down laptops
+- **Cross-domain governance** — Fabric Solution Architect handles genuine cross-domain design; Integration QA & Change Controller handles cross-artifact validation and final acceptance; all teams use bounded ownership, one writer per artifact and explicit validation/return contracts
+- **Optional GitHub/Azure DevOps repository onboarding** — setup can collect each repository's provider, clone URL, local folder, Fabric subfolder, category, notes, environment topology, branch names, write policies, PR requirements, promotion direction, and optional local/live mapping
+- **Local repository map and multi-root workspace** — selected business repositories are recorded in `.github/agent-docs/local/repository-map.local.json` and opened beside the agentic root through `Fabric-Agentic-Workspace.code-workspace`; both files remain machine-local
+
+### Preserved
+
+- **Original installer experience** — the existing/new-folder choice, multi-workspace setup, prerequisite verification, tool inventory/install logic, locked-down fallbacks, custom skills, configuration files and exact clean-repository `git pull --ff-only` vendor-update behaviour remain the V0.6 foundation; repository onboarding is an additive, separately gated step
+- **Original public package** — users still see and download the same BAT + PS1 installer alongside the README, changelog and existing project documentation; maintainer-only development material is not shipped into user workspaces
+
+### Changed
+
+- **Tool update review is explicit** — every supported installed CLI is now shown as `Current`, `Update`, or `Unverified`; Python remains a prerequisite and VS Code continues to manage installed extension/MCP updates
+- **GitHub CLI fresh installs prefer the authoritative GitHub release** — avoids a stale winget catalog installing an older CLI; the no-admin winget download/extraction path remains the locked-down/proxy fallback
+- **GitHub CLI update detection follows the installed portable executable** — when a newer per-user `gh` sits beside an older machine-wide copy, setup now prioritises and records the newer path instead of falsely reporting a network/proxy failure
+- **Tool inventory versions are normalised during update review** — confirmed current versions are written back to `tool-status.json`, not only versions changed by an update
+- **Git completion output is truthful** — re-runs now distinguish an initial commit, an update commit, no staged changes, and a failed commit instead of always claiming an initial commit was created
+- **Git/Fabric safety boundaries are explicit** — the README warns that the initial commit stages every non-ignored file and no longer implies that Fabric Git restores item data, unsupported items, every setting, or automatically preserves production overrides
+- **README evolved in place** — keeps the original introduction, tool coverage, workflow explanations and project voice while updating the agent map, maintenance ownership, installer behaviour and V0.6 status
+
+- **Existing-repository Git commits are ownership-scoped** — update runs stage and commit only declared, tracked or non-ignored installer-owned paths, excluding unrelated user work and intentionally local VS Code/tool/repository-map files; new repositories still receive the expected initial workspace commit
+- **Portable installs are transactional** — archives/MSIs extract into a sibling staging directory, the executable is validated before activation, and the prior directory is restored if replacement fails
+- **Downloads use publisher verification** — winget catalogue hashes, official GitHub checksum assets, HTTPS provenance, PE validation and Authenticode are used where each publisher supports them, with explicit best-effort reporting otherwise
+- **CLI detection now requires a runnable command** — stale Python console launchers such as an orphaned `fab.exe` no longer suppress Python recovery or create a false-positive tool inventory
+- **Business clones are isolated from the outer workspace repository** — setup clones once, fetches remote branch references without pulling or resetting, validates topology, preserves dirty or mismatched existing folders, never stores a PAT, and excludes the clones and local mapping files from outer commits
+- **Multi-root updates preserve user configuration** — re-runs merge installer-owned roots into the `.code-workspace` file without removing roots or settings the user added
+
 ## [v0.5.1-pre-release] - 2026-07-13
 
 ### Added

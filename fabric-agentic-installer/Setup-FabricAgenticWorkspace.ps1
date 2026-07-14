@@ -3,9 +3,9 @@
     Fabric Agentic Workspace  -- One-click bootstrap
 .DESCRIPTION
     Run this script to set up a guided Fabric agentic workspace
-    with a Fabric Master Agent, specialist agents, Microsoft & data-goblin skills,
+    with a Fabric Master, executive reviewers, specialist teams, Microsoft & Kurt skills,
     custom TMDL and Pipeline skills, and copilot instructions.
-    Once complete it opens the folder in VS Code  -- select Fabric Master Agent
+    Once complete it opens the folder in VS Code  -- select Fabric Workspace Master
     from the Copilot Chat dropdown and type anything to start.
 .NOTES
     Requirements: git, VS Code 1.117.0+ with GitHub Copilot.
@@ -18,6 +18,85 @@
 
 # Keep the window open on any error so the user can read it
 $ErrorActionPreference = 'Stop'
+$productVersion = '0.6.0'
+$workspaceFileName = 'Fabric-Agentic-Workspace.code-workspace'
+$agentManifestJson = @'
+{
+  "schemaVersion": 1,
+  "productVersion": "0.6.0",
+  "defaults": {
+    "mode": "both",
+    "tools": ["read","search","execute","edit"],
+    "conditionalSkills": [],
+    "excludedSkills": ["unrelated vendor skills"],
+    "artifactTypes": [],
+    "writePermissions": "assigned owned paths only; inspect before edit",
+    "defaultRisk": "medium",
+    "validationResponsibilities": ["validate every mutation and report evidence"],
+    "optionalToolRequestPermissions": "request through Team Lead and Master; never install directly",
+    "sourceControlPermissions": "no force push, branch deletion, secret commit, or unapproved merge",
+    "environmentRestrictions": "PROD read-only by default; unknown environment requires clarification"
+  },
+  "agents": [
+    {"id":"fabric-workspace-master","displayName":"Fabric Workspace Master","filename":"00-fabric-workspace-master.agent.md","level":"executive","department":"executive","parent":null,"allowedChildren":["Fabric Solution Architect","Integration QA & Change Controller","Semantic Model Team Lead","Reporting Team Lead","Data Engineering Team Lead","Fabric Administration & Governance Team Lead","ALM & DevOps Team Lead","Applications & Integration Team Lead","Capability Maintenance Team Lead"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search","execute"],"primarySkills":["fabric-orchestration","fabric-working-modes","fabric-source-control-safety","fabric-tool-policy"],"artifactTypes":["work orders","consolidated outcomes"],"writePermissions":"orchestration only; delegate implementation","defaultRisk":"high","focus":"Classify intent, select the authoritative write surface, invoke the minimum teams, prevent conflicting writes, and own the final outcome."},
+    {"id":"fabric-solution-architect","displayName":"Fabric Solution Architect","filename":"01-fabric-solution-architect.agent.md","level":"executive","department":"executive","parent":"fabric-workspace-master","allowedChildren":["Semantic Model Team Lead","Reporting Team Lead","Data Engineering Team Lead","Fabric Administration & Governance Team Lead","ALM & DevOps Team Lead","Applications & Integration Team Lead"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search"],"primarySkills":["fabric-orchestration","fabric-working-modes"],"artifactTypes":["architecture plans","dependency maps","rollback plans"],"writePermissions":"read-only planning","defaultRisk":"low","focus":"Design artifact boundaries, dependencies, sequence, ownership, validation, rollback, and team assignments without broad implementation."},
+    {"id":"integration-qa-change-controller","displayName":"Integration QA & Change Controller","filename":"02-integration-qa-change-controller.agent.md","level":"executive","department":"executive","parent":"fabric-workspace-master","allowedChildren":[],"visibility":"visible","userInvocable":true,"tools":["read","search","execute"],"primarySkills":["fabric-orchestration","fabric-working-modes","fabric-source-control-safety"],"artifactTypes":["acceptance reports","release evidence"],"writePermissions":"read-only validation; return defects to Master","defaultRisk":"low","focus":"Validate cross-artifact references, environment and branch alignment, security, privacy, coherent diffs, rollback, and release readiness."},
+
+    {"id":"semantic-model-team-lead","displayName":"Semantic Model Team Lead","filename":"10-semantic-model-team-lead.agent.md","level":"team-lead","department":"semantic-model","parent":"fabric-workspace-master","allowedChildren":["Model Architecture Agent","Relationships & Storage Mode Agent","TMDL Agent","DAX Agent","Semantic Security & AI Metadata Agent","Semantic Validation & Performance Agent"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search","execute","edit"],"primarySkills":["fabric-tmdl","fabric-working-modes","fabric-tool-policy"],"conditionalSkills":["Microsoft semantic model and Direct Lake skills","Kurt TMDL, DAX, TE2, BPA, and performance skills"],"artifactTypes":["semantic models","TMDL","DAX"],"focus":"Decompose semantic work, select TE2, Modeling MCP/TOM, TMDL, fab, or sqlcmd, coordinate dependencies, and own model-wide validation."},
+    {"id":"model-architecture-agent","displayName":"Model Architecture Agent","filename":"11-model-architecture.agent.md","level":"worker","department":"semantic-model","parent":"semantic-model-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search"],"primarySkills":["fabric-tmdl"],"conditionalSkills":["Microsoft Direct Lake guidance","Kurt semantic architecture skills"],"artifactTypes":["model architecture recommendations"],"writePermissions":"normally read-only","defaultRisk":"low","focus":"Assess grain, fact and dimension boundaries, star schema, Direct Lake versus Import, composites, and calculation-group architecture."},
+    {"id":"relationships-storage-mode-agent","displayName":"Relationships & Storage Mode Agent","filename":"12-relationships-storage-mode.agent.md","level":"worker","department":"semantic-model","parent":"semantic-model-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-tmdl"],"conditionalSkills":["Microsoft Direct Lake guidance","Kurt relationship skills"],"artifactTypes":["relationships","storage modes"],"focus":"Implement and validate cardinality, filter direction, ambiguity, bridges, integrity, storage modes, and Direct Lake behavior."},
+    {"id":"tmdl-agent","displayName":"TMDL Agent","filename":"13-tmdl.agent.md","level":"worker","department":"semantic-model","parent":"semantic-model-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-tmdl"],"conditionalSkills":["Kurt TMDL and PBIP skills"],"artifactTypes":["TMDL files","semantic model metadata"],"focus":"Inspect before editing tables, columns, hierarchies, partitions, expressions, cultures, and PBIP semantic-model files; preserve house style and validate."},
+    {"id":"dax-agent","displayName":"DAX Agent","filename":"14-dax.agent.md","level":"worker","department":"semantic-model","parent":"semantic-model-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-tmdl"],"conditionalSkills":["Kurt DAX skills"],"artifactTypes":["DAX measures","DAX queries","calculation groups"],"focus":"Create and validate measures, time intelligence, calculation groups, context behavior, formats, regression queries, and performance."},
+    {"id":"semantic-security-ai-metadata-agent","displayName":"Semantic Security & AI Metadata Agent","filename":"15-semantic-security-ai-metadata.agent.md","level":"worker","department":"semantic-model","parent":"semantic-model-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-tmdl"],"conditionalSkills":["Microsoft semantic security and AI guidance"],"artifactTypes":["RLS","OLS","roles","AI metadata"],"defaultRisk":"high","focus":"Own RLS, OLS, roles, descriptions, synonyms, AI instructions, schemas, verified-answer metadata, and explicit security-impact validation."},
+    {"id":"semantic-validation-performance-agent","displayName":"Semantic Validation & Performance Agent","filename":"16-semantic-validation-performance.agent.md","level":"worker","department":"semantic-model","parent":"semantic-model-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-tmdl","fabric-tool-policy"],"conditionalSkills":["Kurt BPA and performance skills"],"artifactTypes":["BPA results","schema checks","performance reports"],"writePermissions":"read-only unless a safe fix is approved","defaultRisk":"low","focus":"Run TE2 BPA, schema, relationship, VertiPaq, Direct Lake, DAX regression, and storage validation."},
+
+    {"id":"reporting-team-lead","displayName":"Reporting Team Lead","filename":"20-reporting-team-lead.agent.md","level":"team-lead","department":"reporting","parent":"fabric-workspace-master","allowedChildren":["Report Planning & UX Agent","PBIR Authoring Agent","Theme & Formatting Agent","Advanced & Custom Visuals Agent","Paginated Reports Agent","Report QA & Desktop Verification Agent"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search","execute","edit"],"primarySkills":["fabric-working-modes","fabric-tool-policy"],"conditionalSkills":["Kurt PBIR, report, theme, Deneb, custom visual, and paginated skills"],"artifactTypes":["PBIR reports","themes","paginated reports"],"focus":"Turn requirements into a report plan, coordinate PBIR implementation and semantic dependencies, serialize visual/theme ownership, and require report QA."},
+    {"id":"report-planning-ux-agent","displayName":"Report Planning & UX Agent","filename":"21-report-planning-ux.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search"],"primarySkills":[],"conditionalSkills":["Kurt report planning and UX skills"],"artifactTypes":["report design contracts"],"writePermissions":"read-only planning","defaultRisk":"low","focus":"Define audience, business questions, page plan, navigation, visual selection, accessibility, interactions, and required measures before implementation."},
+    {"id":"pbir-authoring-agent","displayName":"PBIR Authoring Agent","filename":"22-pbir-authoring.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Kurt pbir-cli and pbir-format skills"],"artifactTypes":["PBIR pages","visuals","bindings","filters","bookmarks"],"focus":"Use pbir first for report structure and visuals, verify current help, validate after each mutation, and use controlled direct PBIR only as fallback."},
+    {"id":"theme-formatting-agent","displayName":"Theme & Formatting Agent","filename":"23-theme-formatting.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":[],"conditionalSkills":["Kurt report theme skills"],"artifactTypes":["report themes","format properties"],"focus":"Own typography, palette, spacing, conditional formatting, branding, and accessibility; never edit the same visual concurrently with PBIR Authoring."},
+    {"id":"advanced-custom-visuals-agent","displayName":"Advanced & Custom Visuals Agent","filename":"24-advanced-custom-visuals.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":[],"conditionalSkills":["Kurt Deneb, SVG, and custom-visual skills"],"artifactTypes":["Deneb specs","SVG","custom visual configuration"],"focus":"Implement Deneb, SVG, Python/R visuals, custom visuals, and advanced interactions only when the design requires them."},
+    {"id":"paginated-reports-agent","displayName":"Paginated Reports Agent","filename":"25-paginated-reports.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":[],"conditionalSkills":["Microsoft and Kurt paginated report skills"],"artifactTypes":["paginated report definitions"],"focus":"Own paginated definitions, parameters, data sources, layout, rendering, and export validation."},
+    {"id":"report-qa-desktop-agent","displayName":"Report QA & Desktop Verification Agent","filename":"26-report-qa-desktop-verification.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Kurt PBIR validation skills"],"artifactTypes":["report validation evidence","screenshots"],"writePermissions":"read-only verification","defaultRisk":"low","focus":"Run pbir validation and available Desktop refresh/screenshots; detect overlap, truncation, blanks, broken bindings, accessibility, and theme defects."},
+
+    {"id":"data-engineering-team-lead","displayName":"Data Engineering Team Lead","filename":"30-data-engineering-team-lead.agent.md","level":"team-lead","department":"data-engineering","parent":"fabric-workspace-master","allowedChildren":["Notebook & Spark Agent","Lakehouse, Delta & MLV Agent","Warehouse SQL Agent","SQL Database Agent","Dataflows Gen2 Agent","Pipeline Orchestration Agent","Real-Time Intelligence Agent","Fabric Intelligence & Ontology Agent"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search","execute","edit"],"primarySkills":["fabric-pipelines","fabric-working-modes","fabric-tool-policy"],"conditionalSkills":["Microsoft Fabric engineering skills"],"artifactTypes":["notebooks","lakehouses","warehouses","SQL databases","dataflows","pipelines","RTI"],"focus":"Coordinate source-to-serving engineering and its semantic dependencies, assign one artifact owner, and validate data and orchestration."},
+    {"id":"notebook-spark-agent","displayName":"Notebook & Spark Agent","filename":"31-notebook-spark.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":[],"conditionalSkills":["Microsoft Spark and notebook skills"],"artifactTypes":["Fabric notebooks","PySpark","Spark SQL"],"focus":"Author and validate PySpark, Spark SQL, notebooks, sessions, remote execution, dependencies, and notebook quality."},
+    {"id":"lakehouse-delta-mlv-agent","displayName":"Lakehouse, Delta & MLV Agent","filename":"32-lakehouse-delta-mlv.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":[],"conditionalSkills":["Microsoft Lakehouse, Delta, medallion, MLV, shortcut, and OneLake skills"],"artifactTypes":["Delta tables","lakehouses","materialized lake views","shortcuts"],"focus":"Own Delta, medallion, MLV, incremental processing, shortcuts, schema evolution, and optimization; request DuckDB only through approval."},
+    {"id":"warehouse-sql-agent","displayName":"Warehouse SQL Agent","filename":"33-warehouse-sql.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Microsoft Warehouse skills"],"artifactTypes":["Warehouse DDL","DML","SQL validation"],"focus":"Design and validate Fabric Warehouse and SQL analytics endpoint DDL, DML, serving, and performance using sqlcmd when available."},
+    {"id":"sql-database-agent","displayName":"SQL Database Agent","filename":"34-sql-database.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Microsoft Fabric SQL Database skills"],"artifactTypes":["Fabric SQL Database schemas","procedures","queries"],"focus":"Handle Fabric SQL Database OLTP, procedures, temporal, JSON, vectors, security, and diagnostics distinctly from Warehouse work."},
+    {"id":"dataflows-gen2-agent","displayName":"Dataflows Gen2 Agent","filename":"35-dataflows-gen2.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":[],"conditionalSkills":["Microsoft Dataflows Gen2 and Power Query skills"],"artifactTypes":["Dataflows Gen2 definitions","Power Query M"],"focus":"Own Power Query M, connectors, previews, destinations, refresh behavior, and failure diagnosis for Dataflows Gen2."},
+    {"id":"pipeline-orchestration-agent","displayName":"Pipeline Orchestration Agent","filename":"36-pipeline-orchestration.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-pipelines"],"conditionalSkills":["Microsoft pipeline skills"],"artifactTypes":["Fabric pipeline definitions","schedules"],"focus":"Implement pipeline activities, notebooks, dataflows, copy, variables, schedules, dependencies, retry, and failure handling with schema validation."},
+    {"id":"real-time-intelligence-agent","displayName":"Real-Time Intelligence Agent","filename":"37-real-time-intelligence.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":[],"conditionalSkills":["Microsoft Eventhouse, KQL, Eventstream, and Activator skills"],"artifactTypes":["Eventhouse","KQL","Eventstream","Activator"],"focus":"Own real-time Fabric artifacts, KQL behavior, ingestion, monitoring, and operational validation."},
+    {"id":"fabric-intelligence-ontology-agent","displayName":"Fabric Intelligence & Ontology Agent","filename":"38-fabric-intelligence-ontology.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":[],"conditionalSkills":["Microsoft FabricIQ, Ontology, and Data Agent skills"],"artifactTypes":["ontologies","FabricIQ assets","Data Agents"],"focus":"Handle FabricIQ, Ontology, Data Agents, and related knowledge capabilities while checking current product behavior."},
+
+    {"id":"fabric-administration-governance-team-lead","displayName":"Fabric Administration & Governance Team Lead","filename":"40-fabric-administration-governance-team-lead.agent.md","level":"team-lead","department":"administration-governance","parent":"fabric-workspace-master","allowedChildren":["Workspace & Capacity Administration Agent","Security, Access & Governance Agent","Monitoring, Catalog & Operations Agent"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search","execute","edit"],"primarySkills":["fabric-working-modes","fabric-tool-policy"],"conditionalSkills":["Microsoft administration, governance, and monitoring skills"],"artifactTypes":["workspace settings","capacity settings","governance policy","operations evidence"],"defaultRisk":"high","focus":"Coordinate workspace, capacity, access, governance, monitoring, catalog, and operational safety with explicit approval for destructive changes."},
+    {"id":"workspace-capacity-administration-agent","displayName":"Workspace & Capacity Administration Agent","filename":"41-workspace-capacity-administration.agent.md","level":"worker","department":"administration-governance","parent":"fabric-administration-governance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Microsoft workspace and capacity skills"],"artifactTypes":["workspace and capacity configuration"],"defaultRisk":"high","focus":"Administer workspaces, capacities, settings, assignments, and cost awareness; require approval for destructive or production-impacting actions."},
+    {"id":"security-access-governance-agent","displayName":"Security, Access & Governance Agent","filename":"42-security-access-governance.agent.md","level":"worker","department":"administration-governance","parent":"fabric-administration-governance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":[],"conditionalSkills":["Microsoft security and governance skills"],"artifactTypes":["roles","permissions","governance controls"],"defaultRisk":"high","focus":"Own workspace roles, Entra groups, least privilege, permissions, governance, and security-boundary validation."},
+    {"id":"monitoring-catalog-operations-agent","displayName":"Monitoring, Catalog & Operations Agent","filename":"43-monitoring-catalog-operations.agent.md","level":"worker","department":"administration-governance","parent":"fabric-administration-governance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Microsoft monitoring and catalog skills"],"artifactTypes":["inventory","job status","incident findings"],"writePermissions":"read-only diagnosis by default","defaultRisk":"low","focus":"Search catalog and inventory, inspect jobs and refreshes, monitor status, and diagnose failures without unapproved remediation."},
+
+    {"id":"alm-devops-team-lead","displayName":"ALM & DevOps Team Lead","filename":"50-alm-devops-team-lead.agent.md","level":"team-lead","department":"alm-devops","parent":"fabric-workspace-master","allowedChildren":["GitHub Source Control Agent","Azure DevOps Agent","Fabric Git Integration Agent","Deployment & Release Agent","Power BI ALM Agent"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search","execute","edit"],"primarySkills":["fabric-source-control-safety","fabric-working-modes","fabric-tool-policy"],"conditionalSkills":["Kurt PBIP and pbi-tools skills","Microsoft Fabric Git guidance"],"artifactTypes":["branches","pull requests","pipelines","releases","Fabric Git mappings"],"focus":"Own Git, GitHub, Azure DevOps, Fabric Git integration, release sequencing, and Power BI ALM; tool installation belongs to Maintenance."},
+    {"id":"github-source-control-agent","displayName":"GitHub Source Control Agent","filename":"51-github-source-control.agent.md","level":"worker","department":"alm-devops","parent":"alm-devops-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-source-control-safety","fabric-tool-policy"],"artifactTypes":["Git branches","GitHub PRs","Actions","releases"],"focus":"Use Git and gh for authorized branches, commits, pull requests, reviews, Actions, releases, and repository settings; never expose credentials."},
+    {"id":"azure-devops-agent","displayName":"Azure DevOps Agent","filename":"52-azure-devops.agent.md","level":"worker","department":"alm-devops","parent":"alm-devops-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-source-control-safety","fabric-tool-policy"],"artifactTypes":["Azure Repos PRs","pipelines","boards","project configuration"],"focus":"Use Git and approved az devops/repos/pipelines/boards commands for Azure DevOps work, respecting repository topology and auth policy."},
+    {"id":"fabric-git-integration-agent","displayName":"Fabric Git Integration Agent","filename":"53-fabric-git-integration.agent.md","level":"worker","department":"alm-devops","parent":"alm-devops-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-source-control-safety","fabric-working-modes"],"conditionalSkills":["Microsoft Fabric Git integration guidance"],"artifactTypes":["workspace-branch mappings","Fabric Git status"],"defaultRisk":"high","focus":"Inspect and operate Fabric Git status, commit, update, mapping, and conflict workflows without inferring permission to overwrite either side."},
+    {"id":"deployment-release-agent","displayName":"Deployment & Release Agent","filename":"54-deployment-release.agent.md","level":"worker","department":"alm-devops","parent":"alm-devops-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-source-control-safety","fabric-working-modes"],"artifactTypes":["release plans","deployment pipeline evidence","release notes"],"defaultRisk":"high","focus":"Sequence DEV to TEST to PROD, PRs, deployment pipelines, parameters, release checks, rollback, and notes without assuming branch names."},
+    {"id":"power-bi-alm-agent","displayName":"Power BI ALM Agent","filename":"55-power-bi-alm.agent.md","level":"worker","department":"alm-devops","parent":"alm-devops-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-tool-policy","fabric-source-control-safety"],"conditionalSkills":["Kurt pbi-tools and PBIP skills"],"artifactTypes":["PBIX extraction","PBIP builds","deployment packages"],"focus":"Use pbi-tools for PBIX/PBIP extraction, build, CI/CD, deployment, and ALM validation—not routine PBIR visual editing."},
+
+    {"id":"applications-integration-team-lead","displayName":"Applications & Integration Team Lead","filename":"60-applications-integration-team-lead.agent.md","level":"team-lead","department":"applications-integration","parent":"fabric-workspace-master","allowedChildren":["Python & Fabric SDK Agent","REST, Authentication & XMLA Agent","SQL, ODBC & Data Access Agent"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search","execute","edit"],"primarySkills":["fabric-working-modes","fabric-tool-policy"],"conditionalSkills":["Microsoft SDK, REST, SQL consumption, and authentication skills"],"artifactTypes":["applications","SDK utilities","REST integrations","data-access code"],"focus":"Coordinate custom applications, SDK, REST/XMLA, authentication, ODBC, and data access without leaking secrets."},
+    {"id":"python-fabric-sdk-agent","displayName":"Python & Fabric SDK Agent","filename":"61-python-fabric-sdk.agent.md","level":"worker","department":"applications-integration","parent":"applications-integration-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":[],"conditionalSkills":["Microsoft Fabric SDK and Python skills"],"artifactTypes":["Python applications","SDK utilities"],"focus":"Build Python applications, SDK clients, Azure Identity integrations, APIs, processing, and local utilities with safe dependency handling."},
+    {"id":"rest-authentication-xmla-agent","displayName":"REST, Authentication & XMLA Agent","filename":"62-rest-authentication-xmla.agent.md","level":"worker","department":"applications-integration","parent":"applications-integration-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Microsoft REST and authentication guidance"],"artifactTypes":["REST clients","XMLA operations","authentication configurations"],"defaultRisk":"high","focus":"Handle Fabric/Power BI REST, az rest, audiences, Entra, SPN, managed identity, and XMLA with no secrets in commands or source."},
+    {"id":"sql-odbc-data-access-agent","displayName":"SQL, ODBC & Data Access Agent","filename":"63-sql-odbc-data-access.agent.md","level":"worker","department":"applications-integration","parent":"applications-integration-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Microsoft SQL consumption skills"],"artifactTypes":["ODBC clients","SQLAlchemy code","parameterized queries"],"focus":"Own sqlcmd, ODBC, pyodbc, SQLAlchemy, Warehouse/endpoint/database connectivity, bulk operations, and parameterized validation."},
+
+    {"id":"capability-maintenance-team-lead","displayName":"Capability Maintenance Team Lead","filename":"70-capability-maintenance-team-lead.agent.md","level":"team-lead","department":"capability-maintenance","parent":"fabric-workspace-master","allowedChildren":["Upstream Repository Sync Agent","Skill Inventory & Mapping Agent","Agent Coverage & Organization Agent","Environment & Tooling Agent","Installer Health & Regression Agent","Managed File Review Agent"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search","execute","edit"],"primarySkills":["fabric-maintenance","fabric-tool-policy","fabric-source-control-safety"],"artifactTypes":["vendor state","skill inventory","tool status","maintenance reports","installer evidence"],"focus":"Own vendor sync, skill inventory, organization, approved tool installation and updates, failed-install remediation, managed-file review, and workspace regression checks."},
+    {"id":"upstream-repository-sync-agent","displayName":"Upstream Repository Sync Agent","filename":"71-upstream-repository-sync.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-maintenance"],"artifactTypes":["vendor repository state"],"writePermissions":"clean vendor sync only; never edit, reset, or overwrite vendor content","defaultRisk":"medium","focus":"Inspect the Microsoft and Kurt repositories, preserve the original clean-repository git pull --ff-only workflow, record commits, and report dirty or diverged repositories without resetting them."},
+    {"id":"skill-inventory-mapping-agent","displayName":"Skill Inventory & Mapping Agent","filename":"72-skill-inventory-mapping.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":["fabric-maintenance"],"artifactTypes":["skill inventory","mapping report"],"focus":"Dynamically detect valid, invalid, duplicate, added, removed, renamed, changed, unmapped, and tool-assuming skills and refresh local inventory."},
+    {"id":"agent-coverage-organization-agent","displayName":"Agent Coverage & Organization Agent","filename":"73-agent-coverage-organization.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","edit"],"primarySkills":["fabric-maintenance","fabric-orchestration"],"artifactTypes":["coverage analysis","mapping proposals"],"focus":"Evaluate coverage, overlap, overload, gaps, team fit, workers, and teams; auto-apply only obvious low-risk mappings and seek approval for structural changes."},
+    {"id":"environment-tooling-agent","displayName":"Environment & Tooling Agent","filename":"74-environment-tooling.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-maintenance","fabric-tool-policy"],"artifactTypes":["tool status","installation plans","lockdown remediation reports"],"writePermissions":"approved environment/tool changes only","defaultRisk":"high","optionalToolRequestPermissions":"the only worker allowed to install default or optional tools, always after explicit user approval","focus":"Own current and future default-tool updates, failed installer follow-up, optional installation, locked-down laptop remediation, validation, rollback guidance, and tool-status refresh."},
+    {"id":"installer-health-regression-agent","displayName":"Installer Health & Regression Agent","filename":"75-installer-health-regression.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-maintenance"],"artifactTypes":["test results","installer diagnostics"],"writePermissions":"read-only validation","defaultRisk":"low","focus":"Validate source, manifests, templates, generated installer, clean/update installs, schemas, skills, tools, multi-root behavior, and privacy."},
+    {"id":"managed-file-review-agent","displayName":"Managed File Review Agent","filename":"76-managed-file-review.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-maintenance"],"artifactTypes":["managed-file diffs","review proposals"],"writePermissions":"apply user-requested managed-file changes only after explicit approval","defaultRisk":"high","focus":"Review requested differences between installer-managed files and local customisations without changing the original installer update behaviour; apply an approved amendment only when the user asks."}
+  ]
+}
+
+'@
+$agentManifest = $agentManifestJson | ConvertFrom-Json
 trap {
     Write-Host "`nERROR: $_" -ForegroundColor Red
     Read-Host "`nPress Enter to close"
@@ -28,16 +107,13 @@ trap {
 # PACKAGE MANIFEST  -- files managed by this installer
 # These will be created or overwritten. All other files are left alone.
 # =====================================================================
-$managedAgents = @(
-    '1-fabric-workspace-master-agent.agent.md',
-    '2-fabric-skills-maintainer.agent.md',
-    '3-semantic-model-agent.agent.md',
-    '4-fabric-data-engineer.agent.md',
-    '5-fabric-admin.agent.md',
-    '6-fabric-app-dev.agent.md',
-    '7-fabric-reports-agent.agent.md',
-    '8-fabric-pipelines-agent.agent.md',
-    '9-fabric-devops-agent.agent.md'
+$managedAgents = @($agentManifest.agents | ForEach-Object { $_.filename })
+$legacyManagedAgents = @(
+    '1-fabric-workspace-master-agent.agent.md','2-fabric-skills-maintainer.agent.md',
+    '3-semantic-model-agent.agent.md','4-fabric-data-engineer.agent.md',
+    '5-fabric-admin.agent.md','6-fabric-app-dev.agent.md',
+    '7-fabric-reports-agent.agent.md','8-fabric-pipelines-agent.agent.md',
+    '9-fabric-devops-agent.agent.md','76-update-conflict-reconciliation.agent.md'
 )
 $managedSkills = @(
     'fabric-tmdl',
@@ -48,7 +124,6 @@ $managedConfigs = @(
     '.github\copilot-instructions.md',
     '.github\agent-docs\starting-flow.md',
     '.github\agent-docs\working-flow-reference.md',
-    '.github\agent-docs\tool-status.json',
     'AGENTS.md',
     '.gitignore',
     '.vscode\tasks.json',
@@ -105,12 +180,20 @@ function Update-InstallerPath {
 function Add-DirToPath {
     param([string]$Dir)
     if (-not $Dir) { return }
-    if ($env:Path -notlike "*$Dir*") { $env:Path = "$Dir;$env:Path" }
+    # Always move the requested directory to the front of the current session,
+    # even when it already exists later in PATH. Merely checking for presence
+    # leaves an older machine-wide executable ahead of a newer per-user one.
+    $normalizedDir = $Dir.TrimEnd('\')
+    $sessionRest = @($env:Path -split ';' | Where-Object {
+        $_ -and ($_.TrimEnd('\') -ine $normalizedDir)
+    })
+    $env:Path = (@($Dir) + $sessionRest) -join ';'
     try {
         $userPath = [System.Environment]::GetEnvironmentVariable('Path', 'User')
-        if ($userPath -notlike "*$Dir*") {
+        $userEntries = @($userPath -split ';' | Where-Object { $_ })
+        if (-not @($userEntries | Where-Object { $_.TrimEnd('\') -ieq $normalizedDir })) {
             [System.Environment]::SetEnvironmentVariable(
-                'Path', ((@($userPath, $Dir) | Where-Object { $_ }) -join ';'), 'User')
+                'Path', ((@($userEntries) + $Dir) -join ';'), 'User')
         }
     } catch { }
 }
@@ -145,6 +228,26 @@ function Sync-ToolPaths {
                 ForEach-Object { Add-DirToPath $_.FullName }
         }
     }
+
+    # 4. Prefer portable tools installed by this installer. Windows normally
+    #    builds a new process PATH as Machine + User, so an older machine-wide
+    #    executable (for example C:\Program Files\GitHub CLI\gh.exe) can win over
+    #    a newer per-user portable copy even though the update succeeded. Put the
+    #    exact installer-managed executable folders first for this run and for the
+    #    VS Code process launched at the end of setup.
+    $managedPortableTools = @(
+        @{ Root = "$env:LOCALAPPDATA\Programs\gh";            Exe = 'gh.exe' },
+        @{ Root = "$env:LOCALAPPDATA\Programs\sqlcmd";        Exe = 'sqlcmd.exe' },
+        @{ Root = "$env:LOCALAPPDATA\Programs\TabularEditor"; Exe = 'TabularEditor.exe' },
+        @{ Root = "$env:LOCALAPPDATA\Programs\pbi-tools";     Exe = 'pbi-tools.exe' }
+    )
+    foreach ($managed in $managedPortableTools) {
+        if (Test-Path $managed.Root) {
+            $exe = Get-ChildItem $managed.Root -Recurse -File -Filter $managed.Exe -ErrorAction SilentlyContinue |
+                   Select-Object -First 1
+            if ($exe) { Add-DirToPath $exe.DirectoryName }
+        }
+    }
 }
 
 # -- Helper: resilient "is this CLI on PATH yet?" check ---------------------
@@ -155,10 +258,19 @@ function Sync-ToolPaths {
 # recognised in the SAME run, without forcing the user to re-launch the installer.
 function Test-CliResilient {
     param([string]$Name, [int]$Retries = 4)
+    $isRunnable = {
+        param([string]$CommandName)
+        $cmd = Get-Command $CommandName -ErrorAction SilentlyContinue
+        if (-not $cmd) { return $false }
+        try {
+            $output = & $cmd.Source --version 2>$null | Out-String
+            return ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($output))
+        } catch { return $false }
+    }
     for ($i = 0; $i -lt $Retries; $i++) {
-        if (Get-Command $Name -ErrorAction SilentlyContinue) { return $true }
+        if (& $isRunnable $Name) { return $true }
         Sync-ToolPaths
-        if (Get-Command $Name -ErrorAction SilentlyContinue) { return $true }
+        if (& $isRunnable $Name) { return $true }
         # Direct on-disk probe: pip drops <name>.exe/.cmd/.bat into a Scripts dir.
         foreach ($root in @("$env:APPDATA\Python", "$env:LOCALAPPDATA\Programs\Python")) {
             if (Test-Path $root) {
@@ -166,7 +278,7 @@ function Test-CliResilient {
                          -Include "$Name.exe", "$Name.cmd", "$Name.bat" | Select-Object -First 1
                 if ($hit) {
                     Add-DirToPath $hit.DirectoryName
-                    if (Get-Command $Name -ErrorAction SilentlyContinue) { return $true }
+                    if (& $isRunnable $Name) { return $true }
                 }
             }
         }
@@ -322,13 +434,15 @@ function Ensure-Python {
         $url   = "https://www.python.org/ftp/python/$pyVer/python-$pyVer-$arch.exe"
         $exe   = Join-Path $env:TEMP "python-$pyVer-$arch.exe"
         Write-Host "         Downloading Python $pyVer from python.org ..." -ForegroundColor DarkGray
-        $oldProgress = $ProgressPreference; $ProgressPreference = 'SilentlyContinue'
-        Invoke-WebRequest -Uri $url -OutFile $exe -UseBasicParsing
-        $ProgressPreference = $oldProgress
-        if (Test-Path $exe) {
+        if ((Get-FileBestEffort -Url $url -OutFile $exe) -and
+            (Test-PublisherDownload -Url $url -Path $exe) -and
+            (Test-StagedExecutable -Path $exe)) {
             Write-Host "         Installing Python silently (per-user, no admin; this can take a minute)..." -ForegroundColor DarkGray
             $proc = Start-Process $exe -ArgumentList '/quiet InstallAllUsers=0 PrependPath=1 Include_pip=1' -Wait -PassThru
             if ($proc.ExitCode -ne 0) { Write-Host "         Python installer exit code: $($proc.ExitCode)." -ForegroundColor DarkGray }
+            Remove-Item $exe -Force -ErrorAction SilentlyContinue
+        } else {
+            Write-Host "         Python installer did not pass download/signature verification." -ForegroundColor Yellow
             Remove-Item $exe -Force -ErrorAction SilentlyContinue
         }
     } catch {
@@ -572,7 +686,8 @@ function Invoke-OptionalToolPrompt {
     $hit = Resolve-ToolCommand -Aliases $Aliases -SearchRoots $SearchRoots
     if ($hit) {
         $ver = $null
-        if ($ProbeVersion) { $ver = Get-ToolVersion -Exe $hit.command -VersionArgs $VersionArgs }
+        $probe = if ($hit.path) { $hit.path } else { $hit.command }
+        if ($ProbeVersion) { $ver = Get-ToolVersion -Exe $probe -VersionArgs $VersionArgs }
         Write-Host "  ${Name}: found" -ForegroundColor Green
         Set-ToolStatus -Key $Key -Found $true -Command $hit.command -Path $hit.path -Version $ver -Category $Category -InstallMode 'ask' -AliasesChecked $Aliases
         return
@@ -600,14 +715,14 @@ function Invoke-OptionalToolPrompt {
     $hit2 = Resolve-ToolCommand -Aliases $Aliases -SearchRoots $SearchRoots
     if ($hit2) {
         $ver = $null
-        if ($ProbeVersion) { $ver = Get-ToolVersion -Exe $hit2.command -VersionArgs $VersionArgs }
+        $probe = if ($hit2.path) { $hit2.path } else { $hit2.command }
+        if ($ProbeVersion) { $ver = Get-ToolVersion -Exe $probe -VersionArgs $VersionArgs }
         Write-Host "  ${Name}: installed" -ForegroundColor Green
         Set-ToolStatus -Key $Key -Found $true -Command $hit2.command -Path $hit2.path -Version $ver -Category $Category -InstallMode 'ask' -AliasesChecked $Aliases
     } else {
         Write-Host "  ${Name}: install did not complete -- install manually: $Provider" -ForegroundColor Yellow
-        Write-Host "         Or install it later via the agent: open this workspace in VS Code," -ForegroundColor DarkGray
-        Write-Host "         select '1 - Fabric Workspace Master Agent', and paste the specialist-CLI" -ForegroundColor DarkGray
-        Write-Host "         prompt from the project README ('Corporate / locked-down PCs' section)." -ForegroundColor DarkGray
+        Write-Host "         Or finish it later in VS Code: select '10 - Capability Maintenance" -ForegroundColor DarkGray
+        Write-Host "         Team Lead', name this failed tool, and approve its recovery plan." -ForegroundColor DarkGray
         Set-ToolStatus -Key $Key -Found $false -Reason 'install attempted; not detected' -Category $Category -InstallMode 'ask' -AliasesChecked $Aliases
     }
 }
@@ -617,15 +732,113 @@ function Invoke-OptionalToolPrompt {
 # corporate proxies even where the binary asset host (objects.githubusercontent
 # .com) is filtered -- so we resolve the exact "latest" asset URL here and let
 # the download helper worry about actual reachability. Never throws.
+$script:GitHubAssetVerification = @{}
 function Get-GitHubReleaseAssetUrl {
     param([string]$Repo, [string]$NamePattern)
     try {
         $rel = Invoke-RestMethod "https://api.github.com/repos/$Repo/releases/latest" `
                  -Headers @{ 'User-Agent' = 'fabric-agentic-installer' } -TimeoutSec 30
         $asset = $rel.assets | Where-Object { $_.name -match $NamePattern } | Select-Object -First 1
-        if ($asset) { return $asset.browser_download_url }
+        if ($asset) {
+            $checksum = $rel.assets | Where-Object {
+                $_.name -match '(?i)(sha256|checksums?|hashes)' -and
+                $_.name -match '(?i)\.(txt|sha256|sha256sum)$'
+            } | Select-Object -First 1
+            $script:GitHubAssetVerification[[string]$asset.browser_download_url] = [ordered]@{
+                repo        = $Repo
+                assetName   = [string]$asset.name
+                checksumUrl = if ($checksum) { [string]$checksum.browser_download_url } else { $null }
+            }
+            return $asset.browser_download_url
+        }
     } catch { }
     return $null
+}
+
+# Verify a downloaded GitHub release asset against the publisher's checksum file
+# when the release provides one. If no checksum asset exists, retain official HTTPS
+# release provenance and report that validation is necessarily best-effort.
+function Test-PublisherDownload {
+    param([string]$Url, [string]$Path, [string]$ExpectedSha256 = $null)
+    if (-not $Url -or -not $Path -or -not (Test-Path $Path)) { return $false }
+    if (-not ([uri]$Url).Scheme.Equals('https', [StringComparison]::OrdinalIgnoreCase)) {
+        Write-Host "         Refusing a non-HTTPS download." -ForegroundColor Yellow
+        return $false
+    }
+    try {
+        $actual = (Get-FileHash $Path -Algorithm SHA256).Hash.ToUpperInvariant()
+        if ($ExpectedSha256) {
+            if ($actual -ne $ExpectedSha256.ToUpperInvariant()) {
+                Write-Host "         SHA256 verification failed." -ForegroundColor Yellow
+                return $false
+            }
+            Write-Host "         Verified SHA256 against the pinned publisher value." -ForegroundColor DarkGray
+            return $true
+        }
+
+        $meta = $script:GitHubAssetVerification[$Url]
+        if ($meta -and $meta.checksumUrl) {
+            $sumFile = Join-Path $env:TEMP ("fbs_" + [IO.Path]::GetRandomFileName() + '.txt')
+            try {
+                if (-not (Get-FileBestEffort -Url $meta.checksumUrl -OutFile $sumFile)) {
+                    Write-Host "         Publisher checksum file could not be downloaded; rejecting this asset." -ForegroundColor Yellow
+                    return $false
+                }
+                $escapedName = [regex]::Escape([string]$meta.assetName)
+                $expected = $null
+                foreach ($line in Get-Content -LiteralPath $sumFile -ErrorAction Stop) {
+                    if ($line -match "(?i)^\s*([a-f0-9]{64})\s+[* ]?$escapedName\s*$") { $expected = $Matches[1]; break }
+                    if ($line -match "(?i)^\s*SHA256\s*\($escapedName\)\s*=\s*([a-f0-9]{64})\s*$") { $expected = $Matches[1]; break }
+                }
+                if (-not $expected) {
+                    Write-Host "         Publisher checksum did not contain the selected asset; rejecting it." -ForegroundColor Yellow
+                    return $false
+                }
+                if ($actual -ne $expected.ToUpperInvariant()) {
+                    Write-Host "         Publisher SHA256 verification failed." -ForegroundColor Yellow
+                    return $false
+                }
+                Write-Host "         Verified SHA256 from the official publisher checksum file." -ForegroundColor DarkGray
+                return $true
+            } finally {
+                Remove-Item $sumFile -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        $hostName = ([uri]$Url).DnsSafeHost
+        Write-Host "         No publisher checksum asset is available; official HTTPS provenance ($hostName) will be combined with executable validation." -ForegroundColor DarkGray
+        return $true
+    } catch {
+        Write-Host "         Download verification failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        return $false
+    }
+}
+
+# Validate an executable before a staged payload is allowed to replace a live tool.
+# Signed executables must have a valid Authenticode signature; unsigned executables
+# are accepted only with a non-empty PE image and the provenance/checksum checks above.
+function Test-StagedExecutable {
+    param([string]$Path)
+    if (-not $Path -or -not (Test-Path $Path) -or (Get-Item $Path).Length -lt 2) { return $false }
+    try {
+        $stream = [IO.File]::OpenRead($Path)
+        try { $b0 = $stream.ReadByte(); $b1 = $stream.ReadByte() } finally { $stream.Dispose() }
+        if ($b0 -ne 0x4D -or $b1 -ne 0x5A) {
+            Write-Host "         Extracted executable is not a valid PE image." -ForegroundColor Yellow
+            return $false
+        }
+        $sig = Get-AuthenticodeSignature -FilePath $Path
+        if ($sig.SignerCertificate) {
+            if ($sig.Status -ne 'Valid') {
+                Write-Host "         Authenticode verification failed: $($sig.Status)." -ForegroundColor Yellow
+                return $false
+            }
+            Write-Host "         Authenticode verified: $($sig.SignerCertificate.Subject)." -ForegroundColor DarkGray
+        } else {
+            Write-Host "         Executable is unsigned; PE structure and publisher download provenance were validated best-effort." -ForegroundColor DarkGray
+        }
+        return $true
+    } catch { return $false }
 }
 
 # -- Helper: download via Delivery Optimization (DoSvc) COM ---------------
@@ -757,7 +970,7 @@ function Get-FileBestEffort {
     if (Test-Path $OutFile) { Remove-Item $OutFile -Force -ErrorAction SilentlyContinue }
     if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
         try {
-            & curl.exe -L --ssl-no-revoke --retry 3 --retry-all-errors --fail -s -S -o $OutFile $Url 2>$null
+            & curl.exe -L --ssl-no-revoke --connect-timeout 15 --max-time 90 --retry 3 --retry-all-errors --fail -s -S -o $OutFile $Url 2>$null
             if ((Test-Path $OutFile) -and ((Get-Item $OutFile).Length -gt 0)) { return $true }
         } catch { }
     }
@@ -778,34 +991,73 @@ function Get-FileBestEffort {
     return $false
 }
 
+# -- Helper: atomically activate a validated portable payload ----------------
+# Extraction happens in a sibling staging directory. The currently working tool
+# remains untouched until the staged executable passes validation; if activation
+# fails after the swap begins, the previous directory is restored.
+function Install-StagedToolPayload {
+    param([string]$PayloadPath, [string]$PayloadType, [string]$DestName, [string]$ExeName)
+    $programs = Join-Path $env:LOCALAPPDATA 'Programs'
+    $dest = Join-Path $programs $DestName
+    $nonce = [Guid]::NewGuid().ToString('N')
+    $stage = "$dest.__staging_$nonce"
+    $backup = "$dest.__backup_$nonce"
+    $activated = $false
+    try {
+        New-Item -ItemType Directory -Path $programs -Force | Out-Null
+        New-Item -ItemType Directory -Path $stage -Force | Out-Null
+        if ($PayloadType -eq 'msi') {
+            $p = Start-Process msiexec -ArgumentList @('/a', "`"$PayloadPath`"", '/qn', "TARGETDIR=`"$stage`"") -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "MSI extraction failed with exit code $($p.ExitCode)." }
+        } else {
+            Expand-Archive -LiteralPath $PayloadPath -DestinationPath $stage -Force
+        }
+        $candidate = Get-ChildItem -LiteralPath $stage -Recurse -File -Filter $ExeName -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $candidate -or -not (Test-StagedExecutable -Path $candidate.FullName)) {
+            throw "The staged $ExeName payload did not pass validation."
+        }
+
+        if (Test-Path -LiteralPath $dest) { Move-Item -LiteralPath $dest -Destination $backup -Force }
+        try {
+            Move-Item -LiteralPath $stage -Destination $dest -Force
+            $installed = Get-ChildItem -LiteralPath $dest -Recurse -File -Filter $ExeName -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $installed -or -not (Test-StagedExecutable -Path $installed.FullName)) {
+                throw "The activated $ExeName payload could not be revalidated."
+            }
+            $activated = $true
+            Add-DirToPath $installed.DirectoryName
+            if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Recurse -Force }
+            return $true
+        } catch {
+            if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Recurse -Force -ErrorAction SilentlyContinue }
+            if (Test-Path -LiteralPath $backup) { Move-Item -LiteralPath $backup -Destination $dest -Force }
+            throw
+        }
+    } catch {
+        Write-Host "         Portable activation failed; the previous version was preserved: $($_.Exception.Message)" -ForegroundColor DarkGray
+        return $false
+    } finally {
+        if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
+        if (-not $activated -and (Test-Path -LiteralPath $backup) -and -not (Test-Path -LiteralPath $dest)) {
+            Move-Item -LiteralPath $backup -Destination $dest -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 # -- Helper: install a portable tool from a .zip into %LOCALAPPDATA% ------
-# Downloads the zip, extracts to %LOCALAPPDATA%\Programs\<DestName>, locates
-# <ExeName> anywhere inside, and appends its folder to PATH (session + persisted
-# User scope, via Add-DirToPath). Fully best-effort: any failure returns $false
-# and the caller surfaces the manual link. Optional SHA256 pin verified when set.
+# Downloads and verifies the zip, then delegates staged validation, activation,
+# rollback, and PATH registration to Install-StagedToolPayload.
 function Install-PortableZipTool {
     param([string]$Url, [string]$DestName, [string]$ExeName, [string]$Sha256 = $null)
     if (-not $Url) { return $false }
     $tmp = Join-Path $env:TEMP ("fbz_" + [IO.Path]::GetRandomFileName() + ".zip")
     if (-not (Get-FileBestEffort -Url $Url -OutFile $tmp)) { return $false }
-    if ($Sha256) {
-        try {
-            if ((Get-FileHash $tmp -Algorithm SHA256).Hash -ne $Sha256.ToUpper()) {
-                Remove-Item $tmp -Force -ErrorAction SilentlyContinue; return $false
-            }
-        } catch { }
-    }
-    $dest = Join-Path "$env:LOCALAPPDATA\Programs" $DestName
     try {
-        if (Test-Path $dest) { Remove-Item $dest -Recurse -Force -ErrorAction SilentlyContinue }
-        New-Item -ItemType Directory -Path $dest -Force | Out-Null
-        Expand-Archive -Path $tmp -DestinationPath $dest -Force
-    } catch { Remove-Item $tmp -Force -ErrorAction SilentlyContinue; return $false }
-    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-    $exe = Get-ChildItem $dest -Recurse -File -Filter $ExeName -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $exe) { return $false }
-    Add-DirToPath $exe.DirectoryName
-    return $true
+        if (-not (Test-PublisherDownload -Url $Url -Path $tmp -ExpectedSha256 $Sha256)) { return $false }
+        return (Install-StagedToolPayload -PayloadPath $tmp -PayloadType 'zip' -DestName $DestName -ExeName $ExeName)
+    } finally {
+        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+    }
 }
 
 # -- Helper: install a tool via `winget download` (no admin) --------------
@@ -852,19 +1104,8 @@ function Install-ViaWingetDownload {
                        Where-Object { $_.Extension -in '.msi', '.zip' } | Select-Object -First 1
         }
         if (-not $fetched) { return $false }
-        $dest = Join-Path "$env:LOCALAPPDATA\Programs" $DestName
-        if (Test-Path $dest) { Remove-Item $dest -Recurse -Force -ErrorAction SilentlyContinue }
-        New-Item -ItemType Directory -Path $dest -Force | Out-Null
-        if ($fetched.Extension -eq '.msi') {
-            $p = Start-Process msiexec -ArgumentList @('/a', "`"$($fetched.FullName)`"", '/qn', "TARGETDIR=`"$dest`"") -Wait -PassThru
-            if ($p.ExitCode -ne 0) { return $false }
-        } else {
-            Expand-Archive -Path $fetched.FullName -DestinationPath $dest -Force
-        }
-        $exe = Get-ChildItem $dest -Recurse -File -Filter $ExeName -ErrorAction SilentlyContinue | Select-Object -First 1
-        if (-not $exe) { return $false }
-        Add-DirToPath $exe.DirectoryName
-        return $true
+        Write-Host "         winget verified the publisher manifest and installer hash before extraction." -ForegroundColor DarkGray
+        return (Install-StagedToolPayload -PayloadPath $fetched.FullName -PayloadType $fetched.Extension.TrimStart('.') -DestName $DestName -ExeName $ExeName)
     } catch {
         return $false
     } finally {
@@ -943,6 +1184,8 @@ function Invoke-ToolUpdateCheck {
     Write-Host ""
     Write-Host "  Checking installed tools for updates (best-effort; blocked lookups are skipped)..." -ForegroundColor Cyan
     $script:UpdOutdated = $false
+    $script:UpdChecked = 0
+    $script:UpdUnverified = 0
 
     $py         = Find-RealPython
     $azVenvPy   = Join-Path $env:USERPROFILE '.fabric-az\Scripts\python.exe'
@@ -961,10 +1204,22 @@ function Invoke-ToolUpdateCheck {
     # Prompt + run one tool's update, then re-detect and refresh its version.
     $checkOne = {
         param([string]$Key, [string]$Name, [string]$Installed, [string]$Latest, [scriptblock]$DoUpdate, [scriptblock]$ReDetect)
-        if (-not $Installed -or -not $Latest) { return }              # unknown -> skip quietly
-        if (-not (Test-UpdateAvailable $Installed $Latest)) { return } # already current
+        $installedTok = Get-VersionToken $Installed
+        if ($installedTok -and $script:ToolStatus[$Key]) {
+            $script:ToolStatus[$Key].version = $installedTok
+        }
+        if (-not $Installed -or -not $Latest) {
+            $script:UpdUnverified++
+            Write-Host ("    [Unverified] {0} -- installed or latest version could not be confirmed." -f $Name) -ForegroundColor DarkGray
+            return
+        }
+        $script:UpdChecked++
+        if (-not (Test-UpdateAvailable $Installed $Latest)) {
+            Write-Host ("    [Current] {0} ({1})" -f $Name, (Get-VersionToken $Installed)) -ForegroundColor Green
+            return
+        }
         $script:UpdOutdated = $true
-        Write-Host ("  {0}: v{1} installed, v{2} available." -f $Name, (Get-VersionToken $Installed), (Get-VersionToken $Latest)) -ForegroundColor Yellow
+        Write-Host ("    [Update] {0}: v{1} installed, v{2} available." -f $Name, (Get-VersionToken $Installed), (Get-VersionToken $Latest)) -ForegroundColor Yellow
         $ans = Read-Host ("         Update {0} now? (Y/N)" -f $Name)
         if ($ans -notmatch '^(y|yes)$') { Write-Host "         Skipped." -ForegroundColor DarkGray; return }
         Write-Host ("         Updating {0} (best-effort)..." -f $Name) -ForegroundColor White
@@ -975,7 +1230,7 @@ function Invoke-ToolUpdateCheck {
         if ($newTok) {
             if ($script:ToolStatus[$Key]) { $script:ToolStatus[$Key].version = $newTok }
             if (Test-UpdateAvailable $newTok $Latest) {
-                Write-Host ("  {0}: still v{1} -- update did not complete (network/proxy). Try again later." -f $Name, $newTok) -ForegroundColor Yellow
+                Write-Host ("  {0}: still v{1} -- the selected executable was not replaced. Review the install output or try again later." -f $Name, $newTok) -ForegroundColor Yellow
             } else {
                 Write-Host ("  {0}: updated to v{1}." -f $Name, $newTok) -ForegroundColor Green
             }
@@ -1009,16 +1264,32 @@ function Invoke-ToolUpdateCheck {
             { Get-ToolVersion -Exe (& $probeTarget 'pbir') }
     }
 
-    # gh (GitHub release) -- re-run install action (winget-download then zip).
+    # gh (GitHub release) -- authoritative current portable release first;
+    # winget-download remains the locked-down/proxy-friendly fallback.
     if ($script:ToolStatus['gh'] -and $script:ToolStatus['gh'].found) {
         & $checkOne 'gh' 'GitHub CLI (gh)' (Get-ToolVersion -Exe (& $probeTarget 'gh')) (Get-LatestGitHubVersion 'cli/cli') `
             {
-                if (-not (Install-ViaWingetDownload -WingetId 'GitHub.cli' -ExeName 'gh.exe' -DestName 'gh')) {
-                    $u = Get-GitHubReleaseAssetUrl -Repo 'cli/cli' -NamePattern "gh_.*_windows_$arch\.zip$"
-                    Install-PortableZipTool -Url $u -DestName 'gh' -ExeName 'gh.exe' | Out-Null
+                $u = Get-GitHubReleaseAssetUrl -Repo 'cli/cli' -NamePattern "gh_.*_windows_$arch\.zip$"
+                $portableOk = $false
+                if ($u) { $portableOk = Install-PortableZipTool -Url $u -DestName 'gh' -ExeName 'gh.exe' }
+                if (-not $portableOk) {
+                    Install-ViaWingetDownload -WingetId 'GitHub.cli' -ExeName 'gh.exe' -DestName 'gh' | Out-Null
                 }
             } `
-            { Get-ToolVersion -Exe (& $probeTarget 'gh') }
+            {
+                # Do not re-use the pre-update cached path: it may point to an
+                # older machine-wide gh while the successful portable update is
+                # under the user's profile.
+                $h = Resolve-ToolCommand -Aliases @('gh') -SearchRoots @("$env:LOCALAPPDATA\Programs\gh")
+                if ($h) {
+                    $target = if ($h.path) { $h.path } else { $h.command }
+                    $script:ToolStatus['gh'].command = $h.command
+                    $script:ToolStatus['gh'].path = $h.path
+                    Get-ToolVersion -Exe $target
+                } else {
+                    Get-ToolVersion -Exe (& $probeTarget 'gh')
+                }
+            }
     }
 
     # sqlcmd (GitHub release, go-sqlcmd) -- re-run install action.
@@ -1071,9 +1342,8 @@ function Invoke-ToolUpdateCheck {
             { try { (& az extension list --query "[?name=='azure-devops'].version" -o tsv 2>$null | Select-Object -First 1) } catch { $null } }
     }
 
-    if (-not $script:UpdOutdated) {
-        Write-Host "  All installed tools are up to date (or their latest version could not be checked)." -ForegroundColor DarkGray
-    }
+    Write-Host ("  Update review complete: {0} version(s) confirmed; {1} lookup(s) unverified." -f $script:UpdChecked, $script:UpdUnverified) -ForegroundColor DarkGray
+    Write-Host "  Python is handled separately as a CLI prerequisite, and VS Code manages extension/MCP updates; this review changes neither." -ForegroundColor DarkGray
 }
 
 # -- Helper: merge installer-owned keys into existing JSON settings -----
@@ -1108,7 +1378,223 @@ function Merge-JsonSettings ([string]$Path, [hashtable]$Required) {
     Set-Content -Path $Path -Value $json -Encoding UTF8
 }
 
-$totalSteps = 8
+# -- Helpers: independent business repository onboarding ----------------
+function ConvertTo-SafeFolderName {
+    param([string]$Name, [string]$Default = 'Repository')
+    $value = ([string]$Name).Trim()
+    if ([string]::IsNullOrWhiteSpace($value)) { $value = $Default }
+    foreach ($c in [IO.Path]::GetInvalidFileNameChars()) { $value = $value.Replace([string]$c, '-') }
+    $value = [regex]::Replace($value, '\s+', ' ').Trim().TrimEnd('.', ' ')
+    if ($value -in @('.', '..') -or [string]::IsNullOrWhiteSpace($value)) { $value = $Default }
+    return $value
+}
+
+function Read-NonNegativeCount {
+    param([string]$Prompt, [int]$Default = 0)
+    while ($true) {
+        $raw = Read-Host $Prompt
+        if ([string]::IsNullOrWhiteSpace($raw)) { return $Default }
+        $count = 0
+        if ([int]::TryParse($raw, [ref]$count) -and $count -ge 0 -and $count -le 50) { return $count }
+        Write-Host '  Enter a whole number from 0 to 50.' -ForegroundColor Yellow
+    }
+}
+
+function Test-BusinessRepositoryUrl {
+    param([string]$Provider, [string]$Url)
+    $value = ([string]$Url).Trim()
+    if ([string]::IsNullOrWhiteSpace($value) -or $value.StartsWith('-') -or $value -match '[\r\n]') { return $false }
+
+    # Local bare repositories are accepted only by the isolated regression harness.
+    if ($env:FABRIC_AGENTIC_ALLOW_LOCAL_REPO_FIXTURES -eq '1' -and $value -match '^file://') { return $true }
+
+    if ($value -match '^https?://') {
+        try {
+            $uri = [Uri]$value
+            # Clone URLs are repository identities, not API links. Reject query
+            # strings and fragments so tokens cannot be smuggled into the local
+            # repository map through an otherwise valid HTTPS URL.
+            if (-not [string]::IsNullOrWhiteSpace($uri.Query) -or
+                -not [string]::IsNullOrWhiteSpace($uri.Fragment)) { return $false }
+            # Never accept an embedded password/token. Azure DevOps HTTPS URLs may
+            # legitimately contain a username-like organisation prefix before @.
+            if ($uri.UserInfo -match ':') { return $false }
+            if ($Provider -eq 'github' -and -not [string]::IsNullOrWhiteSpace($uri.UserInfo)) { return $false }
+        } catch { return $false }
+    }
+
+    if ($Provider -eq 'github') {
+        return ($value -match '^https://github\.com/[^/\s]+/[^/\s]+/?$' -or
+                $value -match '^git@github\.com:[^/\s]+/[^/\s]+$' -or
+                $value -match '^ssh://git@github\.com/[^/\s]+/[^/\s]+/?$')
+    }
+    if ($Provider -eq 'azure-devops') {
+        return ($value -match '^https://(?:[^/@\s]+@)?dev\.azure\.com/[^/\s]+/[^/\s]+/_git/[^/\s]+/?$' -or
+                $value -match '^https://[^./\s]+\.visualstudio\.com/[^/\s]+/_git/[^/\s]+/?$' -or
+                $value -match '^git@ssh\.dev\.azure\.com:v3/[^/\s]+/[^/\s]+/[^/\s]+$' -or
+                $value -match '^ssh://git@ssh\.dev\.azure\.com/v3/[^/\s]+/[^/\s]+/[^/\s]+/?$')
+    }
+    return $false
+}
+
+function Get-NormalizedRepositoryUrl {
+    param([string]$Url)
+    $value = ([string]$Url).Trim().Replace('\', '/').TrimEnd('/')
+    if ($value.EndsWith('.git', [StringComparison]::OrdinalIgnoreCase)) {
+        $value = $value.Substring(0, $value.Length - 4)
+    }
+    return $value.ToLowerInvariant()
+}
+
+function Test-GitBranchName {
+    param([string]$Name)
+    if ([string]::IsNullOrWhiteSpace($Name) -or $Name.StartsWith('-')) { return $false }
+    try {
+        & git check-ref-format --branch $Name 2>$null | Out-Null
+        return ($LASTEXITCODE -eq 0)
+    } catch { return $false }
+}
+
+function Read-BranchName {
+    param([string]$Label, [string]$Default)
+    while ($true) {
+        $value = Read-Host "    Branch for $Label (default: $Default)"
+        if ([string]::IsNullOrWhiteSpace($value)) { $value = $Default }
+        $value = $value.Trim()
+        if (Test-GitBranchName $value) { return $value }
+        Write-Host "    '$value' is not a valid Git branch name." -ForegroundColor Yellow
+    }
+}
+
+function Read-WritePolicy {
+    param([string]$Label, [string]$Default = 'ask-before-write')
+    Write-Host "    Write policy for ${Label}:" -ForegroundColor DarkGray
+    Write-Host '      [1] feature-branch-or-development' -ForegroundColor DarkGray
+    Write-Host '      [2] ask-before-write' -ForegroundColor DarkGray
+    Write-Host '      [3] read-only' -ForegroundColor DarkGray
+    $choice = Read-Host "    Select 1-3 (default: $(if ($Default -eq 'read-only') {'3'} elseif ($Default -eq 'feature-branch-or-development') {'1'} else {'2'}))"
+    if ([string]::IsNullOrWhiteSpace($choice)) { return $Default }
+    if ($choice -eq '1') { return 'feature-branch-or-development' }
+    if ($choice -eq '3') { return 'read-only' }
+    return 'ask-before-write'
+}
+
+function New-RepositoryEnvironmentPlan {
+    param(
+        [string]$Label,
+        [string]$DefaultBranch,
+        [string]$PromotionTarget,
+        [string]$DefaultPolicy = 'ask-before-write',
+        [bool]$DefaultPrRequired = $true
+    )
+    $branch = Read-BranchName -Label $Label -Default $DefaultBranch
+    $policy = Read-WritePolicy -Label $Label -Default $DefaultPolicy
+    $prDefault = if ($DefaultPrRequired) { 'Y/n' } else { 'y/N' }
+    $prAnswer = Read-Host "    Require a pull request from $Label to its promotion target? ($prDefault)"
+    $prRequired = if ($DefaultPrRequired) { $prAnswer -notmatch '^(n|no)$' } else { $prAnswer -match '^(y|yes)$' }
+    return [pscustomobject][ordered]@{
+        label                 = $Label
+        branch                = $branch
+        promotionTarget       = if ([string]::IsNullOrWhiteSpace($PromotionTarget)) { $null } else { $PromotionTarget }
+        writePolicy           = $policy
+        pullRequestRequired   = [bool]$prRequired
+        localFabricFolderId   = $null
+        fabricWorkspaceName   = $null
+        fabricWorkspaceId     = $null
+        validationStatus      = 'pending'
+    }
+}
+
+function Test-RepositoryBranchExists {
+    param([string]$RepositoryPath, [string]$Branch)
+    if ([string]::IsNullOrWhiteSpace($Branch)) { return $false }
+    & git -C $RepositoryPath show-ref --verify --quiet "refs/heads/$Branch" 2>$null
+    if ($LASTEXITCODE -eq 0) { return $true }
+    & git -C $RepositoryPath show-ref --verify --quiet "refs/remotes/origin/$Branch" 2>$null
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Get-RepositoryBranchStartPoint {
+    param([string]$RepositoryPath, [string]$Branch)
+    & git -C $RepositoryPath show-ref --verify --quiet "refs/heads/$Branch" 2>$null
+    if ($LASTEXITCODE -eq 0) { return $Branch }
+    & git -C $RepositoryPath show-ref --verify --quiet "refs/remotes/origin/$Branch" 2>$null
+    if ($LASTEXITCODE -eq 0) { return "origin/$Branch" }
+    return $null
+}
+
+function Merge-CodeWorkspace {
+    param([string]$Path, [array]$BusinessRoots)
+    $workspace = [ordered]@{}
+    $folders = @()
+    if (Test-Path -LiteralPath $Path) {
+        try {
+            $parsed = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+            foreach ($prop in $parsed.PSObject.Properties) { $workspace[$prop.Name] = $prop.Value }
+            $folders = @($parsed.folders)
+        } catch {
+            $backup = "$Path.bak"
+            Copy-Item -LiteralPath $Path -Destination $backup -Force
+            Write-Host "  Backed up malformed workspace file to $([IO.Path]::GetFileName($backup))." -ForegroundColor Yellow
+        }
+    }
+
+    $seen = @{}
+    $merged = @()
+    foreach ($folder in $folders) {
+        if (-not $folder -or [string]::IsNullOrWhiteSpace([string]$folder.path)) { continue }
+        $key = ([string]$folder.path).Replace('\', '/').TrimEnd('/').ToLowerInvariant()
+        if (-not $seen.ContainsKey($key)) { $seen[$key] = $true; $merged += $folder }
+    }
+    if (-not $seen.ContainsKey('.')) {
+        $merged = @([pscustomobject][ordered]@{ name = 'Fabric Agentic Workspace'; path = '.' }) + $merged
+        $seen['.'] = $true
+    }
+    foreach ($root in @($BusinessRoots)) {
+        if (-not $root -or [string]::IsNullOrWhiteSpace([string]$root.localPath)) { continue }
+        $relative = ([string]$root.localPath).Replace('\', '/').TrimEnd('/')
+        $key = $relative.ToLowerInvariant()
+        if (-not $seen.ContainsKey($key)) {
+            $merged += [pscustomobject][ordered]@{ name = [string]$root.displayName; path = $relative }
+            $seen[$key] = $true
+        }
+    }
+    $workspace['folders'] = @($merged)
+    if (-not $workspace.Contains('settings') -or $null -eq $workspace['settings']) {
+        $workspace['settings'] = [ordered]@{}
+    }
+    $settings = $workspace['settings']
+    if ($settings -is [System.Collections.IDictionary]) {
+        if (-not $settings.Contains('git.repositoryScanIgnoredFolders')) {
+            $settings['git.repositoryScanIgnoredFolders'] = @('skills-for-fabric', 'power-bi-agentic-development')
+        }
+    } elseif ($settings -is [PSCustomObject]) {
+        if (-not $settings.PSObject.Properties['git.repositoryScanIgnoredFolders']) {
+            $settings | Add-Member -NotePropertyName 'git.repositoryScanIgnoredFolders' -NotePropertyValue @('skills-for-fabric', 'power-bi-agentic-development')
+        }
+    }
+    Write-ManagedFile -Path $Path -Content ($workspace | ConvertTo-Json -Depth 20)
+}
+
+function Add-GitIgnoreRules {
+    param([string]$Path, [string]$Heading, [string[]]$Rules)
+    $existing = ''
+    if (Test-Path -LiteralPath $Path) {
+        $existing = Get-Content -LiteralPath $Path -Raw -ErrorAction SilentlyContinue
+    }
+    $missing = @()
+    foreach ($rule in $Rules) {
+        if ($existing -notmatch "(?m)^\s*$([regex]::Escape($rule))\s*$") { $missing += $rule }
+    }
+    if ($missing.Count -eq 0) { return }
+    $prefix = if ([string]::IsNullOrWhiteSpace($existing)) { '' } else { "`r`n" }
+    $content = $prefix + "# $Heading`r`n" + ($missing -join "`r`n") + "`r`n"
+    $dir = Split-Path $Path -Parent
+    if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    Add-Content -LiteralPath $Path -Value $content -Encoding UTF8
+}
+
+$totalSteps = 9
 
 # =====================================================================
 # STEP 1  -- Workspace folder configuration
@@ -1181,10 +1667,10 @@ Write-Host "            |  sync" -ForegroundColor DarkGray
 Write-Host "            v" -ForegroundColor DarkGray
 Write-Host "     Fabric PROD Workspace       <- stable production" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "  Whatever editing method you use, changes land in the same DEV" -ForegroundColor White
-Write-Host "  workspace and are captured by the same DevOps commit -- so a" -ForegroundColor White
-Write-Host "  revert always restores it. That is why all three ways are" -ForegroundColor White
-Write-Host "  equally safe." -ForegroundColor White
+Write-Host "  Whatever editing method you use, supported item definitions can" -ForegroundColor White
+Write-Host "  follow the same DEV -> Git -> PR -> PROD promotion path. Live and" -ForegroundColor White
+Write-Host "  hybrid edits need extra care until they are validated and committed;" -ForegroundColor White
+Write-Host "  Git does not restore item data, unsupported items, or every setting." -ForegroundColor White
 Write-Host ""
 Write-Host "  ----------------------------------------------------------------" -ForegroundColor Cyan
 Write-Host "  THE THREE WAYS OF WORKING" -ForegroundColor Cyan
@@ -1272,6 +1758,162 @@ if ($wsCount -gt 0) {
     foreach ($name in $workspaceNames) {
         Write-Host "    -> $name (new)" -ForegroundColor Green
     }
+}
+
+# -- Ask separately about independent GitHub / Azure DevOps repositories --
+$businessRepoPlans = @()
+Write-Host ''
+Write-Host '  BUSINESS SOURCE-CONTROL REPOSITORIES (OPTIONAL)' -ForegroundColor Cyan
+Write-Host '  These are independent GitHub or Azure DevOps repositories used for' -ForegroundColor DarkGray
+Write-Host '  Fabric Git integration, ALM, pull requests, or business development.' -ForegroundColor DarkGray
+Write-Host '  They stay separate from this outer workspace repository.' -ForegroundColor DarkGray
+Write-Host ''
+$repoOnboardingAnswer = Read-Host '  Do you want to clone GitHub or Azure DevOps repositories used for Fabric Git integration or source control? (Y/N)'
+if ($repoOnboardingAnswer -match '^(y|yes)$') {
+    $repoCount = Read-NonNegativeCount -Prompt '  How many repositories do you want to clone?'
+    $plannedFolderNames = @()
+    for ($repoIndex = 1; $repoIndex -le $repoCount; $repoIndex++) {
+        Write-Host ''
+        Write-Host "  Repository $repoIndex of $repoCount" -ForegroundColor Cyan
+        $displayName = Read-Host "    Display name (default: Repository $repoIndex)"
+        if ([string]::IsNullOrWhiteSpace($displayName)) { $displayName = "Repository $repoIndex" }
+        $displayName = $displayName.Trim()
+
+        $provider = $null
+        while (-not $provider) {
+            Write-Host '    Provider: [1] GitHub  [2] Azure DevOps' -ForegroundColor DarkGray
+            $providerChoice = Read-Host '    Select 1 or 2'
+            if ($providerChoice -eq '1') { $provider = 'github' }
+            elseif ($providerChoice -eq '2') { $provider = 'azure-devops' }
+            else { Write-Host '    Enter 1 or 2.' -ForegroundColor Yellow }
+        }
+
+        $cloneUrl = $null
+        while (-not $cloneUrl) {
+            $candidateUrl = (Read-Host '    Clone URL (do not include a PAT or password)').Trim()
+            if (Test-BusinessRepositoryUrl -Provider $provider -Url $candidateUrl) {
+                $cloneUrl = $candidateUrl
+            } else {
+                Write-Host '    The URL does not match the selected provider, contains credentials, or is unsafe.' -ForegroundColor Yellow
+                Write-Host '    Use the normal HTTPS or SSH clone URL from GitHub/Azure DevOps.' -ForegroundColor DarkGray
+            }
+        }
+
+        $defaultFolder = ConvertTo-SafeFolderName -Name $displayName -Default "Repository-$repoIndex"
+        while ($true) {
+            $folderName = Read-Host "    Local folder name (default: $defaultFolder)"
+            if ([string]::IsNullOrWhiteSpace($folderName)) { $folderName = $defaultFolder }
+            $folderName = ConvertTo-SafeFolderName -Name $folderName -Default $defaultFolder
+            if ($plannedFolderNames -contains $folderName.ToLowerInvariant()) {
+                Write-Host "    '$folderName' is already used by another planned repository." -ForegroundColor Yellow
+            } else {
+                $plannedFolderNames += $folderName.ToLowerInvariant()
+                break
+            }
+        }
+
+        $fabricSubfolder = (Read-Host '    Optional repository subfolder connected to Fabric (blank for repository root)').Trim()
+        if ($fabricSubfolder -match '(^|[\\/])\.\.([\\/]|$)' -or $fabricSubfolder -match '^[\\/]' -or [IO.Path]::IsPathRooted($fabricSubfolder)) {
+            Write-Host '    Unsafe subfolder ignored; configure it later in repository-map.local.json.' -ForegroundColor Yellow
+            $fabricSubfolder = ''
+        }
+        $fabricSubfolder = $fabricSubfolder.Replace('\', '/').Trim('/')
+
+        Write-Host '    Functional category: [1] data  [2] reporting  [3] shared  [4] custom' -ForegroundColor DarkGray
+        $categoryChoice = Read-Host '    Select 1-4 (default: shared)'
+        $category = switch ($categoryChoice) {
+            '1' { 'data' }
+            '2' { 'reporting' }
+            '4' { 'custom' }
+            default { 'shared' }
+        }
+        $notes = (Read-Host '    Optional notes (stored only in the local gitignored map)').Trim()
+
+        Write-Host ''
+        Write-Host '    Environment topology:' -ForegroundColor DarkGray
+        Write-Host '      [1] DEV and PROD' -ForegroundColor DarkGray
+        Write-Host '      [2] DEV, TEST and PROD' -ForegroundColor DarkGray
+        Write-Host '      [3] Custom' -ForegroundColor DarkGray
+        $topologyChoice = Read-Host '    Select 1-3 (default: 1)'
+        $environments = @()
+        $topology = 'dev-prod'
+        if ($topologyChoice -eq '2') {
+            $topology = 'dev-test-prod'
+            $environments += New-RepositoryEnvironmentPlan -Label 'DEV' -DefaultBranch 'development' -PromotionTarget 'TEST' -DefaultPolicy 'feature-branch-or-development' -DefaultPrRequired $true
+            $environments += New-RepositoryEnvironmentPlan -Label 'TEST' -DefaultBranch 'test' -PromotionTarget 'PROD' -DefaultPolicy 'ask-before-write' -DefaultPrRequired $true
+            $environments += New-RepositoryEnvironmentPlan -Label 'PROD' -DefaultBranch 'main' -PromotionTarget $null -DefaultPolicy 'read-only' -DefaultPrRequired $false
+        } elseif ($topologyChoice -eq '3') {
+            $topology = 'custom'
+            $environmentCount = Read-NonNegativeCount -Prompt '    How many environments are in this topology?' -Default 1
+            if ($environmentCount -lt 1) { $environmentCount = 1 }
+            $seenLabels = @()
+            for ($environmentIndex = 1; $environmentIndex -le $environmentCount; $environmentIndex++) {
+                while ($true) {
+                    $label = (Read-Host "    Environment $environmentIndex label").Trim().ToUpperInvariant()
+                    if ([string]::IsNullOrWhiteSpace($label)) { $label = "ENV$environmentIndex" }
+                    if ($seenLabels -contains $label) { Write-Host '    Environment labels must be unique.' -ForegroundColor Yellow }
+                    else { $seenLabels += $label; break }
+                }
+                $nextTarget = (Read-Host "    Promotion target for $label (blank if final)").Trim().ToUpperInvariant()
+                if ([string]::IsNullOrWhiteSpace($nextTarget)) { $nextTarget = $null }
+                $defaultBranch = $label.ToLowerInvariant()
+                $defaultPolicy = if ($nextTarget) { 'ask-before-write' } else { 'read-only' }
+                $defaultPr = [bool]$nextTarget
+                $environments += New-RepositoryEnvironmentPlan -Label $label -DefaultBranch $defaultBranch -PromotionTarget $nextTarget -DefaultPolicy $defaultPolicy -DefaultPrRequired $defaultPr
+            }
+        } else {
+            $environments += New-RepositoryEnvironmentPlan -Label 'DEV' -DefaultBranch 'development' -PromotionTarget 'PROD' -DefaultPolicy 'feature-branch-or-development' -DefaultPrRequired $true
+            $environments += New-RepositoryEnvironmentPlan -Label 'PROD' -DefaultBranch 'main' -PromotionTarget $null -DefaultPolicy 'read-only' -DefaultPrRequired $false
+        }
+
+        $defaultWorkingEnvironment = $environments[0].label
+        $defaultEnvironmentInput = (Read-Host "    Default working environment (default: $defaultWorkingEnvironment)").Trim().ToUpperInvariant()
+        if ($defaultEnvironmentInput -and @($environments.label) -contains $defaultEnvironmentInput) {
+            $defaultWorkingEnvironment = $defaultEnvironmentInput
+        } elseif ($defaultEnvironmentInput) {
+            Write-Host "    Unknown environment '$defaultEnvironmentInput'; using $defaultWorkingEnvironment." -ForegroundColor Yellow
+        }
+
+        $fabricMapAnswer = Read-Host '    Add optional local/live Fabric workspace mappings now? (y/N)'
+        if ($fabricMapAnswer -match '^(y|yes)$') {
+            if ($workspaceNames.Count -gt 0) {
+                Write-Host "    Local Fabric folders: $($workspaceNames -join ', ')" -ForegroundColor DarkGray
+            }
+            foreach ($environment in $environments) {
+                $localFolder = (Read-Host "      $($environment.label) local Fabric folder (blank for none)").Trim()
+                if ($localFolder -and $workspaceNames -notcontains $localFolder) {
+                    Write-Host "      '$localFolder' was not scaffolded in this run; leaving the local mapping blank." -ForegroundColor Yellow
+                    $localFolder = $null
+                }
+                $environment.localFabricFolderId = $localFolder
+                $liveName = (Read-Host "      $($environment.label) live Fabric workspace name (blank for none)").Trim()
+                $liveId = (Read-Host "      $($environment.label) live Fabric workspace ID (blank for none)").Trim()
+                $environment.fabricWorkspaceName = if ($liveName) { $liveName } else { $null }
+                $environment.fabricWorkspaceId = if ($liveId) { $liveId } else { $null }
+            }
+        }
+
+        $defaultEnvironment = @($environments | Where-Object { $_.label -eq $defaultWorkingEnvironment } | Select-Object -First 1)
+        $defaultWorkingBranch = if ($defaultEnvironment.Count -gt 0) { $defaultEnvironment[0].branch } else { $environments[0].branch }
+        $businessRepoPlans += [pscustomobject][ordered]@{
+            id                        = $folderName.ToLowerInvariant().Replace(' ', '-')
+            displayName               = $displayName
+            provider                  = $provider
+            cloneUrl                  = $cloneUrl
+            folderName                = $folderName
+            localPath                 = "source-control-repositories/$folderName"
+            fabricSubfolder           = if ($fabricSubfolder) { $fabricSubfolder } else { $null }
+            category                  = $category
+            notes                     = if ($notes) { $notes } else { $null }
+            topology                  = $topology
+            defaultWorkingEnvironment = $defaultWorkingEnvironment
+            defaultWorkingBranch      = $defaultWorkingBranch
+            environments              = @($environments)
+        }
+    }
+    Write-Host "`n  $($businessRepoPlans.Count) business repository onboarding plan(s) collected." -ForegroundColor Green
+} else {
+    Write-Host '  No business repositories will be cloned. Existing mappings and clones remain untouched.' -ForegroundColor DarkGray
 }
 
 Read-Host "`n  Press Enter to continue..."
@@ -1501,7 +2143,7 @@ Write-Host ""
 Write-Host "  Specialist tools (optional -- each is detected, explained, and only" -ForegroundColor Cyan
 Write-Host "  installed if you say Yes; declining never blocks setup):" -ForegroundColor Cyan
 
-# sqlcmd -- SQL endpoint query execution (Agents 4, 6). Preferred path is a
+# sqlcmd -- SQL endpoint query execution (Data Engineering / Applications).
 # no-admin `winget download` of the go-sqlcmd MSI (proxy-friendly) which we then
 # extract with `msiexec /a`; if winget is unavailable/blocked we fall back to the
 # portable go-sqlcmd zip from GitHub releases. Either way -> %LOCALAPPDATA%\Programs.
@@ -1552,7 +2194,7 @@ Invoke-OptionalToolPrompt -Key 'pbir' -Name 'pbir CLI' `
         }
     }
 
-# pbi-tools -- PBIP DevOps workflows (Agent 9). Portable net472 Desktop build
+# pbi-tools -- PBIP DevOps workflows (ALM & DevOps). Portable net472 Desktop build
 # (runs on stock Win11; the .core/.net9 builds need an absent .NET runtime).
 # pbi-tools is not a winget package, so its only proxy-penetrating transport is
 # the Delivery-Optimization fallback baked into Get-FileBestEffort (tried after
@@ -1566,18 +2208,22 @@ Invoke-OptionalToolPrompt -Key 'pbiTools' -Name 'pbi-tools' `
         Install-PortableZipTool -Url $u -DestName 'pbi-tools' -ExeName 'pbi-tools.exe' | Out-Null
     }
 
-# gh -- GitHub PRs / Actions / releases (Agent 9). Preferred path is a no-admin
-# `winget download` of the GitHub.cli MSI (winget only FETCHES it, so no UAC),
-# extracted with `msiexec /a`; falls back to the portable zip from GitHub releases.
+# gh -- GitHub PRs / Actions / releases. Prefer GitHub's authoritative current
+# portable release. The no-admin winget download/extraction path remains the
+# corporate proxy / locked-down fallback, but is not allowed to make a fresh
+# normal install start one catalog version behind.
 Invoke-OptionalToolPrompt -Key 'gh' -Name 'GitHub CLI (gh)' `
     -Purpose 'GitHub PRs, Actions, releases and tags from the CLI.' `
     -Provider 'https://cli.github.com' `
     -Aliases @('gh') -SearchRoots @("$env:LOCALAPPDATA\Programs\gh") `
     -Prior $priorToolStatus -Install {
-        if (Install-ViaWingetDownload -WingetId 'GitHub.cli' -ExeName 'gh.exe' -DestName 'gh') { return }
         $arch = if ($env:PROCESSOR_ARCHITECTURE -match 'ARM64') { 'arm64' } else { 'amd64' }
         $u = Get-GitHubReleaseAssetUrl -Repo 'cli/cli' -NamePattern "gh_.*_windows_$arch\.zip$"
-        Install-PortableZipTool -Url $u -DestName 'gh' -ExeName 'gh.exe' | Out-Null
+        $portableOk = $false
+        if ($u) { $portableOk = Install-PortableZipTool -Url $u -DestName 'gh' -ExeName 'gh.exe' }
+        if (-not $portableOk) {
+            Install-ViaWingetDownload -WingetId 'GitHub.cli' -ExeName 'gh.exe' -DestName 'gh' | Out-Null
+        }
     }
 
 # Azure DevOps CLI extension -- bespoke detection (an `az` extension, not a binary).
@@ -1606,9 +2252,8 @@ if ($adoFound) {
             Set-ToolStatus -Key 'azureDevOpsCliExtension' -Found $true -Command 'az devops' -Category 'az-extension' -InstallMode 'ask'
         } else {
             Write-Host "  Azure DevOps CLI extension: install did not complete." -ForegroundColor Yellow
-            Write-Host "         Or install it later via the agent: open this workspace in VS Code," -ForegroundColor DarkGray
-            Write-Host "         select '1 - Fabric Workspace Master Agent', and paste the specialist-CLI" -ForegroundColor DarkGray
-            Write-Host "         prompt from the project README ('Corporate / locked-down PCs' section)." -ForegroundColor DarkGray
+            Write-Host "         Or finish it later in VS Code: select '10 - Capability Maintenance" -ForegroundColor DarkGray
+            Write-Host "         Team Lead', name Azure DevOps CLI, and approve its recovery plan." -ForegroundColor DarkGray
             Set-ToolStatus -Key 'azureDevOpsCliExtension' -Found $false -Command 'az devops' -Category 'az-extension' -InstallMode 'ask' -Reason 'install attempted; not detected'
         }
     } else {
@@ -1682,9 +2327,233 @@ if ($workspaceNames.Count -gt 0) {
 Write-Host "`n  Folder structure ready." -ForegroundColor Green
 
 # =====================================================================
-# STEP 4  -- Clone skill repositories
+# STEP 4  -- Onboard independent business source-control repositories
 # =====================================================================
-Show-Step 4 $totalSteps "Cloning Skill Repositories"
+Show-Step 4 $totalSteps "Business Source-Control Repositories"
+
+$repositoryMapPath = Join-Path $rootPath '.github\agent-docs\local\repository-map.local.json'
+$businessRepositoriesRoot = Join-Path $rootPath 'source-control-repositories'
+$workspaceFilePath = Join-Path $rootPath $workspaceFileName
+$allBusinessRepositories = @()
+$existingRepositoryMap = $null
+$repositoryMapReadable = $true
+
+if (Test-Path -LiteralPath $repositoryMapPath) {
+    try {
+        $existingRepositoryMap = Get-Content -LiteralPath $repositoryMapPath -Raw | ConvertFrom-Json
+        $allBusinessRepositories = @($existingRepositoryMap.repositories)
+        Write-Host "  Existing local repository map: $($allBusinessRepositories.Count) entr$(if ($allBusinessRepositories.Count -eq 1) {'y'} else {'ies'})." -ForegroundColor DarkGray
+    } catch {
+        $repositoryMapReadable = $false
+        Write-Host '  Existing repository-map.local.json is malformed.' -ForegroundColor Yellow
+        Write-Host '  It will be preserved exactly; new repository onboarding is skipped to avoid data loss.' -ForegroundColor Yellow
+    }
+}
+
+if ($businessRepoPlans.Count -gt 0 -and $repositoryMapReadable) {
+    # Protect nested repositories and company-specific mappings immediately, even
+    # if a later optional network operation fails before the configuration step.
+    Add-GitIgnoreRules -Path (Join-Path $rootPath '.gitignore') `
+        -Heading 'Independent business repositories and machine-specific mappings' `
+        -Rules @('source-control-repositories/', '.github/agent-docs/local/', $workspaceFileName)
+    if (-not (Test-Path -LiteralPath $businessRepositoriesRoot)) {
+        New-Item -ItemType Directory -Path $businessRepositoriesRoot -Force | Out-Null
+    }
+
+    $newRepositoryEntries = @()
+    foreach ($plan in $businessRepoPlans) {
+        Write-Host "`n  Onboarding: $($plan.displayName)" -ForegroundColor Cyan
+        $destination = [IO.Path]::GetFullPath((Join-Path $rootPath $plan.localPath))
+        $safeRoot = [IO.Path]::GetFullPath($businessRepositoriesRoot).TrimEnd('\') + '\'
+        if (-not $destination.StartsWith($safeRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            Write-Host '    Unsafe destination rejected; repository was not cloned.' -ForegroundColor Yellow
+            continue
+        }
+
+        $repositoryReady = $false
+        $createdNow = $false
+        if (Test-Path -LiteralPath $destination) {
+            $children = @(Get-ChildItem -LiteralPath $destination -Force -ErrorAction SilentlyContinue)
+            if (Test-Path -LiteralPath (Join-Path $destination '.git')) {
+                $originUrl = (& git -C $destination config --get remote.origin.url 2>$null | Select-Object -First 1)
+                if (-not $originUrl -or (Get-NormalizedRepositoryUrl $originUrl) -ne (Get-NormalizedRepositoryUrl $plan.cloneUrl)) {
+                    Write-Host '    Existing destination is a different Git repository; preserved and skipped.' -ForegroundColor Yellow
+                    continue
+                }
+                Write-Host '    Existing matching clone found; preserving its working tree.' -ForegroundColor Green
+                $repositoryReady = $true
+            } elseif ($children.Count -gt 0) {
+                Write-Host '    Destination is a non-empty, unrelated folder; preserved and skipped.' -ForegroundColor Yellow
+                continue
+            }
+        }
+
+        if (-not $repositoryReady) {
+            Write-Host '    Cloning once using your established Git credential mechanism...' -ForegroundColor White
+            $ErrorActionPreference = 'Continue'
+            try { & git clone -- $plan.cloneUrl $destination 2>&1 | Out-Null } catch { }
+            $cloneExit = $LASTEXITCODE
+            $ErrorActionPreference = 'Stop'
+            if ($cloneExit -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $destination '.git'))) {
+                Write-Host '    Clone did not complete. Check URL access, Git Credential Manager/gh/Entra/SSH, and policy.' -ForegroundColor Yellow
+                Write-Host '    No credential was recorded by the installer; continuing with other repositories.' -ForegroundColor DarkGray
+                continue
+            }
+            $repositoryReady = $true
+            $createdNow = $true
+            Write-Host '    Repository cloned.' -ForegroundColor Green
+        }
+
+        # Fetch remote references only. This does not pull, merge, reset, or touch
+        # working-tree files and is safe for a matching existing clone.
+        $ErrorActionPreference = 'Continue'
+        try { & git -C $destination fetch --prune origin 2>&1 | Out-Null } catch { }
+        $fetchExit = $LASTEXITCODE
+        $ErrorActionPreference = 'Stop'
+        if ($fetchExit -ne 0) {
+            Write-Host '    Remote fetch was blocked/offline; validating against currently available refs.' -ForegroundColor Yellow
+        }
+
+        foreach ($environment in @($plan.environments)) {
+            while ($environment.branch -and -not (Test-RepositoryBranchExists -RepositoryPath $destination -Branch $environment.branch)) {
+                Write-Host "    Branch '$($environment.branch)' for $($environment.label) was not found." -ForegroundColor Yellow
+                Write-Host '      [R] Re-enter the branch name' -ForegroundColor DarkGray
+                Write-Host '      [S] Skip this environment mapping' -ForegroundColor DarkGray
+                Write-Host '      [C] Create a local branch from an existing branch (explicit approval)' -ForegroundColor DarkGray
+                $missingChoice = (Read-Host '    Select R, S, or C').Trim().ToUpperInvariant()
+                if ($missingChoice -eq 'S') {
+                    $environment.branch = $null
+                    $environment.validationStatus = 'skipped-missing-branch'
+                    break
+                }
+                if ($missingChoice -eq 'C') {
+                    $newBranch = Read-BranchName -Label $environment.label -Default $environment.branch
+                    $baseBranch = Read-BranchName -Label 'creation base' -Default 'main'
+                    $baseStart = Get-RepositoryBranchStartPoint -RepositoryPath $destination -Branch $baseBranch
+                    if (-not $baseStart) {
+                        Write-Host "    Base branch '$baseBranch' was not found; nothing was created." -ForegroundColor Yellow
+                        continue
+                    }
+                    $confirmCreate = Read-Host "    Create local branch '$newBranch' from '$baseStart'? Type YES to approve"
+                    if ($confirmCreate -cne 'YES') {
+                        Write-Host '    Branch creation cancelled.' -ForegroundColor DarkGray
+                        continue
+                    }
+                    $ErrorActionPreference = 'Continue'
+                    try { & git -C $destination branch -- $newBranch $baseStart 2>&1 | Out-Null } catch { }
+                    $branchExit = $LASTEXITCODE
+                    $ErrorActionPreference = 'Stop'
+                    if ($branchExit -eq 0) {
+                        $environment.branch = $newBranch
+                        Write-Host "    Local branch '$newBranch' created; it was not pushed." -ForegroundColor Green
+                    } else {
+                        Write-Host '    Branch creation failed; no remote change was attempted.' -ForegroundColor Yellow
+                    }
+                    continue
+                }
+                $replacement = Read-BranchName -Label $environment.label -Default $environment.branch
+                $environment.branch = $replacement
+            }
+            if ($environment.branch -and (Test-RepositoryBranchExists -RepositoryPath $destination -Branch $environment.branch)) {
+                $environment.validationStatus = 'validated'
+            }
+        }
+
+        $defaultEnvironment = @($plan.environments | Where-Object { $_.label -eq $plan.defaultWorkingEnvironment -and $_.branch } | Select-Object -First 1)
+        if ($defaultEnvironment.Count -eq 0) {
+            $defaultEnvironment = @($plan.environments | Where-Object { $_.branch } | Select-Object -First 1)
+        }
+        $desiredBranch = if ($defaultEnvironment.Count -gt 0) { [string]$defaultEnvironment[0].branch } else { $null }
+        $currentBranch = (& git -C $destination branch --show-current 2>$null | Select-Object -First 1)
+        if ($desiredBranch -and $currentBranch -ne $desiredBranch) {
+            $switchApproved = $createdNow
+            if (-not $createdNow) {
+                $dirty = @(& git -C $destination status --porcelain 2>$null)
+                if ($dirty.Count -gt 0) {
+                    Write-Host "    Existing clone is dirty; preserving current branch '$currentBranch'." -ForegroundColor Yellow
+                    $switchApproved = $false
+                } else {
+                    $switchAnswer = Read-Host "    Existing clone is on '$currentBranch'. Switch to mapped default '$desiredBranch'? (y/N)"
+                    $switchApproved = $switchAnswer -match '^(y|yes)$'
+                }
+            }
+            if ($switchApproved) {
+                $localStart = Get-RepositoryBranchStartPoint -RepositoryPath $destination -Branch $desiredBranch
+                $ErrorActionPreference = 'Continue'
+                if ($localStart -eq $desiredBranch) {
+                    try { & git -C $destination checkout $desiredBranch 2>&1 | Out-Null } catch { }
+                } elseif ($localStart -eq "origin/$desiredBranch") {
+                    try { & git -C $destination checkout -b $desiredBranch --track "origin/$desiredBranch" 2>&1 | Out-Null } catch { }
+                }
+                $switchExit = $LASTEXITCODE
+                $ErrorActionPreference = 'Stop'
+                if ($switchExit -eq 0) {
+                    $currentBranch = $desiredBranch
+                    Write-Host "    Working branch: $desiredBranch" -ForegroundColor Green
+                } else {
+                    Write-Host "    Could not switch to '$desiredBranch'; existing checkout was preserved." -ForegroundColor Yellow
+                }
+            }
+        }
+
+        $plan.defaultWorkingEnvironment = if ($defaultEnvironment.Count -gt 0) { $defaultEnvironment[0].label } else { $null }
+        $plan.defaultWorkingBranch = $desiredBranch
+        $entry = [pscustomobject][ordered]@{
+            id                        = $plan.id
+            displayName               = $plan.displayName
+            provider                  = $plan.provider
+            remoteUrl                 = $plan.cloneUrl
+            localPath                 = $plan.localPath
+            fabricSubfolder           = $plan.fabricSubfolder
+            category                  = $plan.category
+            notes                     = $plan.notes
+            topology                  = $plan.topology
+            defaultWorkingEnvironment = $plan.defaultWorkingEnvironment
+            defaultWorkingBranch      = $plan.defaultWorkingBranch
+            currentBranchAtInstall    = $currentBranch
+            cloneStatus               = if ($createdNow) { 'cloned' } else { 'reused-existing' }
+            environments              = @($plan.environments)
+        }
+        $newRepositoryEntries += $entry
+    }
+
+    if ($newRepositoryEntries.Count -gt 0) {
+        foreach ($entry in $newRepositoryEntries) {
+            $allBusinessRepositories = @($allBusinessRepositories | Where-Object {
+                ([string]$_.id -ne [string]$entry.id) -and
+                (([string]$_.localPath).Replace('\', '/') -ne ([string]$entry.localPath).Replace('\', '/'))
+            })
+            $allBusinessRepositories += $entry
+        }
+        $repositoryMap = [ordered]@{
+            schemaVersion = 1
+            generatedAt   = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+            generatedBy   = 'installer'
+            note          = 'Machine/company-specific and gitignored. Contains no credentials. Business repositories remain independent of the outer workspace repository.'
+            repositories  = @($allBusinessRepositories)
+        }
+        Write-ManagedFile -Path $repositoryMapPath -Content ($repositoryMap | ConvertTo-Json -Depth 20)
+        Write-Host "`n  Repository map written locally for $($allBusinessRepositories.Count) independent repositor$(if ($allBusinessRepositories.Count -eq 1) {'y'} else {'ies'})." -ForegroundColor Green
+    } else {
+        Write-Host "`n  No new repository completed onboarding; any existing map was preserved." -ForegroundColor Yellow
+    }
+} elseif ($businessRepoPlans.Count -eq 0) {
+    Write-Host '  Skipped. Existing business repositories and mappings were not changed.' -ForegroundColor DarkGray
+}
+
+# Always create/merge the local multi-root workspace. Existing user-added roots
+# and top-level settings are preserved; only missing managed roots are added.
+if ($repositoryMapReadable) {
+    Merge-CodeWorkspace -Path $workspaceFilePath -BusinessRoots $allBusinessRepositories
+    Write-Host "  Multi-root workspace ready: $workspaceFileName" -ForegroundColor Green
+}
+
+Read-Host "`n  Press Enter to continue..."
+
+# =====================================================================
+# STEP 5  -- Clone skill repositories
+# =====================================================================
+Show-Step 5 $totalSteps "Cloning Skill Repositories"
 
 # NOTE: We deliberately do NOT clone microsoft/fabric-cli (https://github.com/microsoft/fabric-cli).
 # The data-goblin plugin (power-bi-agentic-development/plugins/fabric-cli/) already provides
@@ -1739,9 +2608,9 @@ try {
 Read-Host "`n  Press Enter to continue..."
 
 # =====================================================================
-# STEP 5  -- Embed custom skills
+# STEP 6  -- Embed custom skills
 # =====================================================================
-Show-Step 5 $totalSteps "Writing Custom Skills"
+Show-Step 6 $totalSteps "Writing Custom Skills"
 
 # ----- fabric-tmdl/SKILL.md ------------------------------------------
 $tmdlSkillPath = "$rootPath\.github\skills\fabric-tmdl\SKILL.md"
@@ -1764,7 +2633,7 @@ description: "Use when: editing or creating TMDL files, DAX measures, columns, r
   For TMDL/DAX language depth and validation, the semantic-model agent reads the
   cloned data-goblin skills separately; this skill layers house style on top.
 - **Updating**: edit the PS1 installer (source of truth) and re-run it, or edit this
-  file directly. The Skills Maintainer does NOT auto-modify it (it is house style,
+  file directly. Capability Maintenance does NOT auto-modify it (it is house style,
   not an external API surface).
 - **Freshness**: the date shown in the startup table is this file's real on-disk
   modification time (when this workspace last installed/updated it).
@@ -3288,111 +4157,9 @@ Write-Host "  Written: .github/skills/fabric-cli-policy/SKILL.md" -ForegroundCol
 Read-Host "`n  Press Enter to continue..."
 
 # =====================================================================
-# STEP 6  -- Generate agent definitions
+# STEP 7  -- Generate agent definitions
 # =====================================================================
-Show-Step 6 $totalSteps "Writing Agent Definitions"
-
-# ----- 1 - Fabric Workspace Master Agent (slim router) ----------------
-$masterAgentContent = @'
----
-name: "1 - Fabric Workspace Master Agent"
-description: "Master coordinator for all Fabric work. Start here. Routes to specialist agents, manages session startup, and reads skills on demand."
-tools: [execute, read, edit, search, agent, todo]
----
-
-# MANDATORY SESSION INITIALIZATION - RUNS BEFORE ANYTHING ELSE
-
-**YOU MUST COMPLETE THE STARTING FLOW BEFORE RESPONDING TO ANY USER REQUEST.
-THERE ARE ZERO EXCEPTIONS TO THIS RULE.**
-
-Do NOT answer questions. Do NOT perform tasks. Do NOT greet the user and wait.
-The ONLY thing you do on your first turn is: execute the mandatory tool calls
-below, then follow the Starting Flow.
-
-If the user asks a question or gives a task: SAVE IT silently, tell them you
-are setting up the session first, then run the Starting Flow to completion.
-Return to their question only after topic selection.
-
-**Your very first action - before reading the user's message, before responding,
-before doing anything else - is to execute these tool calls:**
-
-1. Read file: `.github/copilot-instructions.md`
-2. Read file: `AGENTS.md`
-
-These two tool calls are UNCONDITIONAL. Execute them NOW. Only after both
-complete, proceed to route.
-
----
-
-## SELF-CHECK - REPEAT THIS BEFORE EVERY RESPONSE
-
-Before generating ANY response to the user, ask yourself:
-
-> "Has the skill maintenance prompt been shown and resolved in this conversation?"
-
-- If **NO**: Read `.github/agent-docs/starting-flow.md` and follow it.
-- If **YES** and the user has been through topic selection:
-  Read `.github/agent-docs/working-flow-reference.md` and follow it.
-
-This check applies to EVERY turn, including the first one.
-
----
-
-## TOOL WARM-UP AND AUTOMATIC RECOVERY
-
-The mandatory tool calls above (read two files) serve as the warm-up.
-If any fail, read one additional file (`AGENTS.md`) and retry once.
-
-If the retry also fails, output this message and stop:
-
----
-**VS Code tool error detected.**
-
-This workspace requires **VS Code 1.117.0 or above**.
-
-**Check your version:** Help > About (or run `code --version` in a terminal).
-
-- If below 1.117.0: update from https://code.visualstudio.com
-- If 1.117.0 or above: disable then re-enable GitHub Copilot Chat AI Features,
-  open a new chat, and try again.
----
-
-Do NOT attempt any more tool calls after this. Wait for the user to act.
-
----
-
-## ROUTING
-
-After the mandatory tool calls complete, route based on session state:
-
-**IF skill maintenance has NOT been shown yet in this conversation:**
-Read `.github/agent-docs/starting-flow.md` and follow it from Phase 0.
-
-**IF the user has returned from the Skills Maintainer or skipped maintenance:**
-Continue from Phase 2 in `.github/agent-docs/starting-flow.md`.
-
-**IF topic selection is complete and user chose [0] or described a task:**
-Read `.github/agent-docs/working-flow-reference.md` and handle the request.
-
-Routing to a specialist is the ONE exception where you may suggest the user switch
-agents (via the dropdown), because specialists live as separate dropdown agents.
-Keep all OTHER mode changes invisible - never ask the user to switch for internal
-reasons. When a free-text task would clearly benefit from a specialist, you MAY
-recommend switching (see working-flow-reference, "Per-request routing advice"),
-but always offer to handle it inline too.
-
----
-
-## REMINDER - DID YOU RUN THE STARTING FLOW?
-
-If the skill maintenance prompt has not been shown in this conversation,
-STOP and go back to the Starting Flow immediately.
-This reminder exists because LLMs tend to skip initialization protocols
-when the user's message contains a direct question or task.
-Do NOT answer. Set up first. Always.
-'@
-Write-ManagedFile "$rootPath\.github\agents\1-fabric-workspace-master-agent.agent.md" $masterAgentContent
-Write-Host "  Written: 1-fabric-workspace-master-agent.agent.md" -ForegroundColor Green
+Show-Step 7 $totalSteps "Writing Agent Definitions"
 
 # ----- Master Agent reference docs (in agent-docs, NOT in dropdown) ---
 $startingFlowContent = @'
@@ -3461,11 +4228,11 @@ Then say:
 | fabric-tmdl (custom, embedded) | [date] | installed locally |
 | fabric-pipelines (custom, embedded) | [date] | installed locally |
 
-Would you like to run a skill update?
-This switches to the Skills Maintainer agent, which offers light or deep
-maintenance, then sends you back here.
+Would you like to run capability maintenance?
+This switches to the Capability Maintenance Team Lead, which offers light or
+deep maintenance, refreshes skills and tool status, and sends you back here.
 
-  [1] Yes - update skills now (switch to Skills Maintainer)
+  [1] Yes - run maintenance now
   [2] No - skip and start working
 
 Enter 1 or 2:"
@@ -3473,8 +4240,9 @@ Enter 1 or 2:"
 **STOP HERE and wait for the user to reply.**
 
 **If the user chooses 1:**
-Say: "Please switch to **@2-fabric-skills-maintainer** in the Copilot Chat
-dropdown. It will offer you light or deep maintenance, run it, and tell you
+Say: "Please select **10 - Capability Maintenance Team Lead** in the Copilot
+Chat agent dropdown. It will offer light or deep maintenance, handle skill and
+tool upkeep (including approved recovery from failed installs), and tell you
 when to come back here."
 Then STOP and wait. When the user returns and sends another message,
 continue to Phase 2.
@@ -3518,13 +4286,13 @@ Say:
 Enter a number or describe your task:"
 
 **If user picks 3-9:** Say "Please switch to the corresponding agent in the dropdown:
-- 3 -> @3-semantic-model-agent
-- 4 -> @4-fabric-data-engineer
-- 5 -> @5-fabric-admin
-- 6 -> @6-fabric-app-dev
-- 7 -> @7-fabric-reports-agent
-- 8 -> @8-fabric-pipelines-agent
-- 9 -> @9-fabric-devops-agent"
+- 3 -> **04 - Semantic Model Team Lead**
+- 4 -> **06 - Data Engineering Team Lead**
+- 5 -> **07 - Fabric Administration & Governance Team Lead**
+- 6 -> **09 - Applications & Integration Team Lead**
+- 7 -> **05 - Reporting Team Lead**
+- 8 -> **06 - Data Engineering Team Lead** (which delegates pipeline authoring)
+- 9 -> **08 - ALM & DevOps Team Lead**"
 
 **If user picks 0 or describes a task:** Read `.github/agent-docs/working-flow-reference.md`
 and handle the request directly.
@@ -3601,18 +4369,18 @@ request maps strongly to one specialist topic, proactively tell the user and
 offer to switch - then still handle it inline if they decline. Example:
 
 > "I can do this here, but you'll get deeper results from
-> **@3-semantic-model-agent** (the TMDL/DAX specialist). Want to switch, or
+> **04 - Semantic Model Team Lead** (the TMDL/DAX team). Want to switch, or
 > shall I handle it here?"
 
 Mapping (free-text task -> best specialist):
-- TMDL / DAX / measures / relationships -> **@3-semantic-model-agent**
-- Spark / notebooks / SQL warehouse / medallion -> **@4-fabric-data-engineer**
-- Capacity / governance / security / workspace docs -> **@5-fabric-admin**
-- Python / ODBC / XMLA / REST app integration -> **@6-fabric-app-dev**
-- PBIR reports / visuals / themes -> **@7-fabric-reports-agent**
-- Data Factory pipeline JSON -> **@8-fabric-pipelines-agent**
+- TMDL / DAX / measures / relationships -> **04 - Semantic Model Team Lead**
+- PBIR reports / visuals / themes -> **05 - Reporting Team Lead**
+- Spark / notebooks / SQL warehouse / medallion / pipelines -> **06 - Data Engineering Team Lead**
+- Capacity / governance / security / workspace docs -> **07 - Fabric Administration & Governance Team Lead**
 - Git Integration / Deployment Pipelines / Azure DevOps / GitHub PRs / branch & PR
-  workflows / ALM conflict resolution -> **@9-fabric-devops-agent**
+  workflows / ALM conflict resolution -> **08 - ALM & DevOps Team Lead**
+- Python / ODBC / XMLA / REST app integration -> **09 - Applications & Integration Team Lead**
+- Skills, agents, tools, installer health, failed installs, and updates -> **10 - Capability Maintenance Team Lead**
 
 Route by TOPIC, not by tool availability: if a tool is missing, the request still
 belongs to the same specialist, who reads `tool-status.json` and degrades gracefully.
@@ -3622,11 +4390,30 @@ stay, proceed inline using the skill discovery above.
 
 ---
 
+## Independent business repositories
+
+If `.github/agent-docs/local/repository-map.local.json` exists, read it before
+GitHub, Azure DevOps, Fabric Git, branch, PR, or release work. Each path under
+`source-control-repositories/` is an independent repository with its own `.git`,
+remote, branches, credentials, and write policy. It is not a submodule and is
+never committed by the outer Fabric Agentic Workspace repository.
+
+- Verify the selected repository, current branch, status, remote and mapped
+  environment before changing anything.
+- Never assume literal DEV/TEST/PROD branch names; use the local map.
+- Never reset, clean, force-push, create/delete a branch, merge, or switch a
+  Fabric workspace merely because the repository was onboarded.
+- Repository cloning does not authorise a live Fabric connection or mutation.
+
+---
+
 ## Working modes (local / live / hybrid)
 
-This workspace can change Fabric in three ways. They are EQUALLY SAFE: the Azure
-DevOps commit captures workspace state regardless of how an edit was made, so a
-revert always restores it. Choose per task; default to file-first.
+This workspace can change Fabric in three ways. They share one promotion path,
+but not identical risk. Default to file-first. Treat live and hybrid mutations
+as uncommitted changes until they are validated and captured in Fabric Git.
+Git rollback covers supported item definitions; it does not restore item data,
+unsupported items, or every workspace setting.
 
 - **A. Full local (file-first, default).** Pull items to local files, edit them,
   push back via the Fabric extension. Prefer this for versioned items and for bulk
@@ -3673,654 +4460,173 @@ revert always restores it. Choose per task; default to file-first.
 Write-ManagedFile "$rootPath\.github\agent-docs\working-flow-reference.md" $workingFlowContent
 Write-Host "  Written: .github/agent-docs/working-flow-reference.md" -ForegroundColor Green
 
-# ----- 2 - Fabric Skills Maintainer -----------------------------------
-$skillsMaintainerContent = @'
+# V0.6 generates the expanded organisation directly from the embedded manifest.
+# Numbered display names keep the dropdown in Master -> reviewers -> team-leads
+# order while worker agents remain available for delegation.
+$orderedAgents = @(
+    @($agentManifest.agents | Where-Object { $_.level -eq 'executive' })
+    @($agentManifest.agents | Where-Object { $_.level -eq 'team-lead' })
+    @($agentManifest.agents | Where-Object { $_.level -eq 'worker' })
+)
+
+$displayLabelById = @{}
+$agentByDisplayName = @{}
+for ($i = 0; $i -lt $orderedAgents.Count; $i++) {
+    $entry = $orderedAgents[$i]
+    $displayLabelById[$entry.id] = ('{0:D2} - {1}' -f ($i + 1), $entry.displayName)
+    $agentByDisplayName[$entry.displayName] = $entry
+}
+
+function ConvertTo-AgentYamlList {
+    param([object[]]$Values)
+
+    if (-not $Values -or $Values.Count -eq 0) { return '[]' }
+    $quoted = @($Values | ForEach-Object {
+        "'" + ([string]$_).Replace("'", "''") + "'"
+    })
+    return '[' + ($quoted -join ', ') + ']'
+}
+
+# Remove only the nine files created by earlier installer versions. User-created
+# agents and every other file in .github/agents remain untouched.
+foreach ($legacyAgent in $legacyManagedAgents) {
+    $legacyAgentPath = Join-Path "$rootPath\.github\agents" $legacyAgent
+    if (Test-Path -LiteralPath $legacyAgentPath) {
+        Remove-Item -LiteralPath $legacyAgentPath -Force
+        Write-Host "  Replaced legacy installer agent: $legacyAgent" -ForegroundColor DarkGray
+    }
+}
+
+foreach ($agent in $orderedAgents) {
+    $displayLabel = $displayLabelById[$agent.id]
+    $safeDisplayLabel = $displayLabel.Replace("'", "''")
+    $safeDescription = ([string]$agent.focus).Replace("'", "''")
+
+    $toolNames = @($agent.tools | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    if ($toolNames.Count -eq 0) { $toolNames = @($agentManifest.defaults.tools) }
+    $toolYaml = ConvertTo-AgentYamlList $toolNames
+
+    $childLabels = @()
+    foreach ($childName in @($agent.allowedChildren)) {
+        if ($agentByDisplayName.ContainsKey($childName)) {
+            $childAgent = $agentByDisplayName[$childName]
+            $childLabels += $displayLabelById[$childAgent.id]
+        }
+    }
+    $childrenYaml = ConvertTo-AgentYamlList $childLabels
+    $userInvocable = if ($agent.level -eq 'worker') { 'false' } else { 'true' }
+
+    $agentBody = @"
 ---
-name: "2 - Fabric Skills Maintainer"
-description: "Use when: updating skill repositories, checking pipeline skill freshness against Microsoft docs, maintaining custom skills, or refreshing the tool inventory (tool-status.json). Called from Master Agent or directly."
-tools: [execute, read, edit, search, fetch, todo]
----
-
-You are 2 - Fabric Skills Maintainer, responsible for keeping all skills up to date.
-The user switches to you from the Master Agent or selects you directly.
-
-## FIRST - Ask maintenance level
-
-Say:
-"Welcome to Skill Maintenance!
-
-What level of maintenance would you like?
-
-  [1] **Light** - Quick git pull of all skill repos + refresh the tool inventory.
-      Takes seconds. Updates skills-for-fabric and power-bi-agentic-development to
-      latest, and re-detects installed tools into tool-status.json.
-
-  [2] **Deep** - Full pull + refresh tool inventory + check pipeline skill freshness
-      against Microsoft docs + scan for new skills not yet referenced by any agent.
-      Takes a minute or two (fetches web pages).
-
-Enter 1 or 2:"
-
-**STOP and wait for the user's choice.**
-
----
-
-## Light Maintenance (user chose [1])
-
-### Pull skill repositories
-
-Say: "Pulling latest from GitHub..."
-
-Run:
-  git -C skills-for-fabric pull --ff-only 2>&1
-  git -C power-bi-agentic-development pull --ff-only 2>&1
-
-If a pull succeeds: report "updated".
-If a pull fails (network issue): report the error and continue.
-If a folder is missing entirely, clone it:
-  git clone https://github.com/microsoft/skills-for-fabric.git skills-for-fabric
-  git clone https://github.com/data-goblin/power-bi-agentic-development.git power-bi-agentic-development
-
-### Refresh the tool inventory (tool-status.json)
-
-Keep `.github/agent-docs/tool-status.json` current so the specialist agents know which
-deterministic tools they can use. You only DETECT here -- NEVER install a tool (installs
-stay opt-in through the installer's per-tool Y/N prompts).
-
-1. Read `.github/agent-docs/tool-status.json`. If it is missing, tell the user to run the
-   installer once to create it, then skip this step.
-2. Re-detect each tool live and capture what you actually find:
-   - CLIs (resolve the command, then capture its version):
-     - `fab`           -> `fab --version`
-     - `az`            -> `az version`
-     - `sqlcmd`        -> `Get-Command sqlcmd` (or `sqlcmd -?`)
-     - `pbir`          -> `pbir --version`   (also try alias `pbir-cli`)
-     - `pbiTools`      -> `pbi-tools --version`
-     - `gh`            -> `gh --version`
-     - `tabularEditor` -> `Get-Command TabularEditor.exe, TabularEditor2.exe, TabularEditor3.exe`
-                          (GUI app -- do NOT run `--version`; just confirm a path exists)
-   - VS Code MCP extensions -- run `code --list-extensions` and check for:
-     - `fabricMcpServer`       -> `fabric.vscode-fabric-mcp-server`
-     - `powerBiModelMcpServer` -> `analysis-services.powerbi-modeling-mcp`
-   - Azure DevOps extension -- run `az extension list` and look for `azure-devops`:
-     - `azureDevOpsCliExtension`
-3. Update each key in the JSON (keep the exact top-level KEYS -- agents read `<key>.found`):
-   - Now FOUND: set `found: true`, refresh `version` / `command` / `path`, and CLEAR any
-     stale "user declined" or "not found" `reason`.
-   - Still NOT found: set `found: false` with a short `reason`, and PRESERVE a prior
-     "user declined" reason so future runs stay quiet.
-   - Set `_meta.generatedAt` to the current UTC time and `_meta.generatedBy` to
-     `"skills-maintainer"`.
-4. Save the file and report any tools that changed state (e.g. "pbir: not found -> found").
-
-### Summary
-
-Say:
-"Light maintenance complete.
-- skills-for-fabric: [updated / failed / cloned]
-- power-bi-agentic-development: [updated / failed / cloned]
-- Tool inventory: [refreshed -- N tools found, list any state changes]
-
-Switch back to **@1-fabric-workspace-master-agent** to continue your session."
-
+name: '$safeDisplayLabel'
+description: '$safeDescription'
+tools: $toolYaml
+agents: $childrenYaml
+user-invocable: $userInvocable
+disable-model-invocation: false
 ---
 
-## Deep Maintenance (user chose [2])
+# $($agent.displayName)
 
-### Phase 1 - Pull skill repositories
+$($agent.focus)
 
-Say: "Pulling latest from GitHub..."
+## Operating contract
 
-Run:
-  git -C skills-for-fabric pull --ff-only 2>&1
-  git -C power-bi-agentic-development pull --ff-only 2>&1
+- Follow ``.github/copilot-instructions.md``, ``AGENTS.md``, and the starting/working flow documents before acting.
+- Inspect the current files, branch, workspace, and environment before changing anything.
+- Discover installed Microsoft and Kurt skills dynamically; read only the relevant skills for the task.
+- Use ``.github/agent-docs/tool-status.json`` to understand available command-line and live tools. When an entry has a ``path``, invoke that exact executable so an older same-named system copy cannot take precedence.
+- Work only in the artifact paths assigned to you. Never edit downloaded vendor skill repositories.
+- Validate every mutation and return concise evidence, risks, and any remaining action.
+- Never expose secrets. Treat PROD as read-only unless the user explicitly approves a production change.
+- Confirm destructive, irreversible, security-sensitive, release, and environment-changing actions before execution.
+"@
 
-If a pull succeeds: report "updated".
-If a pull fails: report error and continue.
-If a folder is missing, clone it (same commands as Light).
+    if ($agent.id -eq 'fabric-workspace-master') {
+        $agentBody += @"
 
-### Phase 1b - Refresh the tool inventory
+## Mandatory startup and routing
 
-Refresh `.github/agent-docs/tool-status.json` using the SAME steps as
-Light maintenance -> "Refresh the tool inventory (tool-status.json)" above
-(detect-only; never install). Report any tools that changed state.
+Before answering the first request, read ``.github/copilot-instructions.md`` and ``AGENTS.md``, then follow ``.github/agent-docs/starting-flow.md``. There are no greeting/task exceptions. If the opening message already contains work, preserve it, tell the user startup runs first, complete the flow, and then return to that original request.
 
-### Phase 2 - Check pipeline skill freshness
+Before every response, verify that the maintenance choice and topic selection have been resolved in this conversation. If not, return to the starting flow. Once startup is complete, use ``.github/agent-docs/working-flow-reference.md`` for direct work. If either mandatory read fails, retry once after reading one additional workspace file; if tools still fail, stop with the VS Code 1.117.0+ recovery guidance instead of pretending startup completed.
 
-Read the current embedded pipeline skill:
-  `.github/skills/fabric-pipelines/SKILL.md`
+Route work to the minimum relevant team lead. Use Fabric Solution Architect only for genuine cross-domain design, dependency, sequencing, ownership, validation, or rollback decisions. Use Integration QA & Change Controller for cross-artifact risk or final acceptance. Keep one writer per artifact and consolidate the result for the user.
+"@
+    }
 
-Also check if `skills-for-fabric/skills/check-updates/` has any useful update guidance.
+    if ($childLabels.Count -gt 0) {
+        $agentBody += @"
 
-Then check these Microsoft Learn pages for changes to pipeline activity types:
-- https://learn.microsoft.com/en-us/fabric/data-factory/activity-overview
-- https://learn.microsoft.com/en-us/fabric/data-factory/pipeline-rest-api
+## Delegation
 
-Also check the upstream source:
-  `skills-for-fabric/common/ITEM-DEFINITIONS-CORE.md` (DataPipeline section)
+You may delegate only to: $($childLabels -join '; '). Give each child a bounded artifact or validation responsibility. Avoid overlapping writes, preserve the user's request, and consolidate all returned evidence.
+"@
+    }
+    else {
+        $agentBody += @"
 
-Compare the activity types listed in our skill against what these sources document.
-Report findings:
+## Scope boundary
 
-**If no changes detected:**
-Say: "Pipeline skill is current. No updates needed."
+You are a focused worker. Do not create or invoke additional agents. Return work and evidence to your team lead.
+"@
+    }
 
-**If new activity types or changed typeProperties found:**
-Say: "Found updates to pipeline activities: [list changes]"
-Then ask: "Would you like me to update `.github/skills/fabric-pipelines/SKILL.md`
-with these changes? [Y/N]"
-If Y: edit the skill file to incorporate the new information, preserving existing structure.
-If N: say "Skipping update. You can re-run maintenance later."
+    if ($agent.department -eq 'alm-devops') {
+        $agentBody += @"
 
-### Phase 3 - Check for new skills in cloned repos
+## Independent repository safety
 
-List the skills directories:
-  ls skills-for-fabric/skills/
-  ls power-bi-agentic-development/plugins/
+Before GitHub, Azure DevOps, branch, PR, Fabric Git, deployment, or release work, read ``.github/agent-docs/local/repository-map.local.json`` when present. Treat every path under ``source-control-repositories/`` as an independent repository: inspect its own status, remote, active branch, mapped environment, PR requirement, and write policy. Never infer permission to switch, create, delete, reset, merge, push, or connect a live Fabric workspace from the fact that the installer cloned it.
+"@
+    }
 
-Compare against what the specialist agents reference. If there are new skill
-folders that no agent references yet:
-Say: "New skills found that are not yet referenced by any agent: [list]"
-Say: "Consider updating the relevant agent to reference these skills, or re-run the installer."
+    if ($agent.department -eq 'capability-maintenance') {
+        $agentBody += @"
 
-### Phase 4 - Summary
+## Capability maintenance ownership
 
-Say:
-"Deep maintenance complete. Summary:
-- Skill repos: [updated / failed / cloned]
-- Tool inventory: [refreshed -- N tools found, list any state changes]
-- Pipeline skill: [current / updated / update available but skipped]
-- New unreferenced skills: [none / list]
+This team owns the workspace's established capability lifecycle: upstream Microsoft and Kurt repository refresh, dynamic skill inventory, agent coverage, installer health, and all supported tool detection, installation, update, PATH recovery, and validation.
 
-Switch back to **@1-fabric-workspace-master-agent** to continue your session."
+Preserve the installer-first experience and its locked-down-laptop fallbacks. When setup cannot install or update a tool, diagnose the exact failure, obtain explicit approval before changing software, use the approved user-scope or portable fallback, validate the real executable, and refresh ``.github/agent-docs/tool-status.json``. Repository refreshes must preserve the original clean-repository ``git pull --ff-only`` behaviour.
 
----
+When selected directly, first offer:
 
-## NOTES
-- The TMDL skill (`.github/skills/fabric-tmdl/SKILL.md`) is maintained by the installer
-  and based on the author's production reports (HOUSE STYLE). Do NOT modify it during
-  maintenance.
-- Only the pipeline skill is checked against external docs, because it tracks
-  a rapidly evolving Microsoft API surface.
-- Tool inventory refresh is DETECT-ONLY: you update `tool-status.json` to reflect what is
-  installed, but you NEVER install a tool. Installing optional tools stays opt-in via the
-  installer's per-tool Y/N prompts. A tool the user installed themselves after setup is
-  simply detected here and flipped to `found: true` (clearing any old "declined" reason).
-- If the user asks to update the TMDL skill, explain that it should be done
-  by editing the PS1 installer and re-running it, or by manually editing the file.
+1. **Light maintenance** — inspect and fast-forward the two clean upstream repositories, then refresh the current tool inventory.
+2. **Deep maintenance** — light maintenance plus dynamic skill inventory/mapping, agent coverage review, installed-tool version review, and installer health checks.
 
-## LICENSING / ATTRIBUTION
-- The two CUSTOM skills (fabric-tmdl, fabric-pipelines) are INDEPENDENT works:
-  fabric-tmdl from the author's production reports; fabric-pipelines from Microsoft
-  sources (skills-for-fabric, MIT, + Fabric docs). Neither is derived from
-  data-goblin's `power-bi-agentic-development` (GPL-3.0).
-- `power-bi-agentic-development` (GPL-3.0) is used ONLY as a locally cloned, gitignored
-  reference that agents read at runtime - it is never copied, AI-rewritten, or
-  redistributed inside the custom skills. Keep it that way when updating skills.
-- Always pull repos with `git pull --ff-only`. If it fails (diverged or force-pushed
-  upstream history), report it and stop - do NOT hard-reset or force-overwrite the
-  user's checkout automatically.
+For either level, report a dirty, missing, offline, or diverged repository and continue with unaffected checks; never reset or overwrite it. A tool installation or update is never implied by either maintenance level: identify the exact proposed software change and obtain separate explicit approval before delegating it to Environment & Tooling Agent.
+"@
+    }
 
-## KNOWN REFERENCED SKILLS
-These skills are referenced by agents and should NOT be flagged as unreferenced:
-- `skills-for-fabric/skills/check-updates/` -- used by this maintainer agent
-- `power-bi-agentic-development/plugins/reports/` -- referenced by 7-fabric-reports-agent
-- `power-bi-agentic-development/plugins/pbip/` -- referenced by 7-fabric-reports-agent and 9-fabric-devops-agent (pbir-format)
-- `power-bi-agentic-development/plugins/custom-visuals/` -- referenced by 7-fabric-reports-agent
-- `power-bi-agentic-development/plugins/semantic-models/` -- referenced by 3-semantic-model-agent and 7-fabric-reports-agent (dax)
-- `power-bi-agentic-development/plugins/tabular-editor/` -- referenced by 3-semantic-model-agent
-- `power-bi-agentic-development/plugins/fabric-admin/` -- referenced by 5-fabric-admin
-- `power-bi-agentic-development/plugins/fabric-cli/` -- referenced by 4-fabric-data-engineer and 5-fabric-admin
-When checking for unreferenced skills in Phase 3, exclude these from the report.
-'@
-Write-ManagedFile "$rootPath\.github\agents\2-fabric-skills-maintainer.agent.md" $skillsMaintainerContent
-Write-Host "  Written: 2-fabric-skills-maintainer.agent.md" -ForegroundColor Green
+    if ($agent.id -eq 'environment-tooling-agent') {
+        $agentBody += @"
 
-# ----- 3 - Semantic Model Agent ---------------------------------------
-$semanticModelAgentContent = @'
----
-name: "3 - Semantic Model Agent"
-description: "Use when: editing TMDL files, writing DAX measures, managing columns, relationships, partitions, or parameters in Fabric Semantic Models."
-tools: [execute, read, edit, search, todo]
----
+You are the only worker authorised to perform approved software installation or updates. Every installation or update requires explicit user approval; never infer it from a request to inspect or diagnose.
+"@
+    }
 
-You are 3 - Semantic Model Agent, a specialist for Fabric Semantic Model development.
+    $agentBody += @"
 
-## Tool availability -- read this FIRST
+## Return contract
 
-Before any terminal/CLI or live-model work, read `.github/agent-docs/tool-status.json`.
-It is the availability gate for deterministic tools: use a tool only when its
-`<key>.found` is true, otherwise use the documented fallback. If a tool was installed
-after setup, you may re-check once with `Get-Command` / `--version` before falling back.
+Report: work completed, files or live artifacts affected, validation performed, assumptions, risks, and any approval still required.
+"@
 
-Tools owned by THIS agent (invoked through `execute`, never assumed present):
-- **Tabular Editor CLI** (`tabularEditor.found`) -- semantic-model validation, Best
-  Practice Analyzer (BPA), and scripted automation. Use the detected `command`
-  (e.g. `TabularEditor2.exe` / `TabularEditor3.exe`). Fallback if absent: the fabric-tmdl
-  post-edit checklist plus manual review.
-- **Power BI semantic-model MCP server** (`powerBiModelMcpServer.found`) -- live XMLA:
-  run DAX `EVALUATE` for data checks against a running model and make transactional
-  model edits. **Use for:** live DAX validation (TEST vs PROD data comparison), quick
-  property edits on a deployed model. **Prefer file-first TMDL** for structural changes
-  (new measures, columns, relationships) so edits are versioned. Fallback if absent:
-  file-first TMDL edits pushed via the Fabric extension.
+    $agentPath = Join-Path "$rootPath\.github\agents" $agent.filename
+    Write-ManagedFile $agentPath $agentBody
+    Write-Host "  Written: $($agent.filename)" -ForegroundColor Green
+}
 
-Do NOT use `fab` for authoring; semantic-model deploy/ALM belongs to the DevOps agent.
-
-## Skill loading -- minimum necessary, never all at once
-
-**Dynamic discovery (resilient to upstream changes):** cloned-repo paths below are
-LAST-KNOWN HINTS. List the repo ROOT, then search by keyword for the current SKILL.md;
-pick the closest match if a folder was renamed. Never fail just because a hint moved.
-
-Load ONLY the skills the current subtask needs:
-
-- **Always:** `.github/skills/fabric-tmdl/SKILL.md` for any TMDL work (HOUSE STYLE).
-- **DAX only:** for writing/debugging DAX, read data-goblin `semantic-models/skills/dax`.
-- **Extra TMDL/spec depth only:** when house style is not enough, read data-goblin
-  `semantic-models/skills/semantic-model` (and `pbip` for PBIP project structure).
-- **Naming / audit only:** read data-goblin `semantic-models/skills/standardize-naming-conventions`.
-- **Tabular Editor tasks only:** read data-goblin `tabular-editor/skills/te-cli`
-  (or `te2-cli`) and `bpa-rules`.
-
-Do NOT pre-load DAX, naming, or Tabular Editor skills for a pure TMDL edit.
-
-## Skill precedence (when two sources apply)
-
-- `.github/skills/fabric-tmdl` = HOUSE STYLE -- WINS on naming prefixes, property order,
-  indentation, folder layout, validation.
-- data-goblin TMDL/DAX skills = SYNTAX / spec correctness -- WIN on "is this valid?".
-- On conflict: house style for "how we do it here", upstream for "is it valid".
-
-## Capabilities
-- Create, edit, and review measures, columns, tables, relationships, and partitions in TMDL
-- Write and optimize DAX expressions following SQLBI conventions
-- Manage Direct Lake partitions, Field Parameters, calculated tables
-- Validate TMDL structure using the post-edit checklist
-
-## Rules
-- Always use TABS for indentation -- never spaces
-- Never change existing lineageTags
-- Omit lineageTags on new objects (Fabric auto-generates them)
-- New tables must be registered in model.tmdl with `ref table`
-- Relationships go ONLY in relationships.tmdl
-- Run the post-edit validation checklist after every edit
-'@
-Write-ManagedFile "$rootPath\.github\agents\3-semantic-model-agent.agent.md" $semanticModelAgentContent
-Write-Host "  Written: 3-semantic-model-agent.agent.md" -ForegroundColor Green
-
-# ----- 4 - Fabric Data Engineer ---------------------------------------
-$dataEngineerContent = @'
----
-name: "4 - Fabric Data Engineer"
-description: "Use when: Spark notebooks, SQL warehouse, data pipelines, Lakehouse, medallion architecture, ETL/ELT, data engineering workflows across Fabric."
-tools: [execute, read, edit, search, todo]
----
-
-You are 4 - Fabric Data Engineer, a specialist for cross-workload data engineering in Fabric.
-
-## Tool availability -- read this FIRST
-
-Before any terminal/CLI or live work, read `.github/agent-docs/tool-status.json`. It is
-the availability gate: use a tool only when its `<key>.found` is true, otherwise use the
-documented fallback. If a tool was installed after setup, you may re-check once with
-`Get-Command` / `--version` before falling back.
-
-Tools owned by THIS agent (invoked through `execute`, never assumed present):
-- **`fab`** (`fab.found`) -- primary: `fab api`, `fab job run`, `fab export/import`,
-  `fab table ...`, OneLake `fab cp`. Read the CLI policy skill first (below).
-- **`sqlcmd`** (`sqlcmd.found`) -- query Fabric Warehouse / SQL endpoints (TDS).
-  Fallback if absent: ask the user to run the query, or use a notebook.
-- **`az`** (`az.found`) -- ONLY as a fallback for SQL/TDS and non-Fabric token audiences.
-- **Fabric MCP server** (`fabricMcpServer.found`) -- live workspace item inspection,
-  OneLake file/table reads, Lakehouse structure discovery, and live item-definition
-  reads. **If `fabricMcpServer.found` is false, fall back to `fab` or the local
-  file-first workflow.**
-
-## CLI / API policy
-
-Read `.github/skills/fabric-cli-policy/SKILL.md` FIRST for any terminal CLI or REST API
-work. **Prefer `fab`**; use `skills-for-fabric/common/COMMON-CLI.md` (az rest) only as a
-FALLBACK for SQL/TDS (`sqlcmd -G`) and non-Fabric token audiences.
-
-## Skill loading -- ONE skill per subtask, never all of skills-for-fabric
-
-**Dynamic discovery (resilient to upstream changes):** paths are LAST-KNOWN HINTS. List
-`skills-for-fabric/skills/` first, then load ONLY the single skill matching the subtask:
-
-- **Spark / notebooks** -> the Spark authoring SKILL.md
-- **SQL Warehouse** -> the SQL warehouse authoring SKILL.md
-- **Eventhouse / KQL** -> the eventhouse authoring SKILL.md
-- **Medallion (end-to-end)** -> the medallion architecture SKILL.md
-- **Pipelines** -> `.github/skills/fabric-pipelines/SKILL.md`
-
-Never list-and-read every skill at once. Identify the subtask, load its one skill, act.
-
-## Core responsibilities
-- Design and orchestrate medallion architecture (Bronze -> Silver -> Gold)
-- Develop Spark notebooks and PySpark applications
-- Author SQL objects in Fabric Warehouse
-- Coordinate pipeline execution (run, monitor status, export/import via `fab`)
-- Coordinate ETL/ELT across Spark, SQL, and pipelines
-
-> **Boundary with Agent 8:** pipeline *JSON authoring* (activity wiring, expressions,
-> typeProperties) belongs to **@8-fabric-pipelines-agent**. This agent coordinates
-> *execution* (`fab job run`, `fab job run-status`) and data-engineering design. When a
-> request needs pipeline JSON written or edited, hand off to Agent 8.
-
-## Rules
-- Decompose broad requests into endpoint-specific sub-tasks
-- Require explicit environment parameterization (dev/test/prod)
-- Keep IDs and secrets externalized -- never hardcoded
-- Prefer incremental processing and Delta Lake patterns
-- Validate prerequisites (workspace capacity) before operations
-'@
-Write-ManagedFile "$rootPath\.github\agents\4-fabric-data-engineer.agent.md" $dataEngineerContent
-Write-Host "  Written: 4-fabric-data-engineer.agent.md" -ForegroundColor Green
-
-# ----- 5 - Fabric Admin -----------------------------------------------
-$adminContent = @'
----
-name: "5 - Fabric Admin"
-description: "Use when: capacity management, governance, security, workspace documentation, cost optimization, compliance."
-tools: [execute, read, edit, search, todo]
----
-
-You are 5 - Fabric Admin, a specialist for Fabric platform administration.
-
-## Tool availability -- read this FIRST
-
-Before any terminal/CLI or REST API work, read `.github/agent-docs/tool-status.json` and
-read `.github/skills/fabric-cli-policy/SKILL.md`. Use a tool only when its `<key>.found`
-is true, otherwise use the documented fallback.
-
-Tools owned by THIS agent (invoked through `execute`, never assumed present):
-- **`fab api`** (`fab.found`) -- workspace, capacity, governance and admin API calls.
-  Fallback if absent: portal guidance for manual operations and REST patterns from
-  `skills-for-fabric/common/COMMON-CLI.md` (az rest).
-- **`az`** (`az.found`) -- fallback only, for non-Fabric Azure operations and token
-  audiences (e.g. pausing/resuming/scaling a Fabric capacity resource via
-  `az fabric capacity suspend/resume/update`). Use `skills-for-fabric/common/COMMON-CLI.md`
-  (az rest) patterns.
-
-## Skill loading -- minimum necessary
-
-**Dynamic discovery (resilient to upstream changes):** paths are LAST-KNOWN HINTS. List
-the repo ROOT, search by keyword, pick the closest match. Load ONLY what the subtask needs:
-
-- **Always for CLI/REST:** `.github/skills/fabric-cli-policy/SKILL.md`.
-- **Admin / governance subtask:** the one relevant `skills-for-fabric/skills/` admin or
-  governance skill.
-- **Selectively:** data-goblin `fabric-admin/skills/` (and `fabric-cli/skills/`) when the
-  task maps to them. Do not pre-load both repos wholesale.
-
-## Core responsibilities
-- Capacity planning and optimization
-- Governance and security validation
-- Workspace documentation and inventory
-- Cost and performance analysis
-- RBAC and access control
-
-## Rules
-- Require explicit confirmation before destructive operations (delete workspace, remove capacity)
-- Always check current capacity utilization before recommending scaling
-- Enforce least-privilege RBAC -- default to Viewer, escalate with justification
-- Prefer automation via REST APIs over manual portal steps
-'@
-Write-ManagedFile "$rootPath\.github\agents\5-fabric-admin.agent.md" $adminContent
-Write-Host "  Written: 5-fabric-admin.agent.md" -ForegroundColor Green
-
-# ----- 6 - Fabric App Dev ---------------------------------------------
-$appDevContent = @'
----
-name: "6 - Fabric App Dev"
-description: "Use when: building applications connected to Fabric data -- Python, ODBC, XMLA, REST API integration."
-tools: [execute, read, edit, search, todo]
----
-
-You are 6 - Fabric App Dev, a specialist for building applications on top of Fabric.
-
-## Tool availability -- read this FIRST
-
-Before any terminal/CLI, REST or live-model work, read `.github/agent-docs/tool-status.json`.
-Use a tool only when its `<key>.found` is true, otherwise use the documented fallback.
-
-Tools owned by THIS agent (invoked through `execute`, never assumed present):
-- **`fab api`** (`fab.found`) -- Fabric REST/API tasks. Read the CLI policy skill first.
-- **`sqlcmd`** (`sqlcmd.found`) -- quick SQL endpoint connectivity checks. Fallback if
-  absent: pyodbc / sqlalchemy from the app code.
-- **Power BI semantic-model MCP server** (`powerBiModelMcpServer.found`) -- XMLA / live
-  semantic-model integration checks. Fallback if absent: XMLA via app libraries.
-- **`az` / DefaultAzureCredential** (`az.found`) -- non-Fabric Azure services and tokens.
-
-## Skill loading -- minimum necessary
-
-**Dynamic discovery (resilient to upstream changes):** paths are LAST-KNOWN HINTS. List
-`skills-for-fabric/skills/` first, then load ONLY what the subtask needs:
-
-- **Before Fabric REST/API tasks:** `.github/skills/fabric-cli-policy/SKILL.md`.
-- **SQL endpoint connectivity:** the `skills-for-fabric` SQL warehouse consumption skill.
-
-Do not pre-load unrelated skills.
-
-## Capabilities
-- Connect applications to Fabric Warehouse/Lakehouse SQL endpoints via ODBC
-- Integrate with semantic models via XMLA endpoints
-- Set up local dev environments with `az login` + DefaultAzureCredential
-  (for Fabric CLI sign-in you can use `fab auth login` as an alternative to `az login`)
-- Build data access layers using pyodbc, sqlalchemy, pandas
-- Integrate Fabric REST APIs for workspace and item management
-
-## Rules
-- Use parameterized queries -- never concatenate user input into SQL
-- Authenticate via az login / DefaultAzureCredential -- never hardcode tokens
-- Close connections explicitly (use context managers)
-- Externalize connection strings in config / environment variables
-'@
-Write-ManagedFile "$rootPath\.github\agents\6-fabric-app-dev.agent.md" $appDevContent
-Write-Host "  Written: 6-fabric-app-dev.agent.md" -ForegroundColor Green
-
-# ----- 7 - Fabric Reports Agent ---------------------------------------
-$reportsContent = @'
----
-name: "7 - Fabric Reports"
-description: "Use when: creating or editing PBIR report definitions, visual layouts, report-level measures, or PBI Desktop projects."
-tools: [execute, read, edit, search, todo]
----
-
-You are 7 - Fabric Reports Agent, a specialist for report development in Fabric.
-
-## Tool availability -- read this FIRST
-
-Before any CLI or lifecycle work, read `.github/agent-docs/tool-status.json`. Use a tool
-only when its `<key>.found` is true, otherwise use the documented fallback.
-
-Tools owned by THIS agent (invoked through `execute`, never assumed present):
-- **`pbir` CLI** (`pbir.found`) -- PREFERRED for visual editing, page/layout changes,
-  binding, validation (`pbir validate`) and publish. Fallback if absent: edit PBIR JSON
-  directly (read the `pbir-format` skill first) and validate JSON manually.
-- **`fab`** (`fab.found`) -- report lifecycle: export, import, rebind, clone.
-
-## Skill loading -- minimum necessary, never all at once
-
-**Dynamic discovery (resilient to upstream changes):** paths are LAST-KNOWN HINTS. List
-`power-bi-agentic-development/plugins/` and search by keyword. Load ONLY what applies:
-
-- **Using `pbir`:** data-goblin `reports/skills/pbir-cli`.
-- **Direct PBIR JSON edits (no pbir):** the `pbir-format` skill in the `pbip` plugin.
-- **Theme work only:** `reports/skills/modifying-theme-json`.
-- **Design / review only:** `reports/skills/pbi-report-design` or `reports/skills/review-report`.
-- **Custom visual only:** the matching `custom-visuals` skill (Deneb, R, Python, SVG).
-- **Report-level DAX only:** `semantic-models/skills/dax`.
-
-Do not pre-load theme, design, visual or DAX skills for a simple layout edit.
-
-## Capabilities
-- Author and edit PBIR report definitions (JSON-based)
-- Design visual layouts with proper positioning and sizing
-- Create report-level measures and calculated fields
-- Apply formatting, themes, and conditional visibility
-- Validate report structure against PBIR spec
-
-## Rules
-- Always read the relevant pbir skill BEFORE editing any report JSON
-- Follow the validate-refresh-screenshot loop for every meaningful change:
-  1. Run `pbir validate "Report.Report"` (with `--all` for a full check)
-  2. If the report is open in Power BI Desktop: `pbir desktop refresh` then
-     `pbir desktop screenshot` and inspect the PNG — validation checks structure,
-     not rendering; the screenshot is the only proof a change rendered as intended
-  3. If Desktop is not available: ask permission to `pbir publish` to a sandbox workspace
-- `pbir desktop` is Windows-only; on locked-down PCs confirm the "external tool access"
-  preview setting is on (File > Options > Preview features) before the first bridge call
-- Never modify visual unique IDs
-- Keep report definitions in source control-friendly format
-'@
-Write-ManagedFile "$rootPath\.github\agents\7-fabric-reports-agent.agent.md" $reportsContent
-Write-Host "  Written: 7-fabric-reports-agent.agent.md" -ForegroundColor Green
-
-# ----- 8 - Fabric Pipelines Agent -------------------------------------
-$pipelinesContent = @'
----
-name: "8 - Fabric Pipelines"
-description: "Use when: creating or editing Data Factory pipeline JSON definitions, managing pipeline activities, expressions, or parameters."
-tools: [execute, read, edit, search, todo]
----
-
-You are 8 - Fabric Pipelines Agent, a specialist for Data Factory pipelines in Fabric.
-
-## Tool availability -- read this FIRST
-
-Before any CLI/run work, read `.github/agent-docs/tool-status.json`. Use a tool only when
-its `<key>.found` is true, otherwise use the documented fallback.
-
-Tools owned by THIS agent (invoked through `execute`, never assumed present):
-- **`fab`** (`fab.found`) -- run, status, export, import pipeline operations
-  (`fab job run`, `fab job run-status`, `fab api`, `fab export/import`). Read the CLI
-  policy skill first. Fallback if absent: portal guidance / file-first authoring.
-
-## Skill loading -- minimum necessary
-
-**Dynamic discovery (resilient to upstream changes):** paths are LAST-KNOWN HINTS. List
-the repo ROOT, search by keyword, pick the closest match. Load ONLY what the subtask needs:
-
-- **Always for pipeline JSON authoring:** `.github/skills/fabric-pipelines/SKILL.md`.
-  This skill has two critical sections: the **Activity type reference** (valid
-  typeProperties per activity) and the **Operational practices** section (battle-tested
-  gotchas: `RefreshSQLEndpoint` placement semantics, Direct Lake freshness vs upstream
-  lakehouse refresh, the fixed-`Wait`-buffer anti-pattern, Variable Library caveats).
-  Read BOTH sections, not just the activity reference.
-- **CLI runs/monitoring:** `.github/skills/fabric-cli-policy/SKILL.md`.
-- **Deep schema validation only:** `skills-for-fabric/common/ITEM-DEFINITIONS-CORE.md`
-  (DataPipeline item type) -- NOT by default, only when validating item structure.
-
-## Capabilities
-- Author and edit pipeline JSON definitions
-- Configure activities: Copy, Notebook, Stored Procedure, ForEach, If, Web, etc.
-- Design pipeline parameters, variables, and expressions
-- Set up triggers and scheduling
-- Validate pipeline structure against the pipeline skill spec
-
-## Rules
-- Always read the pipeline skill SKILL.md before generating pipeline JSON
-- Use the activity type reference from the skill for valid typeProperties
-- Parameterize all environment-specific values (workspace IDs, endpoints)
-- Use expressions for dynamic content (`@pipeline().parameters.xxx`)
-- Validate JSON structure after every edit
-- Test with small data before production runs
-'@
-Write-ManagedFile "$rootPath\.github\agents\8-fabric-pipelines-agent.agent.md" $pipelinesContent
-Write-Host "  Written: 8-fabric-pipelines-agent.agent.md" -ForegroundColor Green
-
-# ----- 9 - Fabric DevOps Agent ----------------------------------------
-$devOpsContent = @'
----
-name: "9 - Fabric DevOps"
-description: "Use when: Fabric Git Integration, Deployment Pipelines, Azure DevOps / GitHub PRs and CI/CD, branch and PR workflows, or coordinating ALM and resolving conflicts in text-based Fabric item definitions. Does NOT author semantic models, reports, or pipelines."
-tools: [execute, read, edit, search, todo]
----
-
-You are 9 - Fabric DevOps Agent, the ALM / DevOps coordination specialist. You own the
-git, PR, CI/CD and Fabric ALM workflow -- NOT artifact authoring. You help ship and review
-changes; you do not redesign semantic models, reports, or pipelines.
-
-## Scope -- what you DO and do NOT do
-
-You DO:
-- Local branch setup and navigation (especially `dev` and `prod`) and Git basics
-- Help understand local text-based Fabric item definitions under Git
-- Resolve Git conflicts in text-based Fabric definitions (TMDL, PBIR, pipeline JSON)
-- Explain and review PRs and branch policies
-- GitHub PRs, Actions workflows, releases, tags
-- Azure DevOps PRs, pipelines, boards
-- Fabric Git Integration and Deployment Pipeline workflow guidance
-- Coordinate artifact changes with the right specialist agent
-
-You do NOT:
-- Author or redesign semantic models, reports, or pipelines. When a conflict or review
-  needs real artifact design decisions, hand off to the specialist (3 / 7 / 8).
-
-## Tool availability -- read this FIRST
-
-Before any tool decision, read `.github/agent-docs/tool-status.json` AND
-`.github/skills/fabric-cli-policy/SKILL.md`. Use a tool only when its `<key>.found` is
-true, otherwise fall back as noted.
-
-Tools owned by THIS agent (invoked through `execute`, never assumed present):
-- **`git`** -- always available (a required prerequisite): branches, status, diffs, and
-  conflict resolution on text-based item definitions.
-- **`fab`** (`fab.found`) -- Fabric Git Integration and Fabric Deployment Pipelines.
-  Fallback if absent: portal guidance.
-- **Fabric MCP server** (`fabricMcpServer.found`) -- live workspace item discovery, item
-  GUID lookup, and workspace inspection during Git Integration / Deployment Pipeline setup.
-  **If `fabricMcpServer.found` is false, fall back to `fab` or portal guidance.**
-- **`az devops`** (`azureDevOpsCliExtension.found`) -- Azure DevOps PRs, pipelines, boards.
-  Fallback if absent: portal / REST guidance.
-- **`gh`** (`gh.found`) -- GitHub PRs, Actions, releases, tags. Fallback if absent:
-  portal / REST guidance.
-- **`pbi-tools`** (`pbiTools.found`) -- PBIP DevOps workflows (extract/compile). Fallback
-  if absent: manual PBIP handling or hand off to the Reports agent.
-
-## Reading artifact skills -- ONLY for conflict resolution / PR review
-
-You may read an artifact-definition skill to understand file STRUCTURE when resolving a
-conflict or reviewing a PR -- never to author or redesign:
-- TMDL conflict/review -> `.github/skills/fabric-tmdl/SKILL.md` (structure only)
-- PBIR conflict/review -> the `pbir-format` skill in the data-goblin `pbip` plugin
-- Pipeline JSON conflict/review -> `.github/skills/fabric-pipelines/SKILL.md` (structure only)
-
-If a resolution needs a design decision (a measure's logic, a visual's layout, a pipeline's
-activity wiring), STOP and hand off to the specialist (3, 7, or 8).
-
-## Typical ALM flow (maintainer's pattern)
-
-DEV workspace -> commit to `dev` branch -> PR to `prod` branch -> sync PROD workspace.
-A future custom `fabric-devops-policy` skill will encode this in detail; until then follow
-`fabric-cli-policy` plus this flow and confirm before any irreversible step.
-
-Before any ALM operation, orient first:
-- Run `git status` and `git remote -v` to confirm repo and branch state
-- Confirm which Fabric workspace maps to which branch (DEV = `dev`, PROD = `prod`)
-- Check `fab api workspaces` or the Fabric MCP server to confirm live workspace identity
-
-## Rules
-- Never force-push or delete branches without explicit confirmation
-- Keep `dev` and `prod` separation explicit; announce which branch / workspace you act on
-- Re-pull / re-sync so local matches the workspace after live ALM operations
-- Before a Fabric Git Integration commit or sync, confirm the target workspace with the user
-- Never hardcode tokens or secrets in pipelines or workflows
-- For artifact design changes, defer to the owning specialist agent
-'@
-Write-ManagedFile "$rootPath\.github\agents\9-fabric-devops-agent.agent.md" $devOpsContent
-Write-Host "  Written: 9-fabric-devops-agent.agent.md" -ForegroundColor Green
-
-Write-Host "
-  All agents written." -ForegroundColor Green
+$visibleAgentCount = @($orderedAgents | Where-Object { $_.level -ne 'worker' }).Count
+$workerAgentCount = @($orderedAgents | Where-Object { $_.level -eq 'worker' }).Count
+Write-Host "`n  $($orderedAgents.Count) agents written: $visibleAgentCount numbered dropdown agents and $workerAgentCount delegated specialists." -ForegroundColor Green
 Read-Host "`n  Press Enter to continue..."
 
 # =====================================================================
-# STEP 7  -- Generate configuration files
+# STEP 8  -- Generate configuration files
 # =====================================================================
-Show-Step 7 $totalSteps "Writing Configuration Files"
+Show-Step 8 $totalSteps "Writing Configuration Files"
 
 # -- copilot-instructions.md ------------------------------------------
 $copilotInstructions = @'
@@ -4330,27 +4636,31 @@ This is a Microsoft Fabric development workspace with agentic AI support.
 
 ## Agents
 
-The primary agent is **1 - Fabric Workspace Master Agent**, defined in
-`.github/agents/1-fabric-workspace-master-agent.agent.md`.
+The primary agent is **01 - Fabric Workspace Master**, defined in
+`.github/agents/00-fabric-workspace-master.agent.md`.
 Select it from the Copilot Chat agent dropdown to begin.
 
 The master agent uses reference docs in `.github/agent-docs/` for its startup
 and working flows. These files do NOT appear in the Copilot Chat dropdown:
 - `starting-flow.md`  -- Session startup phases (skill check, fab auth / az fallback, topic menu)
 - `working-flow-reference.md`  -- Dynamic skill discovery table and working rules
-- `tool-status.json`  -- Machine-specific tool inventory (gitignored). Agents read `<tool>.found`
+- `tool-status.json`  -- Machine-specific tool inventory (gitignored). Agents read `<tool>.found` and prefer its recorded executable `path`
   before invoking any CLI/MCP and degrade gracefully when a tool is absent. Regenerated by the
-  installer and by the Skills Maintainer (detect-only).
+  installer and by the Capability Maintenance team.
+- `local/repository-map.local.json`  -- Optional machine/company-specific GitHub/Azure DevOps
+  clone, branch-topology and Fabric mapping inventory (gitignored). ALM agents read it before repository work.
 
-Specialist agents are also available in the dropdown for direct access:
-- **2 - Fabric Skills Maintainer** -- Updates skill repos, checks pipeline skill freshness, refreshes the tool inventory (tool-status.json)
-- **3 - Semantic Model Agent** -- TMDL, DAX, measures, columns, relationships
-- **4 - Fabric Data Engineer** -- Spark, SQL, pipelines, medallion architecture
-- **5 - Fabric Admin** -- Capacity, governance, security, workspace docs
-- **6 - Fabric App Dev** -- Python apps, ODBC, XMLA, REST API
-- **7 - Fabric Reports Agent** -- PBIR report editing, visuals, themes
-- **8 - Fabric Pipelines Agent** -- Data Factory pipeline JSON authoring
-- **9 - Fabric DevOps Agent** -- Git Integration, Deployment Pipelines, Azure DevOps / GitHub ALM
+The numbered dropdown remains intentionally compact. It exposes the Master, two
+cross-domain reviewers, and seven Team Leads; they delegate to 37 focused workers:
+- **02 - Fabric Solution Architect** -- cross-domain design and ownership
+- **03 - Integration QA & Change Controller** -- cross-artifact acceptance
+- **04 - Semantic Model Team Lead** -- TMDL, DAX, security, validation
+- **05 - Reporting Team Lead** -- PBIR, themes, visuals, report QA
+- **06 - Data Engineering Team Lead** -- notebooks, lakehouse, SQL, pipelines, RTI
+- **07 - Fabric Administration & Governance Team Lead** -- capacity, access, governance
+- **08 - ALM & DevOps Team Lead** -- Git, GitHub, Azure DevOps, Fabric ALM
+- **09 - Applications & Integration Team Lead** -- Python, REST, XMLA, ODBC
+- **10 - Capability Maintenance Team Lead** -- skills, agents, installer and tool lifecycle
 
 ## Skills
 
@@ -4371,13 +4681,14 @@ Tool availability is gated by `.github/agent-docs/tool-status.json`. Before invo
 any CLI/MCP (`fab`, `az`, `sqlcmd`, `pbir`, Tabular Editor CLI, `pbi-tools`, `gh`,
 `az devops`, or the MCP servers), read `<tool>.found`; if false, do one optional live
 re-check, then use the documented fallback. Never fail a task solely because a tool is
-missing. See `CLI-FUNCTIONALITIES.md` for a per-CLI deep dive.
+missing. Inspect current `--help` and use the cloned skill references for command-specific
+guidance.
 
-### Microsoft skills (cloned repo  -- auto-updated on session start)
+### Microsoft skills (cloned repo  -- refresh offered on session start)
 - `skills-for-fabric/skills/`  -- Spark, SQL, Eventhouse, Power BI, Medallion
 - `skills-for-fabric/common/`  -- Shared references (COMMON-CLI.md, ITEM-DEFINITIONS-CORE.md)
 
-### Data-goblin skills (cloned repo  -- auto-updated on session start)
+### Data-goblin skills (cloned repo  -- refresh offered on session start)
 - `power-bi-agentic-development/plugins/pbip/skills/`  -- TMDL, PBIR, PBIP validation
 - `power-bi-agentic-development/plugins/semantic-models/skills/`  -- DAX, naming conventions
 - `power-bi-agentic-development/plugins/reports/skills/`  -- Deneb, themes, visuals
@@ -4402,7 +4713,10 @@ missing. See `CLI-FUNCTIONALITIES.md` for a per-CLI deep dive.
 ## Workspace conventions
 - Fabric items are synced via the Fabric VS Code extension (not managed by agents)
 - Agents handle the development workflow: editing, validation, skill-guided authoring
-- ALM (pull/push/deploy) is handled by the Fabric extension, not by agents
+- Independent business clones live under `source-control-repositories/`, remain separate Git repositories,
+  and appear as separate roots in the local multi-root workspace
+- ALM agents may operate an explicitly selected repository within its recorded branch/write policy;
+  Fabric item pull/push remains handled by the Fabric extension
 - Custom skills in `.github/skills/` are the installer's source of truth
 '@
 Write-ManagedFile "$rootPath\.github\copilot-instructions.md" $copilotInstructions
@@ -4415,39 +4729,51 @@ $agentsReadme = @'
 ## How to use
 
 Open this folder in VS Code.
-In Copilot Chat, select **1 - Fabric Workspace Master Agent** from the agent dropdown.
+In Copilot Chat, select **01 - Fabric Workspace Master** from the agent dropdown.
 Type anything to begin. The agent offers to update skills, checks your identity
 (`fab auth status`, falling back to `az account show`), and presents a topic menu
-to route you to the right specialist.
+to route you to the right team.
 
-You can also select specialist agents directly from the dropdown
-if you know what you need.
+You can also select an executive reviewer or Team Lead directly. Focused workers
+are delegated by their leads so the dropdown stays clear.
 
 ---
 
 ## Agent architecture
 
-### 1 - Fabric Workspace Master Agent  `.github/agents/1-fabric-workspace-master-agent.agent.md`
-Slim routing hub. On session start: reads copilot-instructions.md and AGENTS.md, then
-follows `.github/agent-docs/starting-flow.md` (skill check, fab auth / az fallback, topic menu).
-For direct task handling: follows `.github/agent-docs/working-flow-reference.md`.
-Reference docs in `agent-docs/` do NOT appear in the Copilot Chat dropdown.
+| # | Dropdown agent | Focus |
+|---|----------------|-------|
+| 01 | **Fabric Workspace Master** | Startup, routing, orchestration, final outcome |
+| 02 | **Fabric Solution Architect** | Cross-domain design, dependencies, ownership, rollback |
+| 03 | **Integration QA & Change Controller** | Cross-artifact checks and final acceptance |
+| 04 | **Semantic Model Team Lead** | TMDL, DAX, relationships, security, validation |
+| 05 | **Reporting Team Lead** | PBIR, UX, themes, visuals, report QA |
+| 06 | **Data Engineering Team Lead** | Spark, lakehouse, SQL, dataflows, pipelines, RTI |
+| 07 | **Fabric Administration & Governance Team Lead** | Workspaces, capacity, access, governance, operations |
+| 08 | **ALM & DevOps Team Lead** | Git, GitHub, Azure DevOps, Fabric Git and releases |
+| 09 | **Applications & Integration Team Lead** | Python, SDK, REST, XMLA, ODBC and data access |
+| 10 | **Capability Maintenance Team Lead** | Skills, agents, tools, installer health and recovery |
 
-### 2 - Fabric Skills Maintainer  `.github/agents/2-fabric-skills-maintainer.agent.md`
-Offers light (quick pull) or deep (pull + MS docs freshness check + unreferenced scan).
-Called from Master Agent or directly.
+The seven Team Leads delegate to 37 numbered worker agents. Each worker owns a
+bounded artifact type or maintenance responsibility and reports evidence back to
+its lead. The Master keeps one writer per artifact and consolidates the result.
 
-### Specialist agents (also selectable from dropdown)
+Reference docs in `.github/agent-docs/` do not appear in the dropdown.
 
-| # | Agent | Focus | Key skills |
-|---|-------|-------|------------|
-| 3 | **Semantic Model Agent** | TMDL, DAX, measures, columns | fabric-tmdl, data-goblin pbip/semantic-models |
-| 4 | **Fabric Data Engineer** | Spark, SQL, pipelines, medallion | skills-for-fabric spark/sqldw/e2e |
-| 5 | **Fabric Admin** | Capacity, governance, docs | skills-for-fabric, fabric-admin |
-| 6 | **Fabric App Dev** | Python apps, ODBC, XMLA | skills-for-fabric sqldw-consumption |
-| 7 | **Fabric Reports Agent** | PBIR reports, visuals, themes | data-goblin pbip/reports |
-| 8 | **Fabric Pipelines Agent** | Pipeline JSON authoring | fabric-pipelines skill |
-| 9 | **Fabric DevOps Agent** | Git Integration, Deployment Pipelines, Azure DevOps / GitHub ALM | fabric-cli-policy + selective artifact-definition reads |
+---
+
+## Source-control layout
+
+- The installation root is the outer **Fabric Agentic Workspace** Git repository.
+- Local Fabric workspace folders hold definitions pulled through the Fabric extension.
+- Optional GitHub/Azure DevOps business clones live under `source-control-repositories/`.
+  Each is independent, ignored by the outer repository, and opened as a separate
+  root/Source Control provider through `Fabric-Agentic-Workspace.code-workspace`.
+- Machine/company-specific repository and branch mappings are stored in the
+  gitignored `.github/agent-docs/local/repository-map.local.json`.
+
+Before repository or ALM work, select **08 - ALM & DevOps Team Lead** and verify
+the mapped repository, active branch, status, remote, environment and write policy.
 
 ---
 
@@ -4456,8 +4782,8 @@ Called from Master Agent or directly.
 | Source | Location | Updated |
 |--------|----------|---------|
 | Custom (TMDL, Pipelines, CLI policy) | `.github/skills/` | Re-run installer |
-| Microsoft skills-for-fabric | `skills-for-fabric/` | Offered on session start / via Skills Maintainer |
-| Data-goblin plugins | `power-bi-agentic-development/` | Offered on session start / via Skills Maintainer |
+| Microsoft skills-for-fabric | `skills-for-fabric/` | Offered on session start / via Capability Maintenance |
+| Kurt/data-goblin plugins | `power-bi-agentic-development/` | Offered on session start / via Capability Maintenance |
 '@
 Write-ManagedFile "$rootPath\AGENTS.md" $agentsReadme
 Write-Host "  Written: AGENTS.md" -ForegroundColor Green
@@ -4468,8 +4794,12 @@ $gitignoreContent = @'
 skills-for-fabric/
 power-bi-agentic-development/
 
+# Independent business repositories (each keeps its own .git/remotes/branches)
+source-control-repositories/
+
 # VS Code local
 .vscode/
+Fabric-Agentic-Workspace.code-workspace
 
 # OS
 Thumbs.db
@@ -4481,6 +4811,9 @@ Thumbs.db
 
 # Machine-specific tool inventory (regenerated by the installer each run)
 .github/agent-docs/tool-status.json
+
+# Machine/company-specific Fabric and repository mappings
+.github/agent-docs/local/
 '@
 $gitignorePath = "$rootPath\.gitignore"
 # Only write the full template if it does not exist  -- user may have customised it
@@ -4488,15 +4821,17 @@ if (-not (Test-Path $gitignorePath)) {
     Write-ManagedFile $gitignorePath $gitignoreContent
     Write-Host "  Written: .gitignore" -ForegroundColor Green
 } else {
-    Write-Host "  .gitignore already exists  -- skipping (not overwriting)" -ForegroundColor Yellow
-    # The tool inventory is machine-specific and must never be committed. Ensure
-    # its ignore line is present even on an existing (pre-tool-status) .gitignore.
-    $ignoreLine = '.github/agent-docs/tool-status.json'
-    $existingIgnore = Get-Content $gitignorePath -Raw -ErrorAction SilentlyContinue
-    if ($existingIgnore -notmatch [regex]::Escape($ignoreLine)) {
-        Add-Content -Path $gitignorePath -Value "`r`n# Machine-specific tool inventory (regenerated by the installer each run)`r`n$ignoreLine" -Encoding UTF8
-        Write-Host "  .gitignore: appended tool-status.json ignore rule" -ForegroundColor Green
-    }
+    Write-Host "  .gitignore already exists  -- preserving its content" -ForegroundColor Yellow
+    Add-GitIgnoreRules -Path $gitignorePath -Heading 'Cloned skill repositories' `
+        -Rules @('skills-for-fabric/', 'power-bi-agentic-development/')
+    Add-GitIgnoreRules -Path $gitignorePath -Heading 'Independent business repositories and local workspace metadata' `
+        -Rules @('source-control-repositories/', $workspaceFileName, '.github/agent-docs/local/')
+    Add-GitIgnoreRules -Path $gitignorePath -Heading 'VS Code local' -Rules @('.vscode/')
+    Add-GitIgnoreRules -Path $gitignorePath -Heading 'Operating-system files' -Rules @('Thumbs.db', '.DS_Store')
+    Add-GitIgnoreRules -Path $gitignorePath -Heading 'Fabric local cache' -Rules @('.pbi/', '*.pbicache')
+    Add-GitIgnoreRules -Path $gitignorePath -Heading 'Machine-specific tool inventory' `
+        -Rules @('.github/agent-docs/tool-status.json')
+    Write-Host '  .gitignore: required installer safety rules confirmed' -ForegroundColor Green
 }
 
 # -- .vscode/tasks.json ------------------------------------------------
@@ -4549,7 +4884,7 @@ $toolStatusObj = [ordered]@{
         schemaVersion = 1
         generatedAt   = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
         generatedBy   = 'installer'
-        note          = 'Machine-specific and gitignored. CLIs are invoked via execute; <key>.found gates use vs. fallback. Regenerate by re-running the installer or via the Skills Maintainer agent.'
+        note          = 'Machine-specific and gitignored. CLIs are invoked via execute; <key>.found gates use vs. fallback, and <key>.path is authoritative when present. Regenerate by re-running the installer or via the Capability Maintenance team.'
     }
 }
 foreach ($k in $script:ToolStatus.Keys) { $toolStatusObj[$k] = $script:ToolStatus[$k] }
@@ -4560,13 +4895,14 @@ Write-Host "  Written: .github/agent-docs/tool-status.json" -ForegroundColor Gre
 Write-Host "`n  All configuration files ready." -ForegroundColor Green
 
 # =====================================================================
-# STEP 8  -- Git init and launch VS Code
+# STEP 9  -- Git init and launch VS Code
 # =====================================================================
-Show-Step 8 $totalSteps "Finishing Up"
+Show-Step 9 $totalSteps "Finishing Up"
 
 Push-Location $rootPath
 try {
-    if (-not (Test-Path "$rootPath\.git")) {
+    $createdGitRepository = -not (Test-Path "$rootPath\.git")
+    if ($createdGitRepository) {
         try { & git init 2>&1 | Out-Null } catch { }
         Write-Host "  Initialised git repository" -ForegroundColor Green
     }
@@ -4576,9 +4912,52 @@ try {
     if ([string]::IsNullOrWhiteSpace($gitUser) -or [string]::IsNullOrWhiteSpace($gitEmail)) {
         Write-Host "  Warning: git user.name/email not configured  -- skipping initial commit." -ForegroundColor Yellow
     } else {
-        try { & git add . 2>&1 | Out-Null } catch { }
-        try { & git commit -m "chore: fabric agentic workspace setup" 2>&1 | Out-Null } catch { }
-        Write-Host "  Initial commit created." -ForegroundColor Green
+        $commitPaths = @()
+        if ($createdGitRepository) {
+            # A newly created repository owns the expected initial workspace snapshot.
+            try { & git add -- . 2>&1 | Out-Null } catch { }
+            $staged = @(& git diff --cached --name-only 2>$null)
+        } else {
+            # An update owns only files declared by this installer. Never sweep user
+            # work into the index, and never include unrelated paths already staged.
+            $declaredPaths = @(
+                @($managedAgents | ForEach-Object { ".github/agents/$_" })
+                @($managedSkills | ForEach-Object { ".github/skills/$_" })
+                @($managedConfigs)
+            ) | ForEach-Object { ([string]$_).Replace('\', '/') } | Sort-Object -Unique
+            foreach ($path in $declaredPaths) {
+                if (-not (Test-Path -LiteralPath (Join-Path $rootPath $path))) { continue }
+                # Do not use `ls-files --error-unmatch` here: an intentionally
+                # ignored, untracked managed file produces a native Git error on
+                # reruns even though excluding that path is the desired result.
+                $tracked = @(& git ls-files -- $path 2>$null).Count -gt 0
+                & git check-ignore -q -- $path 2>$null
+                $ignored = ($LASTEXITCODE -eq 0)
+                if ($tracked -or -not $ignored) { $commitPaths += $path }
+            }
+            if ($commitPaths.Count -gt 0) {
+                try { & git add -- @commitPaths 2>&1 | Out-Null } catch { }
+            }
+            $staged = if ($commitPaths.Count -gt 0) {
+                @(& git diff --cached --name-only -- @commitPaths 2>$null)
+            } else { @() }
+        }
+        if ($staged.Count -eq 0) {
+            Write-Host "  Git is already current; no new commit was needed." -ForegroundColor DarkGray
+        } else {
+            if ($createdGitRepository) {
+                try { & git commit -m "chore: fabric agentic workspace setup" 2>&1 | Out-Null } catch { }
+            } else {
+                # --only constrains the commit even if the user had unrelated staged work.
+                try { & git commit --only -m "chore: fabric agentic workspace setup" -- @commitPaths 2>&1 | Out-Null } catch { }
+            }
+            if ($LASTEXITCODE -eq 0) {
+                $commitKind = if ($createdGitRepository) { 'Initial commit' } else { 'Workspace update commit' }
+                Write-Host "  $commitKind created." -ForegroundColor Green
+            } else {
+                Write-Host "  Warning: files were staged, but Git could not create the commit." -ForegroundColor Yellow
+            }
+        }
     }
 } finally {
     Pop-Location
@@ -4586,19 +4965,28 @@ try {
 
 Write-Host ""
 Write-Host "=============================================" -ForegroundColor Green
-Write-Host "  Setup complete!" -ForegroundColor Green
+Write-Host "  Setup complete! v$productVersion" -ForegroundColor Green
 Write-Host "  Workspace: $rootPath" -ForegroundColor Green
 Write-Host "=============================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  VS Code will now open your workspace." -ForegroundColor White
-Write-Host "  Once open, select 1 - Fabric Workspace Master Agent from the" -ForegroundColor White
+Write-Host "  Once open, select 01 - Fabric Workspace Master from the" -ForegroundColor White
 Write-Host "  Copilot Chat dropdown and type anything to start." -ForegroundColor White
 Write-Host ""
 Write-Host "  Managed files (overwritten on re-run):" -ForegroundColor DarkGray
-Write-Host "    Agents: $($managedAgents -join ', ')" -ForegroundColor DarkGray
+Write-Host "    Agents: $($managedAgents.Count) managed definitions (10 dropdown, 37 delegated)" -ForegroundColor DarkGray
 Write-Host "    Skills: $($managedSkills -join ', ')" -ForegroundColor DarkGray
+Write-Host "    Business repositories: $($allBusinessRepositories.Count) independent clone(s) in the local multi-root workspace" -ForegroundColor DarkGray
 Write-Host "  All other files in .github/ are left untouched." -ForegroundColor DarkGray
 Write-Host ""
 Read-Host "  Press Enter to open VS Code..."
 
-& $vscodeCmd $rootPath
+$launchTarget = $rootPath
+if ($repositoryMapReadable -and (Test-Path -LiteralPath $workspaceFilePath)) {
+    $launchTarget = $workspaceFilePath
+}
+if ($env:FABRIC_AGENTIC_SKIP_VSCODE_LAUNCH -eq '1') {
+    Write-Host '  VS Code launch skipped by the installer regression harness.' -ForegroundColor DarkGray
+} else {
+    & $vscodeCmd $launchTarget
+}
