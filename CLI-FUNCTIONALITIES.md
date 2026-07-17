@@ -4,24 +4,41 @@
 > files) needs **no CLI**. Installing a CLI adds terminal and control-plane /
 > data-plane power on top. This workspace standardises on the **Fabric CLI
 > (`fab`)**; **Azure CLI (`az`)** is a documented **fallback** for the few things
-> `fab` does not cover (SQL/TDS queries and non-Fabric token audiences).
+> `fab` does not cover (SQL/TDS queries and non-Fabric token audiences). On top of
+> those two, a handful of **opt-in specialist CLIs** (`pbir`, Tabular Editor CLI,
+> `pbi-tools`, `sqlcmd`, `gh`, `az devops`) give individual agents extra power for
+> reports, semantic models, SQL, and ALM — installed only if you say yes at setup.
 
 This document is a practical, opinionated catalogue of the CLI actions that are
 most useful in this workspace. It focuses on the commands a Fabric developer is
 most likely to reach for during local, live, or hybrid agent-assisted work:
 identity checks, item export/import, job runs, REST calls, OneLake/table
-operations, Git/ALM tasks, and the few fallback cases where `az` or `sqlcmd` are
-still the better tool.
+operations, Git/ALM tasks, report and model automation, and the few fallback
+cases where `az` or `sqlcmd` are still the better tool.
 
 It is not intended to be a permanent exhaustive reference for every Fabric,
 Power BI, Azure, or SQL command. Command groups and flags evolve, especially
-around newer Fabric APIs and preview features. Treat the examples here as the
-high-value working set, then confirm exact syntax with `fab --help`,
-`fab <group> --help`, the Azure CLI help, or the official Microsoft references
-linked below.
+around newer Fabric APIs and the newer/preview specialist CLIs. Treat the
+examples here as the high-value working set, then confirm exact syntax with
+`fab --help`, `fab <group> --help`, each specialist tool's own `--help`/`-?`,
+the Azure CLI help, or the official references linked below.
 
-- **Install `fab`** (recommended): `pip install ms-fabric-cli` (Python 3.10–3.13). Repo: https://github.com/microsoft/fabric-cli
-- **Install `az`** (fallback): https://aka.ms/installazurecli
+### How this document is organized
+
+- **Part I — Fabric platform CLIs (`fab` + `az` fallback).** The original, workload-first
+  deep dive (sections 0–21): every way of working may touch these two CLIs.
+- **Part II — Specialist CLIs (one chapter each).** Opt-in tools owned by individual
+  agents (sections 22–27). Each is detected, explained, and installed Y/N at setup, and
+  gated at runtime by `.github/agent-docs/tool-status.json` (`<key>.found`). None is
+  required for the core local-editing workflow.
+
+Install / detection:
+
+- **`fab`** (recommended): `pip install ms-fabric-cli` (Python 3.10–3.13). Repo: https://github.com/microsoft/fabric-cli
+- **`az`** (fallback): https://aka.ms/installazurecli
+- **Specialist CLIs**: the installer detects each, prints its provider + purpose, and
+  asks Y/N before a best-effort install (see the README **Prerequisites** table and each
+  Part II chapter). Provider links are listed per chapter below.
 
 Official references:
 
@@ -31,6 +48,11 @@ Official references:
 - Microsoft Fabric Data Factory activity overview: https://learn.microsoft.com/en-us/fabric/data-factory/activity-overview
 - Microsoft Fabric VS Code extension: https://marketplace.visualstudio.com/items?itemName=fabric.vscode-fabric
 - Azure CLI reference: https://learn.microsoft.com/en-us/cli/azure/
+- Tabular Editor CLI: https://docs.tabulareditor.com
+- pbi-tools: https://pbi.tools
+- `pbir` CLI: data-goblin `power-bi-agentic-development` (`reports/skills/pbir-cli`)
+- GitHub CLI (`gh`): https://cli.github.com/manual/
+- Azure DevOps CLI: https://learn.microsoft.com/en-us/azure/devops/cli/
 
 The agents read `.github/skills/fabric-cli-policy/SKILL.md` for the decision rule
 before any CLI/REST task. This file is the human-readable companion to that skill.
@@ -38,6 +60,8 @@ before any CLI/REST task. This file is the human-readable companion to that skil
 ---
 
 ## Table of contents
+
+**Part I — Fabric platform CLIs (`fab` + `az` fallback)**
 
 - [0. Authentication & identity](#0-authentication--identity)
 - [1. Power BI / semantic model authoring](#1-power-bi--semantic-model-authoring)
@@ -63,7 +87,23 @@ before any CLI/REST task. This file is the human-readable companion to that skil
 - [21. Config & scripting tips](#21-config--scripting-tips)
 - [Quick reference: `az rest` → `fab api`](#quick-reference-az-rest--fab-api)
 
+**Part II — Specialist CLIs (opt-in, agent-owned)**
+
+- [22. `pbir` — Power BI report CLI](#22-pbir--power-bi-report-cli)
+- [23. Tabular Editor CLI — semantic-model validation & deployment](#23-tabular-editor-cli--semantic-model-validation--deployment)
+- [24. `pbi-tools` — PBIX/PBIP source control & build](#24-pbi-tools--pbixpbip-source-control--build)
+- [25. `sqlcmd` — T-SQL over the Fabric SQL endpoint](#25-sqlcmd--t-sql-over-the-fabric-sql-endpoint)
+- [26. `gh` — GitHub CLI](#26-gh--github-cli)
+- [27. `az devops` — Azure DevOps CLI](#27-az-devops--azure-devops-cli)
+
 ---
+
+# Part I — Fabric platform CLIs (`fab` + `az` fallback)
+
+The sections below are the original, **workload-first** deep dive. `fab` is the
+default for control-plane and data-plane work; `az` (and `sqlcmd`) appear only in
+the documented fallback cases. Every way of working — local, live, or hybrid — may
+touch these two CLIs.
 
 ## 0. Authentication & identity
 
@@ -421,3 +461,240 @@ underlying Azure capacity resource is an Azure control-plane action → use `az`
 > the data-goblin references under
 > `power-bi-agentic-development/plugins/fabric-cli/skills/fabric-cli/` for the
 > current syntax. When in doubt, the agents discover the exact commands dynamically.
+
+---
+
+# Part II — Specialist CLIs (opt-in, agent-owned)
+
+The tools below sit **on top of** `fab`/`az`. Each is an opt-in specialist: the
+installer detects it, prints its provider and purpose, and asks **Y/N** before a
+best-effort install (see the README **Prerequisites** table). Each is **owned by one
+team/worker agent** and gated at runtime by `.github/agent-docs/tool-status.json` — an
+agent reads `<key>.found` first, optionally does one live `--version`/`Get-Command`
+re-check, then falls back gracefully when the tool is absent. **None of these is
+required for the core local-editing workflow.**
+
+> The newer/niche tools (`pbir`, the Tabular Editor CLI, `pbi-tools`) move quickly and
+> some are in preview. The tables below are an accurate **working set** taken from each
+> provider's own docs — always confirm exact flags with the tool's `--help`/`-?` and the
+> linked provider reference before scripting against them.
+
+---
+
+## 22. `pbir` — Power BI report CLI
+
+**Purpose** — Create, explore, edit, format, validate and publish **PBIR** reports
+(`.pbir`/`.pbip`, or PBIX-with-PBIR-metadata) from the terminal, plus a Windows-only
+bridge that drives an open Power BI Desktop (reload the canvas, screenshot pages).
+
+| | |
+|---|---|
+| **Owned by** | **020 Reporting Team Lead**, via **022 PBIR Authoring Agent**. **055 Power BI ALM Agent** may *read* the `pbir-format` skill for PR/conflict review only — it does not author reports. |
+| **tool-status.json key** | `pbir` (aliases checked: `pbir`, `pbir-cli`) |
+| **Provider** | data-goblin / Kurt Buhler — see the `reports/skills/pbir-cli` skill in `power-bi-agentic-development` |
+| **When to use** | Any structured report edit. The skill's rule: **always** use `pbir` when available; only edit PBIR JSON directly (with the `pbir-format` skill) if `pbir` fails three times in a row. |
+
+| What | Example |
+|------|---------|
+| Validate after every change | `pbir validate "Sales.Report"` (add `--qa`, `--fields`, or `--all`) |
+| Read a property / raw JSON | `pbir get "Sales.Report/Overview.Page/Card.Visual.title.fontSize"` · `pbir cat "Sales.Report"` |
+| Set a property (glob + filter) | `pbir set "Sales.Report/**/*.Visual.title.show" --value false -f` |
+| New thin report bound to a model | `pbir new report "Sales.Report" -c "Workspace/Model.SemanticModel"` |
+| Add a visual | `pbir add visual card "Sales.Report/Overview.Page" --title "Revenue" -d "Values:Sales.Revenue" --y 120` |
+| Add a filter / bookmark | `pbir add filter Date Year -r "Sales.Report"` · `pbir add bookmark "Sales.Report" "Q1 View"` |
+| Discover data roles for a visual | `pbir add visual --list` · `pbir visuals bind --list-roles` |
+| Publish to a Fabric workspace | `pbir publish "Sales.Report" "Workspace.Workspace/Sales.Report" -f` (positional args, **not** `--workspace`) |
+| Desktop bridge (Windows only) | `pbir desktop list` → `pbir desktop refresh "Sales.Report"` → `pbir desktop screenshot "Sales.Report/Overview.Page" -o verify.png` |
+
+- **Path syntax** is filesystem-like with required type suffixes
+  (`Report.Report/Page.Page/Visual.Visual`); glob (`**/*.Visual`) for bulk ops (needs `-f`).
+  **Top-level flags go before the subcommand**: `pbir -q new report ...`, not `pbir new report -q`.
+- **Fallback when absent** — edit PBIR JSON directly using the **`pbir-format` skill (in the
+  `pbip` plugin, not the reports plugin)**; never hand-edit PBIR without it.
+- **Caveats** — `pbir desktop` is Windows-only (every call fails on macOS/Linux) and needs the
+  Desktop "external tool access" preview setting on; `pbir desktop refresh` reloads PBIP/PBIR
+  definitions, not PBIX. `validate` checks structure, not rendering — confirm visually via the
+  Desktop screenshot loop or a sandbox `pbir publish`.
+
+---
+
+## 23. Tabular Editor CLI — semantic-model validation & deployment
+
+**Purpose** — Headless semantic-model operations for CI/CD: Best Practice Analyzer
+(BPA), C# scripts/macros, schema validation, deploy via XMLA, and (new CLI) diffing,
+testing, refresh and VertiPaq analysis.
+
+| | |
+|---|---|
+| **Owned by** | **010 Semantic Model Team Lead**, via **016 Semantic Validation & Performance Agent** |
+| **tool-status.json key** | `tabularEditor` (aliases checked: `te`, `TabularEditor.exe`, `TabularEditor2.exe`, `TabularEditor3.exe`) |
+| **Provider** | Tabular Editor — https://docs.tabulareditor.com |
+| **Two binaries** | `TabularEditor.exe` (TE2 CLI) — stable, Windows-only, free, production-ready. `te` — the new cross-platform CLI, in Limited Public Preview. |
+
+**`TabularEditor.exe` (TE2 — use for production pipelines today):**
+
+| What | Example |
+|------|---------|
+| Run, waiting for completion | `start /wait TabularEditor.exe "model.bim" -S script.csx` |
+| Run BPA, fail build on issues | `start /wait TabularEditor.exe "model.bim" -A rules.json -V` (`-G` for GitHub annotations) |
+| Run a C# script | `... -S script.csx` |
+| Deploy to a workspace via XMLA | `... -D "Provider=MSOLAP;Data Source=powerbi://...;" "DatabaseName" -O -C -P -R` |
+| Emit XMLA/TMSL without deploying | `... -X out.xmla` |
+
+> `TabularEditor.exe` is a WinForms app — **always** wrap CLI runs in `start /wait` so the
+> console waits for the task to finish. Running it in CI does **not** need a TE3 licence.
+
+**`te` (new CLI — cross-platform, preview, no `start /wait` needed):**
+
+| What | Example |
+|------|---------|
+| Validate / run BPA | `te validate ...` · `te bpa run --fail-on warning` |
+| Deploy with fine-grained flags | `te deploy --deploy-roles --deploy-partitions ...` (`--dry-run`, `--xmla <file>`) |
+| Run scripts / format DAX | `te script ...` · `te format` |
+| Inspect / diff / dependencies | `te ls`, `te find`, `te diff` (exit `2` on difference), `te deps --unused` |
+| Refresh / test / VertiPaq | `te refresh --table ...` · `te test run --trx out.trx` · `te vertipaq` |
+
+- **Fallback when absent** — author/validate TMDL by hand via the `fabric-tmdl` (house style)
+  + data-goblin DAX/naming skills; BPA rules live in the data-goblin `bpa-rules` skill.
+- **Caveats** — the `te` preview is time-limited (expires 2026-09-30); TE3 **desktop** needs a
+  paid licence but the CLIs in CI do not. `te` is **not** a real exe name for TE2 — detection
+  checks all four aliases and stores what was actually found.
+- **Install strategy** — setup tries an automated portable install first (works on open networks);
+  if that fails it prints the exact link (`releases/latest` → `TabularEditor.Portable.zip`, unzip to
+  `%LOCALAPPDATA%\Programs\TabularEditor`). **Corporate security can return that zip empty or block it
+  outright** (deep content inspection of executables); an IT/download approval may be required. Drop the
+  zip in Downloads and re-run to auto-pick it up, or ask **070 - Capability Maintenance Team Lead**.
+- **If it can't be installed** — the **016 Semantic Validation & Performance Agent** falls back to the
+  `fabric-tmdl` (house style) + data-goblin DAX/naming skills and the `bpa-rules` skill: it authors and
+  reviews TMDL/DAX and applies BPA rules by hand. You lose only the *automated* headless BPA/VertiPaq run,
+  not the modelling capability.
+
+---
+
+## 24. `pbi-tools` — PBIX/PBIP source control & build
+
+**Purpose** — Extract a PBIX/PBIT into a source-controllable folder, compile sources
+back into a PBIX/PBIT, convert between serialization formats, and deploy.
+
+| | |
+|---|---|
+| **Owned by** | **055 Power BI ALM Agent** — for ALM/round-tripping of legacy PBIX in Git |
+| **tool-status.json key** | `pbiTools` (command `pbi-tools`) |
+| **Provider** | https://pbi.tools |
+| **When to use** | Round-tripping classic **PBIX** into Git when the source isn't already PBIP/PBIR. For native PBIP/PBIR reports prefer `pbir` (§22); for models prefer TMDL / Tabular Editor (§23). |
+
+| Action | Example |
+|------|---------|
+| Inspect running Desktop instances | `pbi-tools info` |
+| Extract a PBIX to a source folder | `pbi-tools extract ".\Sales.pbix"` (default TMDL model serialization) |
+| Compile sources back to PBIX/PBIT | `pbi-tools compile ".\Sales" -format PBIT` |
+| Convert serialization in place | `pbi-tools convert ".\Sales" -modelSerialization Tmdl` |
+| Export table data to CSV | `pbi-tools export-data -pbixPath ".\Sales.pbix"` |
+| Deploy via a manifest profile | `pbi-tools deploy ".\Sales" <label> -environment Development` |
+
+- **Fallback when absent** — use the Fabric VS Code extension / `pbir` for PBIR reports;
+  manual PBIP serialization for models.
+- **Caveats** — Windows-centric (it talks to Power BI Desktop internals). `compile` to PBIX is
+  supported only for "thin" report-only projects; use the **PBIT** format when the project
+  contains a data model.
+- **Install strategy** — setup tries an automated portable install first (works on open networks);
+  if that fails it prints the exact link (`releases/latest` → `pbi-tools.<version>.zip` net472, unzip to
+  `%LOCALAPPDATA%\Programs\pbi-tools`). **Corporate security can return that zip empty or block it
+  outright** (deep content inspection of executables); an IT/download approval may be required. Drop the
+  zip in Downloads and re-run to auto-pick it up, or ask **070 - Capability Maintenance Team Lead**.
+- **If it can't be installed** — the **055 Power BI ALM Agent** falls back to the Fabric VS Code
+  extension / `fab export`/`import` and `pbir` (§22) for PBIR reports, and manual PBIP/TMDL serialization
+  for models. You lose only classic-**PBIX** round-tripping into Git; native PBIP/PBIR ALM is unaffected.
+
+---
+
+## 25. `sqlcmd` — T-SQL over the Fabric SQL endpoint
+
+**Purpose** — Run T-SQL against a Fabric Warehouse / Lakehouse SQL analytics endpoint
+(or Azure SQL). This is the one thing `fab` does **not** do. See also §8.
+
+| | |
+|---|---|
+| **Owned by** | **033 Warehouse SQL Agent** & **063 SQL, ODBC & Data Access Agent** |
+| **tool-status.json key** | `sqlcmd` |
+| **Provider** | Microsoft — modern `go-sqlcmd` (https://aka.ms/go-sqlcmd) |
+| **When to use** | Any T-SQL query/script against a Fabric SQL endpoint, when `fab` data-plane commands aren't enough. |
+
+| What | Example |
+|------|---------|
+| Query an endpoint with Entra auth | `sqlcmd -G -S <ep>.datawarehouse.fabric.microsoft.com -d <db> -Q "SELECT TOP 10 * FROM dbo.sales"` |
+| Run a SQL script file | `sqlcmd -G -S <ep> -d <db> -i script.sql` |
+| CSV-style output | add `-s "," -W` to the query |
+
+- **Fallback when absent** — Python `pyodbc` with an Entra token
+  (`conn = pyodbc.connect(connstr, attrs_before={1256: token})`), or any SQL client.
+  Get the token via `az account get-access-token --resource https://database.windows.net`.
+- **Caveats** — `-G` uses Entra ID auth. The modern `go-sqlcmd` and the legacy ODBC `sqlcmd`
+  differ on some flags — confirm with `sqlcmd -?`.
+
+---
+
+## 26. `gh` — GitHub CLI
+
+**Purpose** — Drive GitHub from the terminal: repos, pull requests, issues, Actions
+runs, releases, and raw API calls. Used for the GitHub side of the DevOps workflow.
+
+| | |
+|---|---|
+| **Owned by** | **051 GitHub Source Control Agent** |
+| **tool-status.json key** | `gh` |
+| **Provider** | https://cli.github.com/manual/ |
+| **When to use** | When the repo's remote is GitHub: PR creation/review, CI status, releases. For Azure DevOps remotes use `az devops` (§27). |
+
+| What | Example |
+|------|---------|
+| Sign in / check status | `gh auth login` · `gh auth status` |
+| View / clone a repo | `gh repo view` · `gh repo clone <owner>/<repo>` |
+| List / create a PR | `gh pr list` · `gh pr create --base prod --head dev --fill` |
+| Check out / review a PR | `gh pr checkout <n>` · `gh pr review --approve` |
+| CI status / merge a PR | `gh pr checks <n>` · `gh pr merge <n> --squash` |
+| Watch / view Actions runs | `gh run list` · `gh run watch <id>` |
+| Create a release | `gh release create v1.0.0 --notes "..."` |
+| Raw API call | `gh api repos/<owner>/<repo>/pulls` |
+
+- **Fallback when absent** — plain `git` for branch/commit/push, plus the GitHub web UI for
+  PRs/Actions; the ALM & DevOps team coordinates the Fabric-side ALM regardless.
+- **Caveats** — needs an authenticated session (`gh auth login`) or a `GH_TOKEN`/`GITHUB_TOKEN`
+  env var; org SSO may require an extra authorization step.
+
+---
+
+## 27. `az devops` — Azure DevOps CLI
+
+**Purpose** — Drive Azure DevOps from the terminal: repos & PRs, branch policies,
+pipelines (build/release), boards work items, and artifacts.
+
+| | |
+|---|---|
+| **Owned by** | **052 Azure DevOps Agent** |
+| **tool-status.json key** | `azureDevOpsCliExtension` (command `az devops`) |
+| **Provider** | https://learn.microsoft.com/en-us/azure/devops/cli/ |
+| **When to use** | When the repo's remote / CI is Azure DevOps. For GitHub remotes use `gh` (§26). |
+
+| What | Example |
+|------|---------|
+| Install the extension | `az extension add --name azure-devops` |
+| Set org/project defaults | `az devops configure --defaults organization=https://dev.azure.com/<org> project=<proj>` |
+| List / create a PR | `az repos pr list` · `az repos pr create --source-branch dev --target-branch prod` |
+| Inspect branch policies | `az repos policy list` |
+| Run / list pipelines | `az pipelines run --name <pipeline>` · `az pipelines list` |
+| Show build status | `az pipelines build list` |
+| Boards work items | `az boards work-item show --id <n>` |
+
+- **Fallback when absent** — plain `git` plus the Azure DevOps web UI; the **053 Fabric Git
+  Integration Agent** still coordinates Fabric Git Integration / Deployment Pipelines via `fab`.
+- **Caveats** — `az devops` is an **extension on top of `az`**: if the `az` key is missing this
+  tool cannot exist (that's why its `tool-status.json` `reason` reads "az missing"). Auth via
+  `az login` or a PAT in `AZURE_DEVOPS_EXT_PAT`.
+
+---
+
+> **One workspace contract for every tool above.** Read `tool-status.json` →
+> if `<key>.found` use the tool → else one optional live re-check → else the documented
+> fallback. Never fail a task **solely** because a specialist CLI is missing; the core
+> local-editing workflow needs none of them.
