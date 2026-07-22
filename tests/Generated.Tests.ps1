@@ -26,7 +26,9 @@ BeforeAll {
     # Run the installer's dry-run generator. stdin is fed from NUL so any
     # "Press Enter to continue" prompts in the generation steps return
     # immediately (EOF) instead of blocking the test run.
-    $cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -File "{0}" -EmitAgentsTo "{1}" < NUL' -f $script:Installer, $script:EmitDir
+    # Force Windows PowerShell 5.1 (powershell.exe) for the child so the emit path
+    # behaves identically on a PS7 CI host and a local PS5.1 shell.
+    $cmd = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}" -EmitAgentsTo "{1}" < NUL' -f $script:Installer, $script:EmitDir
     $script:EmitOutput  = & cmd /c $cmd 2>&1
     $script:EmitExit    = $LASTEXITCODE
     $script:AgentsDir   = Join-Path $script:EmitDir '.github\agents'
@@ -66,7 +68,9 @@ AfterAll {
 Describe 'Installer emit mode (real generator dry-run)' {
 
     It 'exits successfully (self-test gate passed)' {
-        $script:EmitExit | Should -Be 0
+        # On failure, surface the installer's emit output in the CI log so the
+        # exact cause is visible instead of a bare non-zero exit code.
+        $script:EmitExit | Should -Be 0 -Because "the emit dry-run must exit 0; installer output was:`n$(($script:EmitOutput | Out-String))"
     }
 
     It 'creates exactly one agent file per manifest entry' {

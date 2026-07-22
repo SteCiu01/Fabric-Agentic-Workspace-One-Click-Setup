@@ -23,7 +23,9 @@ Describe 'Version single source of truth' {
     }
 
     It 'manifest declares an integer schemaVersion' {
-        $script:Manifest.schemaVersion | Should -BeOfType [int]
+        # ConvertFrom-Json yields Int32 on Windows PowerShell 5.1 but Int64 on
+        # PowerShell 7 (the CI runner), so accept either integral type.
+        ($script:Manifest.schemaVersion -is [int] -or $script:Manifest.schemaVersion -is [long]) | Should -BeTrue
     }
 
     It 'README status heading matches the installer version (no doc drift)' {
