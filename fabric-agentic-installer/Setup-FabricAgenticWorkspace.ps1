@@ -16,17 +16,75 @@
     It will overwrite its own files but leave unmanaged files untouched.
 #>
 
+# CI / automation entry points (both optional; normal interactive install ignores them):
+#   -EmitAgentsTo <dir>  Dry-run: generate agents + config into <dir> and exit, with NO
+#                        prerequisite checks, repo cloning, tool installs or VS Code launch.
+#                        Used by tests/Generated.Tests.ps1 to validate real generated output.
+#   -VerifyRoot <dir>    Re-hash the managed files in an installed workspace against its
+#                        installed-manifest.json and report drift (exit 1 on any drift).
+param(
+    [string]$EmitAgentsTo,
+    [string]$VerifyRoot
+)
+
 # Keep the window open on any error so the user can read it
 $ErrorActionPreference = 'Stop'
-$productVersion = '0.6.0'
+$productVersion = '0.6.1'
 $workspaceFileName = 'Fabric-Agentic-Workspace.code-workspace'
+
+# --- Integrity verification mode (-VerifyRoot) -----------------------
+# Self-contained: reads installed-manifest.json and re-computes SHA256 for each
+# recorded file, reporting missing/modified managed files. Makes the integrity
+# manifest actually verifiable rather than self-attested.
+if ($VerifyRoot) {
+    $verifyTarget = [System.IO.Path]::GetFullPath($VerifyRoot)
+    $verifyManifestPath = Join-Path $verifyTarget '.github\agent-docs\installed-manifest.json'
+    if (-not (Test-Path -LiteralPath $verifyManifestPath)) {
+        Write-Host "No installed-manifest.json found at $verifyManifestPath" -ForegroundColor Red
+        exit 2
+    }
+    $verifyManifest = Get-Content -LiteralPath $verifyManifestPath -Raw | ConvertFrom-Json
+    $verifyDrift = @(); $verifyMissing = @(); $verifyOk = 0
+    foreach ($vf in $verifyManifest.files) {
+        $vp = Join-Path $verifyTarget ($vf.path -replace '/', '\')
+        if (-not (Test-Path -LiteralPath $vp -PathType Leaf)) { $verifyMissing += $vf.path; continue }
+        $vsha = (Get-FileHash -LiteralPath $vp -Algorithm SHA256).Hash
+        if ($vsha -ne $vf.sha256) { $verifyDrift += $vf.path } else { $verifyOk++ }
+    }
+    Write-Host "Integrity verification for $verifyTarget" -ForegroundColor Cyan
+    Write-Host "  Verified OK : $verifyOk" -ForegroundColor Green
+    if ($verifyMissing.Count) {
+        Write-Host "  Missing     : $($verifyMissing.Count)" -ForegroundColor Yellow
+        $verifyMissing | ForEach-Object { Write-Host "    - $_" -ForegroundColor DarkYellow }
+    }
+    if ($verifyDrift.Count) {
+        Write-Host "  Modified    : $($verifyDrift.Count)" -ForegroundColor Red
+        $verifyDrift | ForEach-Object { Write-Host "    - $_" -ForegroundColor DarkYellow }
+    }
+    if ($verifyMissing.Count -or $verifyDrift.Count) { exit 1 }
+    Write-Host "  All managed files match the manifest." -ForegroundColor Green
+    exit 0
+}
+
+# =====================================================================
+# MAINTAINER MAP  -- where things live in this file (collapse #regions in VS Code)
+#   AGENT MANIFEST          embedded JSON source of truth (schema-validated)
+#   PACKAGE MANIFEST        list of installer-managed files
+#   Helper functions        step banners, managed-file writer, tool detection
+#   STEP 1..9               the install flow (folders, skills, agents, config)
+# The embedded agent manifest is validated in CI against
+#   schema/agent-manifest.schema.json  by  tests/Manifest.Tests.ps1
+# Run the tests locally with:  Invoke-Pester   (from the repo root)
+# =====================================================================
+
+#region AGENT MANIFEST (embedded source of truth -- keep in sync with schema/agent-manifest.schema.json)
 $agentManifestJson = @'
 {
   "schemaVersion": 1,
-  "productVersion": "0.6.0",
+  "productVersion": "0.6.1",
   "defaults": {
     "mode": "both",
-    "tools": ["read","search","execute","edit"],
+    "tools": ["read","search"],
     "conditionalSkills": [],
     "excludedSkills": ["unrelated vendor skills"],
     "artifactTypes": [],
@@ -44,59 +102,60 @@ $agentManifestJson = @'
 
     {"id":"semantic-model-team-lead","displayName":"Semantic Model Team Lead","filename":"10-semantic-model-team-lead.agent.md","level":"team-lead","department":"semantic-model","parent":"fabric-workspace-master","allowedChildren":["Model Architecture Agent","Relationships & Storage Mode Agent","TMDL Agent","DAX Agent","Semantic Security & AI Metadata Agent","Semantic Validation & Performance Agent"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search","execute","edit"],"primarySkills":["fabric-tmdl","fabric-working-modes","fabric-tool-policy"],"conditionalSkills":["Microsoft semantic model and Direct Lake skills","Kurt TMDL, DAX, TE2, BPA, and performance skills"],"artifactTypes":["semantic models","TMDL","DAX"],"focus":"Decompose semantic work, select TE2, Modeling MCP/TOM, TMDL, fab, or sqlcmd, coordinate dependencies, and own model-wide validation."},
     {"id":"model-architecture-agent","displayName":"Model Architecture Agent","filename":"11-model-architecture.agent.md","level":"worker","department":"semantic-model","parent":"semantic-model-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search"],"primarySkills":["fabric-tmdl"],"conditionalSkills":["Microsoft Direct Lake guidance","Kurt semantic architecture skills"],"artifactTypes":["model architecture recommendations"],"writePermissions":"normally read-only","defaultRisk":"low","focus":"Assess grain, fact and dimension boundaries, star schema, Direct Lake versus Import, composites, and calculation-group architecture."},
-    {"id":"relationships-storage-mode-agent","displayName":"Relationships & Storage Mode Agent","filename":"12-relationships-storage-mode.agent.md","level":"worker","department":"semantic-model","parent":"semantic-model-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-tmdl"],"conditionalSkills":["Microsoft Direct Lake guidance","Kurt relationship skills"],"artifactTypes":["relationships","storage modes"],"focus":"Implement and validate cardinality, filter direction, ambiguity, bridges, integrity, storage modes, and Direct Lake behavior."},
-    {"id":"tmdl-agent","displayName":"TMDL Agent","filename":"13-tmdl.agent.md","level":"worker","department":"semantic-model","parent":"semantic-model-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-tmdl"],"conditionalSkills":["Kurt TMDL and PBIP skills"],"artifactTypes":["TMDL files","semantic model metadata"],"focus":"Inspect before editing tables, columns, hierarchies, partitions, expressions, cultures, and PBIP semantic-model files; preserve house style and validate."},
-    {"id":"dax-agent","displayName":"DAX Agent","filename":"14-dax.agent.md","level":"worker","department":"semantic-model","parent":"semantic-model-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-tmdl"],"conditionalSkills":["Kurt DAX skills"],"artifactTypes":["DAX measures","DAX queries","calculation groups"],"focus":"Create and validate measures, time intelligence, calculation groups, context behavior, formats, regression queries, and performance."},
-    {"id":"semantic-security-ai-metadata-agent","displayName":"Semantic Security & AI Metadata Agent","filename":"15-semantic-security-ai-metadata.agent.md","level":"worker","department":"semantic-model","parent":"semantic-model-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-tmdl"],"conditionalSkills":["Microsoft semantic security and AI guidance"],"artifactTypes":["RLS","OLS","roles","AI metadata"],"defaultRisk":"high","focus":"Own RLS, OLS, roles, descriptions, synonyms, AI instructions, schemas, verified-answer metadata, and explicit security-impact validation."},
+    {"id":"relationships-storage-mode-agent","displayName":"Relationships & Storage Mode Agent","filename":"12-relationships-storage-mode.agent.md","level":"worker","department":"semantic-model","parent":"semantic-model-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":["fabric-tmdl"],"conditionalSkills":["Microsoft Direct Lake guidance","Kurt relationship skills"],"artifactTypes":["relationships","storage modes"],"focus":"Implement and validate cardinality, filter direction, ambiguity, bridges, integrity, storage modes, and Direct Lake behavior."},
+    {"id":"tmdl-agent","displayName":"TMDL Agent","filename":"13-tmdl.agent.md","level":"worker","department":"semantic-model","parent":"semantic-model-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":["fabric-tmdl"],"conditionalSkills":["Kurt TMDL and PBIP skills"],"artifactTypes":["TMDL files","semantic model metadata"],"focus":"Inspect before editing tables, columns, hierarchies, partitions, expressions, cultures, and PBIP semantic-model files; preserve house style and validate."},
+    {"id":"dax-agent","displayName":"DAX Agent","filename":"14-dax.agent.md","level":"worker","department":"semantic-model","parent":"semantic-model-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":["fabric-tmdl"],"conditionalSkills":["Kurt DAX skills"],"artifactTypes":["DAX measures","DAX queries","calculation groups"],"focus":"Create and validate measures, time intelligence, calculation groups, context behavior, formats, regression queries, and performance."},
+    {"id":"semantic-security-ai-metadata-agent","displayName":"Semantic Security & AI Metadata Agent","filename":"15-semantic-security-ai-metadata.agent.md","level":"worker","department":"semantic-model","parent":"semantic-model-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":["fabric-tmdl"],"conditionalSkills":["Microsoft semantic security and AI guidance"],"artifactTypes":["RLS","OLS","roles","AI metadata"],"defaultRisk":"high","focus":"Own RLS, OLS, roles, descriptions, synonyms, AI instructions, schemas, verified-answer metadata, and explicit security-impact validation."},
     {"id":"semantic-validation-performance-agent","displayName":"Semantic Validation & Performance Agent","filename":"16-semantic-validation-performance.agent.md","level":"worker","department":"semantic-model","parent":"semantic-model-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-tmdl","fabric-tool-policy"],"conditionalSkills":["Kurt BPA and performance skills"],"artifactTypes":["BPA results","schema checks","performance reports"],"writePermissions":"read-only unless a safe fix is approved","defaultRisk":"low","focus":"Run TE2 BPA, schema, relationship, VertiPaq, Direct Lake, DAX regression, and storage validation."},
 
     {"id":"reporting-team-lead","displayName":"Reporting Team Lead","filename":"20-reporting-team-lead.agent.md","level":"team-lead","department":"reporting","parent":"fabric-workspace-master","allowedChildren":["Report Planning & UX Agent","PBIR Authoring Agent","Theme & Formatting Agent","Advanced & Custom Visuals Agent","Paginated Reports Agent","Report QA & Desktop Verification Agent"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search","execute","edit"],"primarySkills":["fabric-working-modes","fabric-tool-policy"],"conditionalSkills":["Kurt PBIR, report, theme, Deneb, custom visual, and paginated skills"],"artifactTypes":["PBIR reports","themes","paginated reports"],"focus":"Turn requirements into a report plan, coordinate PBIR implementation and semantic dependencies, serialize visual/theme ownership, and require report QA."},
     {"id":"report-planning-ux-agent","displayName":"Report Planning & UX Agent","filename":"21-report-planning-ux.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search"],"primarySkills":[],"conditionalSkills":["Kurt report planning and UX skills"],"artifactTypes":["report design contracts"],"writePermissions":"read-only planning","defaultRisk":"low","focus":"Define audience, business questions, page plan, navigation, visual selection, accessibility, interactions, and required measures before implementation."},
-    {"id":"pbir-authoring-agent","displayName":"PBIR Authoring Agent","filename":"22-pbir-authoring.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Kurt pbir-cli and pbir-format skills"],"artifactTypes":["PBIR pages","visuals","bindings","filters","bookmarks"],"focus":"Use pbir first for report structure and visuals, verify current help, validate after each mutation, and use controlled direct PBIR only as fallback."},
-    {"id":"theme-formatting-agent","displayName":"Theme & Formatting Agent","filename":"23-theme-formatting.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":[],"conditionalSkills":["Kurt report theme skills"],"artifactTypes":["report themes","format properties"],"focus":"Own typography, palette, spacing, conditional formatting, branding, and accessibility; never edit the same visual concurrently with PBIR Authoring."},
-    {"id":"advanced-custom-visuals-agent","displayName":"Advanced & Custom Visuals Agent","filename":"24-advanced-custom-visuals.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":[],"conditionalSkills":["Kurt Deneb, SVG, and custom-visual skills"],"artifactTypes":["Deneb specs","SVG","custom visual configuration"],"focus":"Implement Deneb, SVG, Python/R visuals, custom visuals, and advanced interactions only when the design requires them."},
-    {"id":"paginated-reports-agent","displayName":"Paginated Reports Agent","filename":"25-paginated-reports.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":[],"conditionalSkills":["Microsoft and Kurt paginated report skills"],"artifactTypes":["paginated report definitions"],"focus":"Own paginated definitions, parameters, data sources, layout, rendering, and export validation."},
+    {"id":"pbir-authoring-agent","displayName":"PBIR Authoring Agent","filename":"22-pbir-authoring.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Kurt pbir-cli and pbir-format skills"],"artifactTypes":["PBIR pages","visuals","bindings","filters","bookmarks"],"focus":"Use pbir first for report structure and visuals, verify current help, validate after each mutation, and use controlled direct PBIR only as fallback."},
+    {"id":"theme-formatting-agent","displayName":"Theme & Formatting Agent","filename":"23-theme-formatting.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","edit"],"primarySkills":[],"conditionalSkills":["Kurt report theme skills"],"artifactTypes":["report themes","format properties"],"focus":"Own typography, palette, spacing, conditional formatting, branding, and accessibility; never edit the same visual concurrently with PBIR Authoring."},
+    {"id":"advanced-custom-visuals-agent","displayName":"Advanced & Custom Visuals Agent","filename":"24-advanced-custom-visuals.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","edit"],"primarySkills":[],"conditionalSkills":["Kurt Deneb, SVG, and custom-visual skills"],"artifactTypes":["Deneb specs","SVG","custom visual configuration"],"focus":"Implement Deneb, SVG, Python/R visuals, custom visuals, and advanced interactions only when the design requires them."},
+    {"id":"paginated-reports-agent","displayName":"Paginated Reports Agent","filename":"25-paginated-reports.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","edit"],"primarySkills":[],"conditionalSkills":["Microsoft and Kurt paginated report skills"],"artifactTypes":["paginated report definitions"],"focus":"Own paginated definitions, parameters, data sources, layout, rendering, and export validation."},
     {"id":"report-qa-desktop-agent","displayName":"Report QA & Desktop Verification Agent","filename":"26-report-qa-desktop-verification.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Kurt PBIR validation skills"],"artifactTypes":["report validation evidence","screenshots"],"writePermissions":"read-only verification","defaultRisk":"low","focus":"Run pbir validation and available Desktop refresh/screenshots; detect overlap, truncation, blanks, broken bindings, accessibility, and theme defects."},
 
     {"id":"data-engineering-team-lead","displayName":"Data Engineering Team Lead","filename":"30-data-engineering-team-lead.agent.md","level":"team-lead","department":"data-engineering","parent":"fabric-workspace-master","allowedChildren":["Notebook & Spark Agent","Lakehouse, Delta & MLV Agent","Warehouse SQL Agent","SQL Database Agent","Dataflows Gen2 Agent","Pipeline Orchestration Agent","Real-Time Intelligence Agent","Fabric Intelligence & Ontology Agent"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search","execute","edit"],"primarySkills":["fabric-pipelines","fabric-working-modes","fabric-tool-policy"],"conditionalSkills":["Microsoft Fabric engineering skills"],"artifactTypes":["notebooks","lakehouses","warehouses","SQL databases","dataflows","pipelines","RTI"],"focus":"Coordinate source-to-serving engineering and its semantic dependencies, assign one artifact owner, and validate data and orchestration."},
-    {"id":"notebook-spark-agent","displayName":"Notebook & Spark Agent","filename":"31-notebook-spark.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":[],"conditionalSkills":["Microsoft Spark and notebook skills"],"artifactTypes":["Fabric notebooks","PySpark","Spark SQL"],"focus":"Author and validate PySpark, Spark SQL, notebooks, sessions, remote execution, dependencies, and notebook quality."},
-    {"id":"lakehouse-delta-mlv-agent","displayName":"Lakehouse, Delta & MLV Agent","filename":"32-lakehouse-delta-mlv.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":[],"conditionalSkills":["Microsoft Lakehouse, Delta, medallion, MLV, shortcut, and OneLake skills"],"artifactTypes":["Delta tables","lakehouses","materialized lake views","shortcuts"],"focus":"Own Delta, medallion, MLV, incremental processing, shortcuts, schema evolution, and optimization; request DuckDB only through approval."},
-    {"id":"warehouse-sql-agent","displayName":"Warehouse SQL Agent","filename":"33-warehouse-sql.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Microsoft Warehouse skills"],"artifactTypes":["Warehouse DDL","DML","SQL validation"],"focus":"Design and validate Fabric Warehouse and SQL analytics endpoint DDL, DML, serving, and performance using sqlcmd when available."},
-    {"id":"sql-database-agent","displayName":"SQL Database Agent","filename":"34-sql-database.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Microsoft Fabric SQL Database skills"],"artifactTypes":["Fabric SQL Database schemas","procedures","queries"],"focus":"Handle Fabric SQL Database OLTP, procedures, temporal, JSON, vectors, security, and diagnostics distinctly from Warehouse work."},
-    {"id":"dataflows-gen2-agent","displayName":"Dataflows Gen2 Agent","filename":"35-dataflows-gen2.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":[],"conditionalSkills":["Microsoft Dataflows Gen2 and Power Query skills"],"artifactTypes":["Dataflows Gen2 definitions","Power Query M"],"focus":"Own Power Query M, connectors, previews, destinations, refresh behavior, and failure diagnosis for Dataflows Gen2."},
-    {"id":"pipeline-orchestration-agent","displayName":"Pipeline Orchestration Agent","filename":"36-pipeline-orchestration.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-pipelines"],"conditionalSkills":["Microsoft pipeline skills"],"artifactTypes":["Fabric pipeline definitions","schedules"],"focus":"Implement pipeline activities, notebooks, dataflows, copy, variables, schedules, dependencies, retry, and failure handling with schema validation."},
-    {"id":"real-time-intelligence-agent","displayName":"Real-Time Intelligence Agent","filename":"37-real-time-intelligence.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":[],"conditionalSkills":["Microsoft Eventhouse, KQL, Eventstream, and Activator skills"],"artifactTypes":["Eventhouse","KQL","Eventstream","Activator"],"focus":"Own real-time Fabric artifacts, KQL behavior, ingestion, monitoring, and operational validation."},
-    {"id":"fabric-intelligence-ontology-agent","displayName":"Fabric Intelligence & Ontology Agent","filename":"38-fabric-intelligence-ontology.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":[],"conditionalSkills":["Microsoft FabricIQ, Ontology, and Data Agent skills"],"artifactTypes":["ontologies","FabricIQ assets","Data Agents"],"focus":"Handle FabricIQ, Ontology, Data Agents, and related knowledge capabilities while checking current product behavior."},
+    {"id":"notebook-spark-agent","displayName":"Notebook & Spark Agent","filename":"31-notebook-spark.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":[],"conditionalSkills":["Microsoft Spark and notebook skills"],"artifactTypes":["Fabric notebooks","PySpark","Spark SQL"],"focus":"Author and validate PySpark, Spark SQL, notebooks, sessions, remote execution, dependencies, and notebook quality."},
+    {"id":"lakehouse-delta-mlv-agent","displayName":"Lakehouse, Delta & MLV Agent","filename":"32-lakehouse-delta-mlv.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":[],"conditionalSkills":["Microsoft Lakehouse, Delta, medallion, MLV, shortcut, and OneLake skills"],"artifactTypes":["Delta tables","lakehouses","materialized lake views","shortcuts"],"focus":"Own Delta, medallion, MLV, incremental processing, shortcuts, schema evolution, and optimization; request DuckDB only through approval."},
+    {"id":"warehouse-sql-agent","displayName":"Warehouse SQL Agent","filename":"33-warehouse-sql.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Microsoft Warehouse skills"],"artifactTypes":["Warehouse DDL","DML","SQL validation"],"focus":"Design and validate Fabric Warehouse and SQL analytics endpoint DDL, DML, serving, and performance using sqlcmd when available."},
+    {"id":"sql-database-agent","displayName":"SQL Database Agent","filename":"34-sql-database.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Microsoft Fabric SQL Database skills"],"artifactTypes":["Fabric SQL Database schemas","procedures","queries"],"focus":"Handle Fabric SQL Database OLTP, procedures, temporal, JSON, vectors, security, and diagnostics distinctly from Warehouse work."},
+    {"id":"dataflows-gen2-agent","displayName":"Dataflows Gen2 Agent","filename":"35-dataflows-gen2.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":[],"conditionalSkills":["Microsoft Dataflows Gen2 and Power Query skills"],"artifactTypes":["Dataflows Gen2 definitions","Power Query M"],"focus":"Own Power Query M, connectors, previews, destinations, refresh behavior, and failure diagnosis for Dataflows Gen2."},
+    {"id":"pipeline-orchestration-agent","displayName":"Pipeline Orchestration Agent","filename":"36-pipeline-orchestration.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":["fabric-pipelines"],"conditionalSkills":["Microsoft pipeline skills"],"artifactTypes":["Fabric pipeline definitions","schedules"],"focus":"Implement pipeline activities, notebooks, dataflows, copy, variables, schedules, dependencies, retry, and failure handling with schema validation."},
+    {"id":"real-time-intelligence-agent","displayName":"Real-Time Intelligence Agent","filename":"37-real-time-intelligence.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":[],"conditionalSkills":["Microsoft Eventhouse, KQL, Eventstream, and Activator skills"],"artifactTypes":["Eventhouse","KQL","Eventstream","Activator"],"focus":"Own real-time Fabric artifacts, KQL behavior, ingestion, monitoring, and operational validation."},
+    {"id":"fabric-intelligence-ontology-agent","displayName":"Fabric Intelligence & Ontology Agent","filename":"38-fabric-intelligence-ontology.agent.md","level":"worker","department":"data-engineering","parent":"data-engineering-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":[],"conditionalSkills":["Microsoft FabricIQ, Ontology, and Data Agent skills"],"artifactTypes":["ontologies","FabricIQ assets","Data Agents"],"focus":"Handle FabricIQ, Ontology, Data Agents, and related knowledge capabilities while checking current product behavior."},
 
     {"id":"fabric-administration-governance-team-lead","displayName":"Fabric Administration & Governance Team Lead","filename":"40-fabric-administration-governance-team-lead.agent.md","level":"team-lead","department":"administration-governance","parent":"fabric-workspace-master","allowedChildren":["Workspace & Capacity Administration Agent","Security, Access & Governance Agent","Monitoring, Catalog & Operations Agent"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search","execute","edit"],"primarySkills":["fabric-working-modes","fabric-tool-policy"],"conditionalSkills":["Microsoft administration, governance, and monitoring skills"],"artifactTypes":["workspace settings","capacity settings","governance policy","operations evidence"],"defaultRisk":"high","focus":"Coordinate workspace, capacity, access, governance, monitoring, catalog, and operational safety with explicit approval for destructive changes."},
-    {"id":"workspace-capacity-administration-agent","displayName":"Workspace & Capacity Administration Agent","filename":"41-workspace-capacity-administration.agent.md","level":"worker","department":"administration-governance","parent":"fabric-administration-governance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Microsoft workspace and capacity skills"],"artifactTypes":["workspace and capacity configuration"],"defaultRisk":"high","focus":"Administer workspaces, capacities, settings, assignments, and cost awareness; require approval for destructive or production-impacting actions."},
-    {"id":"security-access-governance-agent","displayName":"Security, Access & Governance Agent","filename":"42-security-access-governance.agent.md","level":"worker","department":"administration-governance","parent":"fabric-administration-governance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":[],"conditionalSkills":["Microsoft security and governance skills"],"artifactTypes":["roles","permissions","governance controls"],"defaultRisk":"high","focus":"Own workspace roles, Entra groups, least privilege, permissions, governance, and security-boundary validation."},
+    {"id":"workspace-capacity-administration-agent","displayName":"Workspace & Capacity Administration Agent","filename":"41-workspace-capacity-administration.agent.md","level":"worker","department":"administration-governance","parent":"fabric-administration-governance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Microsoft workspace and capacity skills"],"artifactTypes":["workspace and capacity configuration"],"defaultRisk":"high","focus":"Administer workspaces, capacities, settings, assignments, and cost awareness; require approval for destructive or production-impacting actions."},
+    {"id":"security-access-governance-agent","displayName":"Security, Access & Governance Agent","filename":"42-security-access-governance.agent.md","level":"worker","department":"administration-governance","parent":"fabric-administration-governance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":[],"conditionalSkills":["Microsoft security and governance skills"],"artifactTypes":["roles","permissions","governance controls"],"defaultRisk":"high","focus":"Own workspace roles, Entra groups, least privilege, permissions, governance, and security-boundary validation."},
     {"id":"monitoring-catalog-operations-agent","displayName":"Monitoring, Catalog & Operations Agent","filename":"43-monitoring-catalog-operations.agent.md","level":"worker","department":"administration-governance","parent":"fabric-administration-governance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Microsoft monitoring and catalog skills"],"artifactTypes":["inventory","job status","incident findings"],"writePermissions":"read-only diagnosis by default","defaultRisk":"low","focus":"Search catalog and inventory, inspect jobs and refreshes, monitor status, and diagnose failures without unapproved remediation."},
 
     {"id":"alm-devops-team-lead","displayName":"ALM & DevOps Team Lead","filename":"50-alm-devops-team-lead.agent.md","level":"team-lead","department":"alm-devops","parent":"fabric-workspace-master","allowedChildren":["GitHub Source Control Agent","Azure DevOps Agent","Fabric Git Integration Agent","Deployment & Release Agent","Power BI ALM Agent"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search","execute","edit"],"primarySkills":["fabric-source-control-safety","fabric-working-modes","fabric-tool-policy"],"conditionalSkills":["Kurt PBIP and pbi-tools skills","Microsoft Fabric Git guidance"],"artifactTypes":["branches","pull requests","pipelines","releases","Fabric Git mappings"],"focus":"Own Git, GitHub, Azure DevOps, Fabric Git integration, release sequencing, and Power BI ALM; tool installation belongs to Maintenance."},
-    {"id":"github-source-control-agent","displayName":"GitHub Source Control Agent","filename":"51-github-source-control.agent.md","level":"worker","department":"alm-devops","parent":"alm-devops-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-source-control-safety","fabric-tool-policy"],"artifactTypes":["Git branches","GitHub PRs","Actions","releases"],"focus":"Use Git and gh for authorized branches, commits, pull requests, reviews, Actions, releases, and repository settings; never expose credentials."},
-    {"id":"azure-devops-agent","displayName":"Azure DevOps Agent","filename":"52-azure-devops.agent.md","level":"worker","department":"alm-devops","parent":"alm-devops-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-source-control-safety","fabric-tool-policy"],"artifactTypes":["Azure Repos PRs","pipelines","boards","project configuration"],"focus":"Use Git and approved az devops/repos/pipelines/boards commands for Azure DevOps work, respecting repository topology and auth policy."},
-    {"id":"fabric-git-integration-agent","displayName":"Fabric Git Integration Agent","filename":"53-fabric-git-integration.agent.md","level":"worker","department":"alm-devops","parent":"alm-devops-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-source-control-safety","fabric-working-modes"],"conditionalSkills":["Microsoft Fabric Git integration guidance"],"artifactTypes":["workspace-branch mappings","Fabric Git status"],"defaultRisk":"high","focus":"Inspect and operate Fabric Git status, commit, update, mapping, and conflict workflows without inferring permission to overwrite either side."},
-    {"id":"deployment-release-agent","displayName":"Deployment & Release Agent","filename":"54-deployment-release.agent.md","level":"worker","department":"alm-devops","parent":"alm-devops-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-source-control-safety","fabric-working-modes"],"artifactTypes":["release plans","deployment pipeline evidence","release notes"],"defaultRisk":"high","focus":"Sequence DEV to TEST to PROD, PRs, deployment pipelines, parameters, release checks, rollback, and notes without assuming branch names."},
-    {"id":"power-bi-alm-agent","displayName":"Power BI ALM Agent","filename":"55-power-bi-alm.agent.md","level":"worker","department":"alm-devops","parent":"alm-devops-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-tool-policy","fabric-source-control-safety"],"conditionalSkills":["Kurt pbi-tools and PBIP skills"],"artifactTypes":["PBIX extraction","PBIP builds","deployment packages"],"focus":"Use pbi-tools for PBIX/PBIP extraction, build, CI/CD, deployment, and ALM validation—not routine PBIR visual editing."},
+    {"id":"github-source-control-agent","displayName":"GitHub Source Control Agent","filename":"51-github-source-control.agent.md","level":"worker","department":"alm-devops","parent":"alm-devops-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-source-control-safety","fabric-tool-policy"],"artifactTypes":["Git branches","GitHub PRs","Actions","releases"],"focus":"Use Git and gh for authorized branches, commits, pull requests, reviews, Actions, releases, and repository settings; never expose credentials."},
+    {"id":"azure-devops-agent","displayName":"Azure DevOps Agent","filename":"52-azure-devops.agent.md","level":"worker","department":"alm-devops","parent":"alm-devops-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-source-control-safety","fabric-tool-policy"],"artifactTypes":["Azure Repos PRs","pipelines","boards","project configuration"],"focus":"Use Git and approved az devops/repos/pipelines/boards commands for Azure DevOps work, respecting repository topology and auth policy."},
+    {"id":"fabric-git-integration-agent","displayName":"Fabric Git Integration Agent","filename":"53-fabric-git-integration.agent.md","level":"worker","department":"alm-devops","parent":"alm-devops-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-source-control-safety","fabric-working-modes"],"conditionalSkills":["Microsoft Fabric Git integration guidance"],"artifactTypes":["workspace-branch mappings","Fabric Git status"],"defaultRisk":"high","focus":"Inspect and operate Fabric Git status, commit, update, mapping, and conflict workflows without inferring permission to overwrite either side."},
+    {"id":"deployment-release-agent","displayName":"Deployment & Release Agent","filename":"54-deployment-release.agent.md","level":"worker","department":"alm-devops","parent":"alm-devops-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-source-control-safety","fabric-working-modes"],"artifactTypes":["release plans","deployment pipeline evidence","release notes"],"defaultRisk":"high","focus":"Sequence DEV to TEST to PROD, PRs, deployment pipelines, parameters, release checks, rollback, and notes without assuming branch names."},
+    {"id":"power-bi-alm-agent","displayName":"Power BI ALM Agent","filename":"55-power-bi-alm.agent.md","level":"worker","department":"alm-devops","parent":"alm-devops-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":["fabric-tool-policy","fabric-source-control-safety"],"conditionalSkills":["Kurt pbi-tools and PBIP skills"],"artifactTypes":["PBIX extraction","PBIP builds","deployment packages"],"focus":"Use pbi-tools for PBIX/PBIP extraction, build, CI/CD, deployment, and ALM validation—not routine PBIR visual editing."},
 
     {"id":"applications-integration-team-lead","displayName":"Applications & Integration Team Lead","filename":"60-applications-integration-team-lead.agent.md","level":"team-lead","department":"applications-integration","parent":"fabric-workspace-master","allowedChildren":["Python & Fabric SDK Agent","REST, Authentication & XMLA Agent","SQL, ODBC & Data Access Agent"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search","execute","edit"],"primarySkills":["fabric-working-modes","fabric-tool-policy"],"conditionalSkills":["Microsoft SDK, REST, SQL consumption, and authentication skills"],"artifactTypes":["applications","SDK utilities","REST integrations","data-access code"],"focus":"Coordinate custom applications, SDK, REST/XMLA, authentication, ODBC, and data access without leaking secrets."},
-    {"id":"python-fabric-sdk-agent","displayName":"Python & Fabric SDK Agent","filename":"61-python-fabric-sdk.agent.md","level":"worker","department":"applications-integration","parent":"applications-integration-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":[],"conditionalSkills":["Microsoft Fabric SDK and Python skills"],"artifactTypes":["Python applications","SDK utilities"],"focus":"Build Python applications, SDK clients, Azure Identity integrations, APIs, processing, and local utilities with safe dependency handling."},
-    {"id":"rest-authentication-xmla-agent","displayName":"REST, Authentication & XMLA Agent","filename":"62-rest-authentication-xmla.agent.md","level":"worker","department":"applications-integration","parent":"applications-integration-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Microsoft REST and authentication guidance"],"artifactTypes":["REST clients","XMLA operations","authentication configurations"],"defaultRisk":"high","focus":"Handle Fabric/Power BI REST, az rest, audiences, Entra, SPN, managed identity, and XMLA with no secrets in commands or source."},
-    {"id":"sql-odbc-data-access-agent","displayName":"SQL, ODBC & Data Access Agent","filename":"63-sql-odbc-data-access.agent.md","level":"worker","department":"applications-integration","parent":"applications-integration-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Microsoft SQL consumption skills"],"artifactTypes":["ODBC clients","SQLAlchemy code","parameterized queries"],"focus":"Own sqlcmd, ODBC, pyodbc, SQLAlchemy, Warehouse/endpoint/database connectivity, bulk operations, and parameterized validation."},
+    {"id":"python-fabric-sdk-agent","displayName":"Python & Fabric SDK Agent","filename":"61-python-fabric-sdk.agent.md","level":"worker","department":"applications-integration","parent":"applications-integration-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":[],"conditionalSkills":["Microsoft Fabric SDK and Python skills"],"artifactTypes":["Python applications","SDK utilities"],"focus":"Build Python applications, SDK clients, Azure Identity integrations, APIs, processing, and local utilities with safe dependency handling."},
+    {"id":"rest-authentication-xmla-agent","displayName":"REST, Authentication & XMLA Agent","filename":"62-rest-authentication-xmla.agent.md","level":"worker","department":"applications-integration","parent":"applications-integration-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Microsoft REST and authentication guidance"],"artifactTypes":["REST clients","XMLA operations","authentication configurations"],"defaultRisk":"high","focus":"Handle Fabric/Power BI REST, az rest, audiences, Entra, SPN, managed identity, and XMLA with no secrets in commands or source."},
+    {"id":"sql-odbc-data-access-agent","displayName":"SQL, ODBC & Data Access Agent","filename":"63-sql-odbc-data-access.agent.md","level":"worker","department":"applications-integration","parent":"applications-integration-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Microsoft SQL consumption skills"],"artifactTypes":["ODBC clients","SQLAlchemy code","parameterized queries"],"focus":"Own sqlcmd, ODBC, pyodbc, SQLAlchemy, Warehouse/endpoint/database connectivity, bulk operations, and parameterized validation."},
 
     {"id":"capability-maintenance-team-lead","displayName":"Capability Maintenance Team Lead","filename":"70-capability-maintenance-team-lead.agent.md","level":"team-lead","department":"capability-maintenance","parent":"fabric-workspace-master","allowedChildren":["Upstream Repository Sync Agent","Skill Inventory & Mapping Agent","Agent Coverage & Organization Agent","Environment & Tooling Agent","Installer Health & Regression Agent","Managed File Review Agent"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search","execute","edit"],"primarySkills":["fabric-maintenance","fabric-tool-policy","fabric-source-control-safety"],"artifactTypes":["vendor state","skill inventory","tool status","maintenance reports","installer evidence"],"focus":"Own vendor sync, skill inventory, organization, approved tool installation and updates, failed-install remediation, managed-file review, and workspace regression checks."},
     {"id":"upstream-repository-sync-agent","displayName":"Upstream Repository Sync Agent","filename":"71-upstream-repository-sync.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-maintenance"],"artifactTypes":["vendor repository state"],"writePermissions":"clean vendor sync only; never edit, reset, or overwrite vendor content","defaultRisk":"medium","focus":"Inspect the Microsoft and Kurt repositories, preserve the original clean-repository git pull --ff-only workflow, record commits, and report dirty or diverged repositories without resetting them."},
     {"id":"skill-inventory-mapping-agent","displayName":"Skill Inventory & Mapping Agent","filename":"72-skill-inventory-mapping.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":["fabric-maintenance"],"artifactTypes":["skill inventory","mapping report"],"focus":"Dynamically detect valid, invalid, duplicate, added, removed, renamed, changed, unmapped, and tool-assuming skills and refresh local inventory."},
     {"id":"agent-coverage-organization-agent","displayName":"Agent Coverage & Organization Agent","filename":"73-agent-coverage-organization.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","edit"],"primarySkills":["fabric-maintenance","fabric-orchestration"],"artifactTypes":["coverage analysis","mapping proposals"],"focus":"Evaluate coverage, overlap, overload, gaps, team fit, workers, and teams; auto-apply only obvious low-risk mappings and seek approval for structural changes."},
-    {"id":"environment-tooling-agent","displayName":"Environment & Tooling Agent","filename":"74-environment-tooling.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-maintenance","fabric-tool-policy"],"artifactTypes":["tool status","installation plans","lockdown remediation reports"],"writePermissions":"approved environment/tool changes only","defaultRisk":"high","optionalToolRequestPermissions":"the only worker allowed to install default or optional tools, always after explicit user approval","focus":"Own current and future default-tool updates, failed installer follow-up, optional installation, locked-down laptop remediation, validation, rollback guidance, and tool-status refresh."},
+    {"id":"environment-tooling-agent","displayName":"Environment & Tooling Agent","filename":"74-environment-tooling.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":["fabric-maintenance","fabric-tool-policy"],"artifactTypes":["tool status","installation plans","lockdown remediation reports"],"writePermissions":"approved environment/tool changes only","defaultRisk":"high","optionalToolRequestPermissions":"the only worker allowed to install default or optional tools, always after explicit user approval","focus":"Own current and future default-tool updates, failed installer follow-up, optional installation, locked-down laptop remediation, validation, rollback guidance, and tool-status refresh."},
     {"id":"installer-health-regression-agent","displayName":"Installer Health & Regression Agent","filename":"75-installer-health-regression.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-maintenance"],"artifactTypes":["test results","installer diagnostics"],"writePermissions":"read-only validation","defaultRisk":"low","focus":"Validate source, manifests, templates, generated installer, clean/update installs, schemas, skills, tools, multi-root behavior, and privacy."},
-    {"id":"managed-file-review-agent","displayName":"Managed File Review Agent","filename":"76-managed-file-review.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"primarySkills":["fabric-maintenance"],"artifactTypes":["managed-file diffs","review proposals"],"writePermissions":"apply user-requested managed-file changes only after explicit approval","defaultRisk":"high","focus":"Review requested differences between installer-managed files and local customisations without changing the original installer update behaviour; apply an approved amendment only when the user asks."}
+    {"id":"managed-file-review-agent","displayName":"Managed File Review Agent","filename":"76-managed-file-review.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","edit"],"primarySkills":["fabric-maintenance"],"artifactTypes":["managed-file diffs","review proposals"],"writePermissions":"apply user-requested managed-file changes only after explicit approval","defaultRisk":"high","focus":"Review requested differences between installer-managed files and local customisations without changing the original installer update behaviour; apply an approved amendment only when the user asks."}
   ]
 }
 
 '@
 $agentManifest = $agentManifestJson | ConvertFrom-Json
+#endregion AGENT MANIFEST
 trap {
     Write-Host "`nERROR: $_" -ForegroundColor Red
     Read-Host "`nPress Enter to close"
@@ -1634,6 +1693,12 @@ $totalSteps = 9
 # =====================================================================
 Show-Step 1 $totalSteps "Workspace Folder"
 
+if ($EmitAgentsTo) {
+    $rootPath = [System.IO.Path]::GetFullPath($EmitAgentsTo)
+    if (-not (Test-Path -LiteralPath $rootPath)) { New-Item -ItemType Directory -Path $rootPath -Force | Out-Null }
+    Write-Host "  [emit mode] Generating into: $rootPath" -ForegroundColor Cyan
+} else {
+
 Write-Host "  Welcome to the Fabric Agentic Workspace setup!" -ForegroundColor White
 Write-Host ""
 Write-Host "  This will configure your local folder with agents and skills" -ForegroundColor White
@@ -1876,12 +1941,14 @@ if ($repoOnboardingAnswer -match '^(y|yes)$') {
 }
 
 Read-Host "`n  Press Enter to continue..."
+}
 
 # =====================================================================
 # STEP 2  -- Prerequisites check
 # ====================================================================="
 Show-Step 2 $totalSteps "Checking Prerequisites"
 
+if (-not $EmitAgentsTo) {
 $missing = @()
 $warnings = @()
 
@@ -2285,6 +2352,7 @@ if ($warnings.Count -gt 0) {
 
 Write-Host "`n  All prerequisites OK." -ForegroundColor Green
 Read-Host "`n  Press Enter to continue..."
+}
 
 # =====================================================================
 # STEP 3  -- Create folder structure
@@ -2327,6 +2395,7 @@ Write-Host "`n  Folder structure ready." -ForegroundColor Green
 # =====================================================================
 Show-Step 4 $totalSteps "Business Source-Control Repositories"
 
+if (-not $EmitAgentsTo) {
 $repositoryMapPath = Join-Path $rootPath '.github\agent-docs\local\repository-map.local.json'
 $businessRepositoriesRoot = Join-Path $rootPath 'source-control-repositories'
 $workspaceFilePath = Join-Path $rootPath $workspaceFileName
@@ -2506,12 +2575,14 @@ if ($repositoryMapReadable) {
 }
 
 Read-Host "`n  Press Enter to continue..."
+}
 
 # =====================================================================
 # STEP 5  -- Clone skill repositories
 # =====================================================================
 Show-Step 5 $totalSteps "Cloning Skill Repositories"
 
+if (-not $EmitAgentsTo) {
 # NOTE: We deliberately do NOT clone microsoft/fabric-cli (https://github.com/microsoft/fabric-cli).
 # The data-goblin plugin (power-bi-agentic-development/plugins/fabric-cli/) already provides
 # rich `fab` references and scripts, and the `fab` tool itself is installed via pip
@@ -2569,6 +2640,7 @@ try {
 }
 
 Read-Host "`n  Press Enter to continue..."
+}
 
 # =====================================================================
 # STEP 6  -- Embed custom skills
@@ -4109,6 +4181,62 @@ dynamically (paths evolve):
 The Microsoft `skills-for-fabric/common/COMMON-CLI.md` is **az-based** and is the
 documented fallback reference for SQL/TDS and non-Fabric token audiences.
 
+## Data Engineering execution channel (notebooks, SQL, Spark)
+
+Data-engineering execution (authoring + running notebooks, Spark, and SQL) is the
+most tool-sensitive work in this workspace. **Choose the channel by task type FIRST,**
+then degrade gracefully if a channel is unavailable. Never fail a task just because
+one tool is blocked.
+
+### Step 1 -- classify the task
+- **Notebook / Spark job** (PySpark, Spark SQL, lakehouse transforms) -> the
+  **remote Spark kernel is the PRIMARY tool**. SQL/TDS (port 1433) is irrelevant here.
+- **Warehouse / SQL-endpoint query** (T-SQL, set-based SQL) -> **`sqlcmd -G` is
+  PRIMARY when the endpoint is reachable**.
+
+### Step 2 -- classify a failure before reacting
+When a SQL/TDS call fails, decide which of these it is -- they need different fixes:
+- **Tool missing** (`sqlcmd` not installed) -> route install to the Capability
+  Maintenance team (070); do not self-install.
+- **Auth failure** -> re-authenticate (`fab auth login` / `az login`); not a network fallback.
+- **Port 1433 blocked** (egress/firewall refuses the TDS connection) -> use the
+  fallback ladder below.
+
+> **Port 1433 is NOT universally blocked.** On some locked-down corporate machines
+> outbound TDS/1433 to the SQL analytics endpoint is blocked by egress policy, which
+> makes `sqlcmd -G` time out. **This is machine-specific -- do NOT assume 1433 is
+> always blocked.** On many environments it works fine. Only trigger the fallback
+> ladder when you have actually observed a 1433/TDS connection failure on THIS machine.
+
+### Step 3 -- fallback ladder when 1433 is blocked (or for any Spark task)
+1. **Author** the notebook/item with `fab` (control-plane over HTTPS -- never touches 1433).
+2. **Execute & iterate interactively** on the **Fabric Data Engineering extension
+   remote Spark kernel** -- preferred for build -> run -> read -> amend -> rerun loops.
+   Spark SQL can query the same lakehouse/tables without touching 1433. Note: Spark
+   SQL is not T-SQL -- warehouse-only T-SQL (procs, MERGE, certain DDL) will not run
+   on a Spark kernel; route those to REST/XMLA or the portal query editor, or flag them.
+3. **Headless / one-shot run:** trigger the notebook via the Fabric REST
+   *run-on-demand* job API (`fab job run ...`), **poll job status**, and read results
+   from the **portal run snapshot** or from a Lakehouse output table the notebook
+   writes. The API returns job *status*, not cell results -- do not expect data back
+   from the trigger call.
+
+### The agent CANNOT set up the remote kernel autonomously
+Installing the extension, completing Fabric sign-in (MFA), selecting the remote Spark
+kernel, and attaching a Lakehouse are **interactive / approval steps a coding agent
+cannot perform**. So:
+- **Detect first** whether a remote Spark kernel is already available/attached.
+- **If not ready**, either **ask the human to set it up** (give clear, step-by-step
+  instructions) or route the install to 070 -- do not self-install or pretend it is ready.
+- **Offer the human the trade-off explicitly:**
+  - **Kernel (cooperative)** -- best for live, iterative development and eyeballing
+    results; needs one-time human setup (sign-in, kernel pick, lakehouse attach).
+  - **HTTP REST run-on-demand (autonomous)** -- needs no interactive setup and lets
+    the agent iterate on its own, **but** returns job status only; results come from a
+    portal snapshot or an output table, so the feedback loop is slower and coarser.
+- Once the kernel is attached (or the HTTP path is chosen), the agent drives authoring,
+  execution, iteration, and reconciliation itself.
+
 ## Guardrails
 - Never hardcode tokens, secrets, or IDs -- parameterise (dev/test/prod).
 - Confirm before destructive `fab rm` / delete operations.
@@ -4426,6 +4554,26 @@ unsupported items, or every workspace setting.
   MCP being "installed" is not enough - it must be callable in this session.
 - **C. Hybrid (local + live).** Mix both in one session.
 
+### Read the user's intent before choosing local vs live
+
+When the task implies LIVE / service work, do not silently default to the
+file-first / REST-only safe path. FIRST run the start-by-use MCP self-test, and if
+you still fall back to local or REST, SAY SO explicitly ("MCP was not callable this
+session, using REST/CLI instead") rather than defaulting quietly. Treat any of
+these as a live/MCP-first signal:
+
+- The user pastes a live `app.powerbi.com/groups/<workspaceId>/...` workspace or
+  report URL, or a service semantic-model URL / dataset GUID.
+- The user says "live", "in the service", "via MCP", "on the running model", or
+  asks you to read/compare REAL deployed data.
+- The user asks you to go through reports/models that only exist in the workspace
+  (not pulled to local files).
+
+In those cases: run the MCP self-test up front; if callable, go MCP-first; if not,
+announce the REST/CLI fallback and proceed - but never present a local-only pass as
+if it were the live work the user asked for. When unsure whether local or live is
+wanted, surface the choice instead of assuming.
+
 ### Hybrid discipline (avoid drift)
 
 - Default to FILE-FIRST for any item that is versioned locally.
@@ -4612,7 +4760,21 @@ foreach ($agent in $orderedAgents) {
             $childLabels += $displayLabelById[$childAgent.id]
         }
     }
-    $childrenYaml = ConvertTo-AgentYamlList $childLabels
+
+    # The Master's `agents:` frontmatter also includes every worker so that a
+    # DIRECT Master -> worker dispatch is LEGAL as a documented degraded-mode
+    # fallback (used only after the normal Master -> Team Lead route has been
+    # retried and failed -- see the Master body). Normal routing stays lead-first;
+    # the human-facing Delegation prose below still lists only the leads/executives.
+    $agentsForFrontmatter = $childLabels
+    if ($agent.id -eq 'fabric-workspace-master') {
+        $workerLabels = @()
+        foreach ($candidate in $orderedAgents) {
+            if ($candidate.level -eq 'worker') { $workerLabels += $displayLabelById[$candidate.id] }
+        }
+        $agentsForFrontmatter = @($childLabels + $workerLabels)
+    }
+    $childrenYaml = ConvertTo-AgentYamlList $agentsForFrontmatter
     $userInvocable = if ($agent.level -eq 'worker') { 'false' } else { 'true' }
 
     $agentBody = @"
@@ -4639,6 +4801,9 @@ $($agent.focus)
 - Validate every mutation and return concise evidence, risks, and any remaining action.
 - Never expose secrets. Treat PROD as read-only unless the user explicitly approves a production change.
 - Confirm destructive, irreversible, security-sensitive, release, and environment-changing actions before execution.
+- **Transport resilience -- retry before you diagnose.** Sub-agent dispatch and live MCP/XMLA calls run over HTTP/2 and can hit transient stream errors (e.g. ``ERR_HTTP2_SERVER_REFUSED_STREAM``, empty/"no output" completions, dropped streams). These are **retry-safe**: retry the call 2-3 times with a short backoff before treating it as a real failure. An empty completion is a transport blip, not proof the agent did nothing.
+- **Bound every live call; switch transport on breach.** Put a sensible timeout on each live MCP/XMLA/dispatch call. If it hangs or breaches the timeout, abort and switch transport (e.g. drop from Modeling MCP/XMLA to TMDL ``getDefinition`` or REST) rather than looping on the wedged channel.
+- **Do not cry "firewall".** A dispatch or MCP failure is transient transport by default -- retry first. Only suspect a network/egress block if it fails **repeatedly across separate sessions**, and even then keep it scoped to the specific channel. In particular, outbound **SQL/TDS port 1433** blocking is **machine-specific** (some locked-down corporate laptops only): if you observe a 1433/TDS failure on THIS machine, use the SQL fallback ladder in ``fabric-cli-policy`` -- but never assume 1433 is blocked everywhere or that a 1433 block implies any other channel is blocked.
 "@
 
     if ($agent.id -eq 'fabric-workspace-master') {
@@ -4659,15 +4824,33 @@ You do **not** implement domain work yourself. You must delegate, and you must n
 For every request: (1) classify the intent and which artifact(s) and team(s) it touches; (2) route to the minimum relevant Team Lead(s) with the ``agent`` tool, stating the goal, scope, the owned artifact, any constraints, and the validation you expect back; (3) let each Team Lead assign the skilled worker to implement and then review/validate the change **as a team** before returning; (4) consolidate the returned evidence, risks, and remaining actions into one clear answer for the client. If a request would tempt you to open a terminal or edit a file to change a domain artifact, stop and delegate instead — even for a "quick" or "obvious" change.
 
 Use Fabric Solution Architect only for genuine cross-domain design, dependency, sequencing, ownership, validation, or rollback decisions. Use Integration QA & Change Controller for cross-artifact risk or final acceptance. Keep exactly one writer per artifact, never let a change land without its owning team's review, and confirm destructive, irreversible, production, release, or environment-changing actions with the client before the team executes them.
+
+## Degraded-mode direct dispatch (fallback only)
+
+Normal routing is always **lead-first**: dispatch to the relevant Team Lead and let the lead assign and validate the owning worker. This is the default and it works.
+
+Your ``agents:`` list also includes the individual workers so that a **direct Master -> worker** dispatch is *available* as a fallback. Use it **only** when the normal lead route is genuinely unusable, and **never before retrying**:
+
+1. If a dispatch to a Team Lead returns empty/"no output" or a transport error (e.g. ``ERR_HTTP2_SERVER_REFUSED_STREAM``), **retry the lead 2-3 times with a short backoff first** -- these are transient transport blips, not structural failures.
+2. Only if the lead route still fails after retries may you dispatch **directly to the specific owning worker** as a degraded mode, and you must say so explicitly in your report (which worker, why the lead route was bypassed).
+3. Even in degraded mode, preserve the safety model: one writer per artifact, validate the change, and treat PROD as read-only unless the client approved a production change. When possible, still have the owning Team Lead review the result afterwards.
+
+Do not use degraded-mode direct dispatch as a convenience shortcut around the team structure -- it exists purely to keep work moving when the lead hop is broken.
 "@
     }
 
     if ($childLabels.Count -gt 0) {
+        $delegationNote = if ($agent.id -eq 'fabric-workspace-master') {
+            "Route normally to: $($childLabels -join '; '). Individual workers are also in your ``agents:`` list, but dispatch to them directly only in the degraded-mode fallback described above (after retrying the lead route)."
+        }
+        else {
+            "You may delegate only to: $($childLabels -join '; ')."
+        }
         $agentBody += @"
 
 ## Delegation
 
-You may delegate only to: $($childLabels -join '; '). Give each child a bounded artifact or validation responsibility. Avoid overlapping writes, preserve the user's request, and consolidate all returned evidence.
+$delegationNote Give each child a bounded artifact or validation responsibility. Avoid overlapping writes, preserve the user's request, and consolidate all returned evidence.
 "@
     }
     else {
@@ -4676,6 +4859,21 @@ You may delegate only to: $($childLabels -join '; '). Give each child a bounded 
 ## Scope boundary
 
 You are a focused worker. Do not create or invoke additional agents. Return work and evidence to your team lead.
+
+## Refusal and escalation
+
+Stay strictly inside your owned artifact type and your granted tools. Refuse and escalate to your Team Lead instead of improvising when a request: falls outside your artifact scope or belongs to another worker; needs a tool you were not granted (for example editing when you hold only read/search/execute, or running commands when you hold only read/search/edit); requires installing or updating software (route to Capability Maintenance); or would perform a destructive, irreversible, production, release, or environment-changing action without explicit user approval. Never widen your own scope or capabilities to complete a task -- report the blocker and the exact approval or owner required.
+"@
+    }
+
+    if ($agent.level -eq 'team-lead') {
+        $agentBody += @"
+
+## Team lead ownership and validation
+
+You own the outcome for your department, but you deliver it **through your workers**. For every task: assign exactly **one** owning worker per artifact so two agents never write the same file or live object concurrently; give that worker a bounded scope; and **validate the returned work yourself** (or via your validation worker) before you report success upward. Do not sign off unreviewed worker output.
+
+Escalate rather than exceed your remit: send genuinely cross-domain design, sequencing, or ownership questions to Fabric Solution Architect, and cross-artifact risk or final acceptance to Integration QA & Change Controller, via the Master. Obtain explicit user approval before any worker executes a destructive, irreversible, production, release, or environment-changing action, and surface unresolved risks and remaining approvals in your report instead of quietly proceeding.
 "@
     }
 
@@ -4926,6 +5124,12 @@ Thumbs.db
 # Machine-specific tool inventory (regenerated by the installer each run)
 .github/agent-docs/tool-status.json
 
+# Machine-specific self-test / guardrail report (regenerated by the installer each run)
+.github/agent-docs/guardrail-status.json
+
+# Machine-specific integrity manifest (regenerated by the installer each run)
+.github/agent-docs/installed-manifest.json
+
 # Machine/company-specific Fabric and repository mappings
 .github/agent-docs/local/
 '@
@@ -4945,6 +5149,10 @@ if (-not (Test-Path $gitignorePath)) {
     Add-GitIgnoreRules -Path $gitignorePath -Heading 'Fabric local cache' -Rules @('.pbi/', '*.pbicache')
     Add-GitIgnoreRules -Path $gitignorePath -Heading 'Machine-specific tool inventory' `
         -Rules @('.github/agent-docs/tool-status.json')
+    Add-GitIgnoreRules -Path $gitignorePath -Heading 'Machine-specific self-test / guardrail report' `
+        -Rules @('.github/agent-docs/guardrail-status.json')
+    Add-GitIgnoreRules -Path $gitignorePath -Heading 'Machine-specific integrity manifest' `
+        -Rules @('.github/agent-docs/installed-manifest.json')
     Write-Host '  .gitignore: required installer safety rules confirmed' -ForegroundColor Green
 }
 
@@ -5009,7 +5217,125 @@ $toolStatusJson = $toolStatusObj | ConvertTo-Json -Depth 6
 Write-ManagedFile "$rootPath\.github\agent-docs\tool-status.json" $toolStatusJson
 Write-Host "  Written: .github/agent-docs/tool-status.json" -ForegroundColor Green
 
+# -- Post-generation self-test + guardrail-status.json ----------------
+# Re-reads what was actually written to disk and re-derives the governance
+# invariants from the embedded manifest. This is an honest advisory report:
+# it verifies STRUCTURE (files, frontmatter, hierarchy, least-privilege tools)
+# but does NOT claim runtime enforcement -- agent behaviour on a locked-down
+# Copilot Chat build is advisory, not hook-enforced.
+Write-Host "`n  Running post-generation self-test..." -ForegroundColor Cyan
+$selfTestChecks = [System.Collections.Generic.List[object]]::new()
+function Add-SelfTestCheck([string]$Name, [bool]$Ok, [string]$Detail) {
+    $selfTestChecks.Add([ordered]@{ check = $Name; pass = $Ok; detail = $Detail }) | Out-Null
+    $icon = if ($Ok) { '[+]' } else { '[x]' }
+    $color = if ($Ok) { 'Green' } else { 'Red' }
+    Write-Host "    $icon $Name" -ForegroundColor $color
+    if (-not $Ok -and $Detail) { Write-Host "        $Detail" -ForegroundColor DarkYellow }
+}
+
+$expectedAgentCount = @($agentManifest.agents).Count
+$agentsDirPath = Join-Path $rootPath '.github\agents'
+$writtenAgentFiles = @(Get-ChildItem -Path $agentsDirPath -Filter '*.agent.md' -File -ErrorAction SilentlyContinue)
+Add-SelfTestCheck 'Agent file count matches manifest' ($writtenAgentFiles.Count -eq $expectedAgentCount) "found $($writtenAgentFiles.Count), expected $expectedAgentCount"
+
+$missingFrontmatter = @($writtenAgentFiles | Where-Object {
+    $head = Get-Content $_.FullName -TotalCount 1 -ErrorAction SilentlyContinue
+    $head -ne '---'
+})
+Add-SelfTestCheck 'Every agent file opens with YAML frontmatter' ($missingFrontmatter.Count -eq 0) ($missingFrontmatter | ForEach-Object { $_.Name }) -join ', '
+
+$idSet = @{}; foreach ($a in $agentManifest.agents) { $idSet[$a.id] = $a }
+$nameToId = @{}; foreach ($a in $agentManifest.agents) { $nameToId[$a.displayName] = $a.id }
+$badParent = @($agentManifest.agents | Where-Object { $_.parent -and -not $idSet.ContainsKey($_.parent) })
+Add-SelfTestCheck 'All parents resolve to a known agent' ($badParent.Count -eq 0) (($badParent | ForEach-Object { $_.id }) -join ', ')
+
+$badChild = [System.Collections.Generic.List[string]]::new()
+foreach ($a in $agentManifest.agents) {
+    foreach ($c in @($a.allowedChildren)) { if (-not $nameToId.ContainsKey($c)) { $badChild.Add("$($a.id)->$c") } }
+}
+Add-SelfTestCheck 'All allowedChildren resolve to a known display name' ($badChild.Count -eq 0) ($badChild -join ', ')
+
+$badDelegation = @($agentManifest.agents | Where-Object { $_.level -eq 'worker' -and (@($_.tools) -contains 'agent') })
+Add-SelfTestCheck 'No worker holds the delegation (agent) tool' ($badDelegation.Count -eq 0) (($badDelegation | ForEach-Object { $_.id }) -join ', ')
+
+$allowedToolTokens = @('agent','read','search','execute','edit')
+$badTools = [System.Collections.Generic.List[string]]::new()
+foreach ($a in $agentManifest.agents) {
+    if (-not $a.PSObject.Properties['tools'] -or $null -eq $a.tools) { $badTools.Add("$($a.id):no-tools") ; continue }
+    foreach ($t in @($a.tools)) { if ($allowedToolTokens -notcontains $t) { $badTools.Add("$($a.id):$t") } }
+}
+Add-SelfTestCheck 'Every agent has explicit, valid tools (least privilege)' ($badTools.Count -eq 0) ($badTools -join ', ')
+
+$defaultTools = @($agentManifest.defaults.tools)
+$defaultReadOnly = (@($defaultTools | Sort-Object) -join ',') -eq 'read,search'
+Add-SelfTestCheck 'Manifest default capability set is read-only' $defaultReadOnly "default = [$($defaultTools -join ', ')]"
+
+$selfTestPassed = @($selfTestChecks | Where-Object { -not $_.pass }).Count -eq 0
+$guardrailStatus = [ordered]@{
+    schemaVersion  = 1
+    generatedAt    = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    generatedBy    = 'installer'
+    productVersion = $productVersion
+    enforcement    = 'advisory'
+    enforcementNote = 'Agent hierarchy and tool scopes are declared in each agent frontmatter and are honoured by the model as guidance. Copilot Chat on locked-down enterprise builds does not hook-enforce these boundaries; they are advisory, not sandboxed. This report validates STRUCTURE, not runtime enforcement.'
+    selfTestPassed = $selfTestPassed
+    agentCount     = $writtenAgentFiles.Count
+    expectedAgentCount = $expectedAgentCount
+    checks         = $selfTestChecks
+}
+$guardrailJson = $guardrailStatus | ConvertTo-Json -Depth 6
+Write-ManagedFile "$rootPath\.github\agent-docs\guardrail-status.json" $guardrailJson
+Write-Host "  Written: .github/agent-docs/guardrail-status.json" -ForegroundColor Green
+if ($selfTestPassed) {
+    Write-Host "  Self-test PASSED: generated workspace matches the governance manifest." -ForegroundColor Green
+} else {
+    Write-Host "  Self-test reported issues (advisory) -- see guardrail-status.json." -ForegroundColor Yellow
+}
+
+# -- Integrity manifest (installed-manifest.json) ---------------------
+# Records a version stamp and a SHA256 for every generated agent/config file
+# so a later run -- or the Capability Maintenance team -- can detect drift
+# between what the installer produced and what is on disk. Re-running the
+# installer is idempotent: it overwrites these managed files and refreshes
+# this manifest.
+$integrityFiles = [System.Collections.Generic.List[object]]::new()
+$integrityTargets = @()
+$integrityTargets += @($writtenAgentFiles | ForEach-Object { $_.FullName })
+foreach ($cfgRel in $managedConfigs) {
+    $integrityTargets += (Join-Path $rootPath $cfgRel)
+}
+foreach ($skillName in $managedSkills) {
+    $integrityTargets += (Join-Path $rootPath ".github\skills\$skillName\SKILL.md")
+}
+foreach ($target in $integrityTargets) {
+    if (Test-Path -LiteralPath $target -PathType Leaf) {
+        $rel = $target.Substring($rootPath.Length).TrimStart('\','/').Replace('\','/')
+        $sha = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
+        $integrityFiles.Add([ordered]@{ path = $rel; sha256 = $sha }) | Out-Null
+    }
+}
+$installedManifest = [ordered]@{
+    schemaVersion  = 1
+    generatedAt    = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    generatedBy    = 'installer'
+    productVersion = $productVersion
+    fileCount      = $integrityFiles.Count
+    files          = $integrityFiles
+}
+$installedManifestJson = $installedManifest | ConvertTo-Json -Depth 6
+Write-ManagedFile "$rootPath\.github\agent-docs\installed-manifest.json" $installedManifestJson
+Write-Host "  Written: .github/agent-docs/installed-manifest.json ($($integrityFiles.Count) files hashed)" -ForegroundColor Green
+
 Write-Host "`n  All configuration files ready." -ForegroundColor Green
+
+if ($EmitAgentsTo) {
+    if ($selfTestPassed) {
+        Write-Host "`n  [emit mode] Generated $($writtenAgentFiles.Count) agent files; self-test PASSED." -ForegroundColor Green
+        exit 0
+    }
+    Write-Host "`n  [emit mode] Self-test FAILED -- see output above." -ForegroundColor Red
+    exit 1
+}
 
 # =====================================================================
 # STEP 9  -- Git init and launch VS Code

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.6.1] - 2026-07-20
+
+### Added
+
+- **Machine-checkable manifest contract** — a draft-07 JSON Schema (`schema/agent-manifest.schema.json`) now defines the embedded 47-agent manifest, with `tools` a required per-agent field.
+- **Pester test suite + CI** — `tests/` validates manifest integrity, hierarchy (single root, no cycles, delegation only via the `agent` tool), least-privilege tool scoping and version consistency; a GitHub Actions workflow (`.github/workflows/validate.yml`) runs it on every push and pull request.
+- **Installer self-test & integrity manifest** — after generating the agents the installer re-scans them, writes an advisory `guardrail-status.json`, and stamps an `installed-manifest.json` with a SHA-256 of every generated file.
+- **Repository `.gitignore`** — excludes the local virtual environment, test artifacts and generated runtime status files.
+
+### Changed
+
+- **Least-privilege tools** — all 47 agents now declare an explicit minimum `tools` set; the manifest default is read-only (`read`, `search`), so `edit`/`execute`/`agent` (delegation) are granted only where a role needs them.
+
 ## [v0.6.0] - 2026-07-15
 
 ### Added

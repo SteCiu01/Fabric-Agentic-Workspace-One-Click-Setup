@@ -1,0 +1,23 @@
+# Python virtual environments
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+
+# Pester / test artifacts
+testresults.xml
+TestResults/
+run_pester.ps1
+
+# Generated / runtime status files (end-user workspace outputs, not source)
+guardrail-status.json
+installed-manifest.json
+tool-status.json
+
+# Editor / OS cruft
+.DS_Store
+Thumbs.db
+*.bak
+*.tmp
+*.orig

@@ -1,6 +1,7 @@
 # Fabric Agentic Workspace — One-Click Setup
 
 [![Latest Release](https://img.shields.io/github/v/release/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup?include_prereleases&label=version)](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/releases)
+[![Validate](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/actions/workflows/validate.yml/badge.svg)](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/actions/workflows/validate.yml)
 
 Pre-release — used regularly by the maintainer in real Fabric work, evolving fast.
 Contributions and feedback welcome.
@@ -69,7 +70,7 @@ when it needs to be installed from scratch.
   - [A bit of history: how Fabric/Power BI work used to flow](#a-bit-of-history-how-fabricpower-bi-work-used-to-flow)
   - [Three ways of working](#three-ways-of-working)
 - [FAQ](#faq)
-- [Current status (v0.6.0)](#current-status-v060)
+- [Current status (v0.6.1)](#current-status-v061)
 - [Contributing](#contributing)
 - [Files in this repository](#files-in-this-repository)
 - [License](#license)
@@ -754,7 +755,7 @@ A: The installer writes `.github/agent-docs/tool-status.json` — a gitignored, 
 
 ---
 
-## Current status (v0.6.0)
+## Current status (v0.6.1)
 
 | Area | Status |
 |---|---|
@@ -767,6 +768,7 @@ A: The installer writes `.github/agent-docs/tool-status.json` — a gitignored, 
 | Opt-in specialist CLIs | **Implemented** — `pbir`, Tabular Editor CLI, `pbi-tools`, `sqlcmd`, `gh`, `az devops` are detect → explain → Y/N → best-effort install; never silent; declined choices remembered |
 | ALM & DevOps Team | **Implemented** — GitHub, Azure DevOps, Fabric Git, deployments/releases and Power BI ALM with five focused workers |
 | Capability Maintenance Team | **Implemented** — repo sync, skill inventory/mapping, agent coverage, tools, installer regression and managed-file review |
+| Manifest schema + CI tests | **Implemented in v0.6.1** — a draft-07 JSON Schema plus a Pester suite (manifest integrity, hierarchy, least-privilege tools, version) run in GitHub Actions on every push/PR; the installer also self-tests generated agents and stamps an integrity manifest |
 | Custom TMDL skill | **Used in real work** — comprehensive syntax and validation rules, maintained from practical modelling experience |
 | Custom Pipelines skill | **Used in real work** — activity reference plus operational practices from production pipeline work |
 | Custom CLI-policy skill | **Used in real work** — `fab`-first / `az`-fallback decision rule that every agent reads before a CLI/REST task |
@@ -776,9 +778,48 @@ A: The installer writes `.github/agent-docs/tool-status.json` — a gitignored, 
 | Data-goblin skills integration | **Implemented** — cloned and updated locally when network/Git access allows |
 | Idempotent re-run (update mode) | **Implemented** — managed files refreshed; existing-repository Git commits are limited to installer-owned paths; user files and unrelated Git work are untouched |
 | Portable download/rollback safety | **Implemented in v0.6.0** — staged extraction, executable validation, official checksums/signatures where available, and prior-version restoration on activation failure |
-| Automated regression tests | **Not yet** — validation is currently manual and experience-based |
+| Automated regression tests | **Implemented in v0.6.1** — a 42-test Pester suite (manifest integrity, hierarchy, least-privilege tools, version/doc consistency, and a real generator dry-run) runs locally and in CI; broader end-to-end install validation remains manual |
 
 This is a pre-release. It is genuinely useful today, but expect rough edges. If something breaks, [open an issue](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/issues).
+
+---
+
+## Quality & validation
+
+The agent organisation is governed by a machine-checkable **manifest** embedded in
+the installer, and several independent layers keep it honest:
+
+- **JSON Schema (`schema/agent-manifest.schema.json`, draft-07)** — defines the
+  shape every agent entry must satisfy (required fields, the closed capability-token
+  set, allowed properties). The manifest is validated against it in CI.
+- **Pester test suite (`tests/`)** — 42 tests / 1 CI-only skip covering manifest
+  integrity (exactly 47 agents, 3 / 7 / 37 tiers, unique ids and prefixes), the
+  delegation hierarchy (single root, no cycles, resolvable children), least-privilege
+  tools (explicit per-agent tools, read-only default, only executives and team-leads
+  may delegate), and version/doc consistency (installer, manifest, README and
+  CHANGELOG all agree).
+- **Real generator smoke test (`tests/Generated.Tests.ps1`)** — runs the installer
+  in a safe dry-run mode (`-EmitAgentsTo <dir>`, no prerequisites, cloning, tool
+  installs or launch) and asserts on the **actual generated agent files**, so the
+  code that writes agents — not just the manifest data — is exercised.
+- **Continuous integration (`.github/workflows/validate.yml`)** — the whole suite
+  runs on GitHub Actions (PowerShell 7) on every push/PR touching the installer,
+  schema or tests; the badge above reflects the latest run.
+- **Install-time self-test + integrity manifest** — after generating agents the
+  installer self-tests them against the manifest (`guardrail-status.json`) and stamps
+  a SHA-256 `installed-manifest.json`. Run `Setup-FabricAgenticWorkspace.ps1
+  -VerifyRoot <installed-workspace>` at any time to re-hash the managed files and
+  detect drift or tampering.
+
+Run the tests locally by double-clicking `tests/Run-Tests.bat`, or:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Import-Module Pester; Invoke-Pester -Path '.\tests' -Output Detailed"
+```
+
+What this does **not** cover: a full end-to-end install against a live Fabric /
+VS Code environment, and the *behavioural* quality of an agent's prompt (only its
+structure and safety). Those remain validated by real-world use.
 
 ---
 
