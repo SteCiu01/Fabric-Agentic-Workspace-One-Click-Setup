@@ -32,6 +32,24 @@ $ErrorActionPreference = 'Stop'
 $productVersion = '0.6.1'
 $workspaceFileName = 'Fabric-Agentic-Workspace.code-workspace'
 
+# SHA256 helper that does not hard-depend on the Get-FileHash cmdlet. A Windows
+# PowerShell 5.1 child launched from PowerShell 7 (as on the CI runner) can
+# inherit a PSModulePath that omits the 5.1 Utility module path, leaving
+# Get-FileHash unresolved; in that case fall back to .NET so integrity hashing
+# always works. Returns an uppercase hex string, matching Get-FileHash.
+function Get-Sha256Hex ([string]$LiteralPath) {
+    if (Get-Command Get-FileHash -ErrorAction SilentlyContinue) {
+        return (Get-FileHash -LiteralPath $LiteralPath -Algorithm SHA256).Hash
+    }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes($LiteralPath)
+        return ([System.BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '')
+    } finally {
+        $sha.Dispose()
+    }
+}
+
 # --- Integrity verification mode (-VerifyRoot) -----------------------
 # Self-contained: reads installed-manifest.json and re-computes SHA256 for each
 # recorded file, reporting missing/modified managed files. Makes the integrity
@@ -48,7 +66,7 @@ if ($VerifyRoot) {
     foreach ($vf in $verifyManifest.files) {
         $vp = Join-Path $verifyTarget ($vf.path -replace '/', '\')
         if (-not (Test-Path -LiteralPath $vp -PathType Leaf)) { $verifyMissing += $vf.path; continue }
-        $vsha = (Get-FileHash -LiteralPath $vp -Algorithm SHA256).Hash
+        $vsha = Get-Sha256Hex -LiteralPath $vp
         if ($vsha -ne $vf.sha256) { $verifyDrift += $vf.path } else { $verifyOk++ }
     }
     Write-Host "Integrity verification for $verifyTarget" -ForegroundColor Cyan
@@ -842,7 +860,7 @@ function Test-PublisherDownload {
         return $false
     }
     try {
-        $actual = (Get-FileHash $Path -Algorithm SHA256).Hash.ToUpperInvariant()
+        $actual = (Get-Sha256Hex -LiteralPath $Path).ToUpperInvariant()
         if ($ExpectedSha256) {
             if ($actual -ne $ExpectedSha256.ToUpperInvariant()) {
                 Write-Host "         SHA256 verification failed." -ForegroundColor Yellow
@@ -5310,7 +5328,7 @@ foreach ($skillName in $managedSkills) {
 foreach ($target in $integrityTargets) {
     if (Test-Path -LiteralPath $target -PathType Leaf) {
         $rel = $target.Substring($rootPath.Length).TrimStart('\','/').Replace('\','/')
-        $sha = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
+        $sha = Get-Sha256Hex -LiteralPath $target
         $integrityFiles.Add([ordered]@{ path = $rel; sha256 = $sha }) | Out-Null
     }
 }
