@@ -29,7 +29,7 @@ param(
 
 # Keep the window open on any error so the user can read it
 $ErrorActionPreference = 'Stop'
-$productVersion = '0.6.1'
+$productVersion = '0.6.2'
 $workspaceFileName = 'Fabric-Agentic-Workspace.code-workspace'
 
 # SHA256 helper that does not hard-depend on the Get-FileHash cmdlet. A Windows
@@ -48,6 +48,28 @@ function Get-Sha256Hex ([string]$LiteralPath) {
     } finally {
         $sha.Dispose()
     }
+}
+
+# Force-refresh a vendor clone to its upstream state. The installer treats the
+# vendor repositories (skills-for-fabric, power-bi-agentic-development) as
+# authoritative-FROM-UPSTREAM: every run mirrors live upstream and any local
+# edit is deliberately discarded so the references never drift. To stay
+# recoverable, a dirty working tree (including untracked files) is stashed onto
+# a timestamped stash BEFORE the hard reset, so nothing is ever silently lost.
+function Update-VendorClone ([string]$Repo, [string]$Label) {
+    if (-not (Test-Path -LiteralPath $Repo)) { return }
+    try {
+        & git -C $Repo fetch --prune origin 2>&1 | Out-Null
+        $dirty = @(& git -C $Repo status --porcelain 2>$null)
+        if ($dirty.Count -gt 0) {
+            $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+            & git -C $Repo stash push -u -m "installer-autostash $stamp" 2>&1 | Out-Null
+            Write-Host "    $Label had local edits  -- stashed before refresh (recover via 'git -C <repo> stash list')." -ForegroundColor Yellow
+        }
+        # origin/HEAD tracks the upstream default branch; reset --hard makes the
+        # clone identical to live upstream regardless of prior local state.
+        & git -C $Repo reset --hard origin/HEAD 2>&1 | Out-Null
+    } catch { }
 }
 
 # --- Integrity verification mode (-VerifyRoot) -----------------------
@@ -99,7 +121,7 @@ if ($VerifyRoot) {
 $agentManifestJson = @'
 {
   "schemaVersion": 1,
-  "productVersion": "0.6.1",
+  "productVersion": "0.6.2",
   "defaults": {
     "mode": "both",
     "tools": ["read","search"],
@@ -162,7 +184,7 @@ $agentManifestJson = @'
     {"id":"sql-odbc-data-access-agent","displayName":"SQL, ODBC & Data Access Agent","filename":"63-sql-odbc-data-access.agent.md","level":"worker","department":"applications-integration","parent":"applications-integration-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-tool-policy"],"conditionalSkills":["Microsoft SQL consumption skills"],"artifactTypes":["ODBC clients","SQLAlchemy code","parameterized queries"],"focus":"Own sqlcmd, ODBC, pyodbc, SQLAlchemy, Warehouse/endpoint/database connectivity, bulk operations, and parameterized validation."},
 
     {"id":"capability-maintenance-team-lead","displayName":"Capability Maintenance Team Lead","filename":"70-capability-maintenance-team-lead.agent.md","level":"team-lead","department":"capability-maintenance","parent":"fabric-workspace-master","allowedChildren":["Upstream Repository Sync Agent","Skill Inventory & Mapping Agent","Agent Coverage & Organization Agent","Environment & Tooling Agent","Installer Health & Regression Agent","Managed File Review Agent"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search","execute","edit"],"primarySkills":["fabric-maintenance","fabric-tool-policy","fabric-source-control-safety"],"artifactTypes":["vendor state","skill inventory","tool status","maintenance reports","installer evidence"],"focus":"Own vendor sync, skill inventory, organization, approved tool installation and updates, failed-install remediation, managed-file review, and workspace regression checks."},
-    {"id":"upstream-repository-sync-agent","displayName":"Upstream Repository Sync Agent","filename":"71-upstream-repository-sync.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-maintenance"],"artifactTypes":["vendor repository state"],"writePermissions":"clean vendor sync only; never edit, reset, or overwrite vendor content","defaultRisk":"medium","focus":"Inspect the Microsoft and Kurt repositories, preserve the original clean-repository git pull --ff-only workflow, record commits, and report dirty or diverged repositories without resetting them."},
+    {"id":"upstream-repository-sync-agent","displayName":"Upstream Repository Sync Agent","filename":"71-upstream-repository-sync.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-maintenance"],"artifactTypes":["vendor repository state"],"writePermissions":"vendor force-refresh to upstream only; stash local edits before hard reset, never hand-edit vendor content","defaultRisk":"medium","focus":"Force-refresh the Microsoft and Kurt vendor repositories to their upstream state so the clones always mirror live upstream, stash any local edits before the hard reset so nothing is lost, record the resulting commits, and report diverged repositories."},
     {"id":"skill-inventory-mapping-agent","displayName":"Skill Inventory & Mapping Agent","filename":"72-skill-inventory-mapping.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":["fabric-maintenance"],"artifactTypes":["skill inventory","mapping report"],"focus":"Dynamically detect valid, invalid, duplicate, added, removed, renamed, changed, unmapped, and tool-assuming skills and refresh local inventory."},
     {"id":"agent-coverage-organization-agent","displayName":"Agent Coverage & Organization Agent","filename":"73-agent-coverage-organization.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","edit"],"primarySkills":["fabric-maintenance","fabric-orchestration"],"artifactTypes":["coverage analysis","mapping proposals"],"focus":"Evaluate coverage, overlap, overload, gaps, team fit, workers, and teams; auto-apply only obvious low-risk mappings and seek approval for structural changes."},
     {"id":"environment-tooling-agent","displayName":"Environment & Tooling Agent","filename":"74-environment-tooling.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":["fabric-maintenance","fabric-tool-policy"],"artifactTypes":["tool status","installation plans","lockdown remediation reports"],"writePermissions":"approved environment/tool changes only","defaultRisk":"high","optionalToolRequestPermissions":"the only worker allowed to install default or optional tools, always after explicit user approval","focus":"Own current and future default-tool updates, failed installer follow-up, optional installation, locked-down laptop remediation, validation, rollback guidance, and tool-status refresh."},
@@ -2463,6 +2485,7 @@ if ($businessRepoPlans.Count -gt 0 -and $repositoryMapReadable) {
 
         $repositoryReady = $false
         $createdNow = $false
+        $doPull = $false
         if (Test-Path -LiteralPath $container) {
             if (Test-Path -LiteralPath $gitDir) {
                 $originUrl = (& git --git-dir $gitDir config --get remote.origin.url 2>$null | Select-Object -First 1)
@@ -2472,6 +2495,12 @@ if ($businessRepoPlans.Count -gt 0 -and $repositoryMapReadable) {
                 }
                 Write-Host '    Existing matching mirror found; preserving its worktrees.' -ForegroundColor Green
                 $repositoryReady = $true
+                # Cloned once already: offer an OPT-IN update. Default is No so a
+                # re-run never silently moves the user's working branches. When
+                # accepted, only clean worktrees strictly behind upstream are
+                # fast-forwarded (never merged/rebased/reset) further below.
+                $pullAns = Read-Host '    You already have this repository locally. Pull existing branches so they match online? (y/N)'
+                if ($pullAns -match '^\s*(y|yes)\s*$') { $doPull = $true }
             } else {
                 $children = @(Get-ChildItem -LiteralPath $container -Force -ErrorAction SilentlyContinue)
                 if ($children.Count -gt 0) {
@@ -2519,7 +2548,37 @@ if ($businessRepoPlans.Count -gt 0 -and $repositoryMapReadable) {
         $mirroredBranches = @()
         foreach ($branch in $remoteBranches) {
             $worktreePath = Join-Path $container $branch
-            if (Test-Path -LiteralPath $worktreePath) { $mirroredBranches += $branch; continue }
+            if (Test-Path -LiteralPath $worktreePath) {
+                $mirroredBranches += $branch
+                if ($doPull) {
+                    # Fast-forward this existing worktree to origin/<branch> ONLY
+                    # when it is clean and strictly behind. Dirty or diverged
+                    # branches are left untouched so no local work is ever lost.
+                    $ErrorActionPreference = 'Continue'
+                    $dirtyWt = @(& git -C $worktreePath status --porcelain 2>$null)
+                    if ($dirtyWt.Count -gt 0) {
+                        Write-Host "    $branch has local changes  -- left as-is (no pull)." -ForegroundColor Yellow
+                    } else {
+                        $ahead = 0; $behind = 0
+                        $counts = (& git -C $worktreePath rev-list --left-right --count "HEAD...origin/$branch" 2>$null)
+                        if ($counts -and ($counts -match '(\d+)\s+(\d+)')) { $ahead = [int]$Matches[1]; $behind = [int]$Matches[2] }
+                        if ($behind -eq 0) {
+                            Write-Host "    $branch already up to date." -ForegroundColor DarkGray
+                        } elseif ($ahead -gt 0) {
+                            Write-Host "    $branch has diverged (local commits)  -- left as-is; pull manually." -ForegroundColor Yellow
+                        } else {
+                            & git -C $worktreePath merge --ff-only "origin/$branch" 2>&1 | Out-Null
+                            if ($LASTEXITCODE -eq 0) {
+                                Write-Host "    $branch fast-forwarded to match online." -ForegroundColor Green
+                            } else {
+                                Write-Host "    $branch could not fast-forward  -- left as-is." -ForegroundColor Yellow
+                            }
+                        }
+                    }
+                    $ErrorActionPreference = 'Stop'
+                }
+                continue
+            }
             # Create/point a local branch at origin/<branch> with upstream tracking
             # and check it out in its own worktree, so pull/push behave like a clone.
             $ErrorActionPreference = 'Continue'
@@ -2620,8 +2679,8 @@ try {
             Write-Host "  Warning: could not clone skills-for-fabric. Clone manually later." -ForegroundColor Yellow
         }
     } else {
-        Write-Host "  skills-for-fabric/ already exists  -- pulling latest..." -ForegroundColor Green
-        try { & git -C "$rootPath\skills-for-fabric" pull --ff-only 2>&1 | Out-Null } catch { }
+        Write-Host "  skills-for-fabric/ already exists  -- force-refreshing to upstream..." -ForegroundColor Green
+        Update-VendorClone "$rootPath\skills-for-fabric" 'skills-for-fabric'
     }
     # Touch files so LastWriteTime reflects sync time, not upstream commit time.
     # A freshly-cloned file may still be locked by antivirus/indexer; this touch is
@@ -2643,8 +2702,8 @@ try {
             Write-Host "  Warning: could not clone power-bi-agentic-development. Clone manually later." -ForegroundColor Yellow
         }
     } else {
-        Write-Host "  power-bi-agentic-development/ already exists  -- pulling latest..." -ForegroundColor Green
-        try { & git -C "$rootPath\power-bi-agentic-development" pull --ff-only 2>&1 | Out-Null } catch { }
+        Write-Host "  power-bi-agentic-development/ already exists  -- force-refreshing to upstream..." -ForegroundColor Green
+        Update-VendorClone "$rootPath\power-bi-agentic-development" 'power-bi-agentic-development'
     }
     # Touch files so LastWriteTime reflects sync time, not upstream commit time.
     # A freshly-cloned file may still be locked by antivirus/indexer; this touch is
@@ -4911,7 +4970,7 @@ Before GitHub, Azure DevOps, branch, PR, Fabric Git, deployment, or release work
 
 This team owns the workspace's established capability lifecycle: upstream Microsoft and Kurt repository refresh, dynamic skill inventory, agent coverage, installer health, and all supported tool detection, installation, update, PATH recovery, and validation.
 
-Preserve the installer-first experience and its locked-down-laptop fallbacks. When setup cannot install or update a tool, diagnose the exact failure, obtain explicit approval before changing software, use the approved user-scope or portable fallback, validate the real executable, and refresh ``.github/agent-docs/tool-status.json``. Repository refreshes must preserve the original clean-repository ``git pull --ff-only`` behaviour.
+Preserve the installer-first experience and its locked-down-laptop fallbacks. When setup cannot install or update a tool, diagnose the exact failure, obtain explicit approval before changing software, use the approved user-scope or portable fallback, validate the real executable, and refresh ``.github/agent-docs/tool-status.json``. Vendor repository refreshes are authoritative-from-upstream: force-refresh the clone to live upstream (fetch + hard reset), stashing any local edits first so nothing is lost, never a fast-forward-only pull that would preserve drift.
 
 When selected directly, first offer:
 
@@ -5254,7 +5313,22 @@ function Add-SelfTestCheck([string]$Name, [bool]$Ok, [string]$Detail) {
 $expectedAgentCount = @($agentManifest.agents).Count
 $agentsDirPath = Join-Path $rootPath '.github\agents'
 $writtenAgentFiles = @(Get-ChildItem -Path $agentsDirPath -Filter '*.agent.md' -File -ErrorAction SilentlyContinue)
-Add-SelfTestCheck 'Agent file count matches manifest' ($writtenAgentFiles.Count -eq $expectedAgentCount) "found $($writtenAgentFiles.Count), expected $expectedAgentCount"
+# The real invariant is that every MANAGED agent was written -- not that the
+# directory contains exactly the manifest count. A user may add their own
+# `*.agent.md`; those are never in the manifest, are left untouched, and must
+# NOT be reported as a failure. So we assert "all managed agents present" and
+# report any extra user-authored agents separately for transparency.
+$managedAgentSet = @{}; foreach ($ma in $managedAgents) { $managedAgentSet[$ma] = $true }
+$writtenAgentNames = @($writtenAgentFiles | ForEach-Object { $_.Name })
+$missingManagedAgents = @($managedAgents | Where-Object { $writtenAgentNames -notcontains $_ })
+$extraUserAgents = @($writtenAgentNames | Where-Object { -not $managedAgentSet.ContainsKey($_) })
+$agentCountDetail = "found $($writtenAgentFiles.Count) agent file(s); $($managedAgents.Count) managed present"
+if ($missingManagedAgents.Count) { $agentCountDetail += "; MISSING managed: $($missingManagedAgents -join ', ')" }
+if ($extraUserAgents.Count)      { $agentCountDetail += "; $($extraUserAgents.Count) user-authored agent(s) preserved: $($extraUserAgents -join ', ')" }
+Add-SelfTestCheck 'All managed agents present (user agents preserved)' ($missingManagedAgents.Count -eq 0) $agentCountDetail
+if ($extraUserAgents.Count) {
+    Write-Host "        Note: $($extraUserAgents.Count) user-authored agent file(s) found and left untouched: $($extraUserAgents -join ', ')" -ForegroundColor DarkGray
+}
 
 $missingFrontmatter = @($writtenAgentFiles | Where-Object {
     $head = Get-Content $_.FullName -TotalCount 1 -ErrorAction SilentlyContinue
@@ -5314,7 +5388,8 @@ if ($selfTestPassed) {
 # Records a version stamp and a SHA256 for every generated agent/config file
 # so a later run -- or the Capability Maintenance team -- can detect drift
 # between what the installer produced and what is on disk. Re-running the
-# installer is idempotent: it overwrites these managed files and refreshes
+# installer is idempotent: it overwrites these managed files, purges installer
+# files it no longer ships (strict manifest-diff, see below), and refreshes
 # this manifest.
 $integrityFiles = [System.Collections.Generic.List[object]]::new()
 $integrityTargets = @()
@@ -5332,6 +5407,67 @@ foreach ($target in $integrityTargets) {
         $integrityFiles.Add([ordered]@{ path = $rel; sha256 = $sha }) | Out-Null
     }
 }
+
+# -- Purge obsolete installer files (strict manifest-diff) ------------
+# The manifest is a write-log of exactly what earlier runs shipped. Any path
+# the PREVIOUS run recorded but this run did NOT re-ship is an obsolete
+# installer artifact (a renamed/removed agent, a superseded config, a dropped
+# skill) and is deleted. This is a strict set difference (old - new) over the
+# write-log, never a directory sweep, so:
+#   * user-authored files (never in any manifest) survive,
+#   * workspace folders and business clones (source-control-repositories/,
+#     PP env folders, .venv, .fabric-*) are outside .github and never touched,
+#   * machine-local state files are explicitly excluded below even if they
+#     were ever listed, and the diff is skipped entirely on an unknown schema.
+$manifestPath = "$rootPath\.github\agent-docs\installed-manifest.json"
+$previousManifestPaths = @()
+if (Test-Path -LiteralPath $manifestPath) {
+    try {
+        $prevManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        if ($prevManifest.schemaVersion -eq 1 -and $prevManifest.files) {
+            $previousManifestPaths = @($prevManifest.files | ForEach-Object { ([string]$_.path).Replace('\','/') })
+        } else {
+            Write-Host "  Skipping obsolete-file purge: previous manifest has an unrecognised schema." -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host "  Skipping obsolete-file purge: previous manifest could not be read." -ForegroundColor Yellow
+    }
+}
+if ($previousManifestPaths.Count -gt 0) {
+    $newManifestPaths = @($integrityFiles | ForEach-Object { ([string]$_.path).Replace('\','/') })
+    # Only ever delete inside installer-owned roots; belt-and-braces on top of
+    # the diff, which already contains only installer-written paths.
+    $purgeAllowedPrefixes = @('.github/agents/', '.github/skills/', '.github/agent-docs/', '.vscode/')
+    $purgeAllowedExact    = @('.github/copilot-instructions.md', 'AGENTS.md', '.gitignore')
+    # Never delete machine-local / stateful files, even if a stale manifest lists them.
+    $purgeExcluded = @(
+        '.github/agent-docs/tool-status.json',
+        '.github/agent-docs/guardrail-status.json',
+        '.github/agent-docs/installed-manifest.json',
+        '.github/agent-docs/local/repository-map.local.json'
+    )
+    $purged = 0
+    foreach ($rel in $previousManifestPaths) {
+        if ($newManifestPaths -contains $rel) { continue }
+        if ($purgeExcluded -contains $rel) { continue }
+        $inRoot = ($purgeAllowedExact -contains $rel) -or (@($purgeAllowedPrefixes | Where-Object { $rel.StartsWith($_) }).Count -gt 0)
+        if (-not $inRoot) { continue }
+        $abs = Join-Path $rootPath ($rel -replace '/', '\')
+        if (Test-Path -LiteralPath $abs -PathType Leaf) {
+            try {
+                Remove-Item -LiteralPath $abs -Force
+                Write-Host "  Purged obsolete installer file: $rel" -ForegroundColor DarkGray
+                $purged++
+            } catch {
+                Write-Host "  Could not purge $rel (in use?) -- leaving in place." -ForegroundColor Yellow
+            }
+        }
+    }
+    if ($purged -gt 0) {
+        Write-Host "  Removed $purged obsolete installer file(s) no longer shipped." -ForegroundColor Green
+    }
+}
+
 $installedManifest = [ordered]@{
     schemaVersion  = 1
     generatedAt    = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")

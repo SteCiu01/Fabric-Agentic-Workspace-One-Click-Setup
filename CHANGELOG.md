@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.6.2] - 2026-07-25
+
+### Added
+
+- **Self-pruning installer** — the installer now removes files it shipped *before* but no longer ships (renamed/removed agents, superseded configs, dropped skills). It reads the previous `installed-manifest.json` write-log, removes only the strict `old − new` set difference scoped to installer-owned roots, and excludes machine-local state (`tool-status.json`, `guardrail-status.json`, `installed-manifest.json`, `repository-map.local.json`). It is never a directory sweep, so user files, Fabric workspace folders and business clones are never touched; the purge is skipped on an unrecognised manifest schema.
+- **Opt-in pull for existing business clones** — when a re-run finds a repository already cloned under `source-control-repositories/`, it asks *"Pull existing branches so they match online? (y/N)"* (default No). On accept it fast-forwards **only** clean, strictly-behind branch worktrees; dirty or diverged branches are left as-is for a manual pull. Declining keeps the previous fetch-only behaviour.
+- **README "Keeping it up to date" contract** — a new maintainability section documents how updates behave and exactly which files users should and should not edit.
+
+### Changed
+
+- **Authoritative-from-upstream vendor refresh** — `skills-for-fabric/` and `power-bi-agentic-development/` are now force-refreshed to upstream on every run (`fetch --prune` + `reset --hard origin/HEAD`) instead of a fast-forward-only pull. Local edits are auto-stashed onto a timestamped stash first (recoverable via `git stash list`), so the references always mirror live upstream and never silently drift.
+- **Self-test respects user-authored agents** — the post-generation check now asserts *all managed agents are present* and reports any extra `*.agent.md` files as preserved, instead of requiring an exact manifest count, so adding your own agent no longer trips a false failure.
+- **Re-scoped Capability Maintenance agents** — the Upstream Repository Sync Agent (`071`) and the Environment & Tooling Team Lead (`070`) now describe the force-refresh model rather than the previous "clean-repository `git pull --ff-only`, never reset" behaviour.
+
 ## [v0.6.1] - 2026-07-20
 
 ### Added
