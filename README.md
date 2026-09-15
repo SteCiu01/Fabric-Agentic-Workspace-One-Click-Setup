@@ -70,7 +70,7 @@ when it needs to be installed from scratch.
   - [A bit of history: how Fabric/Power BI work used to flow](#a-bit-of-history-how-fabricpower-bi-work-used-to-flow)
   - [Three ways of working](#three-ways-of-working)
 - [FAQ](#faq)
-- [Current status (v0.6.2)](#current-status-v062)
+- [Current status (v0.7.0)](#current-status-v070)
 - [Contributing](#contributing)
 - [Files in this repository](#files-in-this-repository)
 - [License](#license)
@@ -90,7 +90,7 @@ So I built a multi-agent workspace that brings everything together. A **master a
 
 As I went deeper I realised the **agent → tools → skills** chain matters as much as the agents themselves. So each agent now owns a **minimum, deterministic set of tools** — the right CLI for its workload (`fab`, `az`, `sqlcmd`, `pbir`, Tabular Editor CLI, `pbi-tools`, `gh`, `az devops`) and the MCP servers where they help — instead of a vague "all tools to everyone" pile. Tool availability is discovered once and recorded in a machine-specific `tool-status.json` inventory. An agent then checks what's actually installed, uses it if present, and **falls back cleanly when it isn't** — which is what keeps the whole thing working on locked-down corporate PCs. A custom **`fabric-cli-policy`** skill encodes the decision rule: prefer `fab`, with `az` as a documented fallback. And each agent loads **only the skills its current subtask needs** rather than eagerly reading everything.
 
-This is a **starting point, not a finished system.** V0.6 keeps the installer, prerequisite checks, tool layer, workspace choices, and Git-based skill updates that already worked in V0.5. On top of that foundation it evolves the previous nine-agent set into a **Master-led organisation**: two cross-domain reviewers, seven Team Leads, and 37 focused workers. The new **Capability Maintenance** team owns skill and agent upkeep plus tool detection, approved installs/updates, PATH recovery, locked-down-laptop follow-up, and installer health. The architecture remains additive: users still download the same two installer files and receive the same clean workspace shape.
+This is a **starting point, not a finished system.** V0.6 evolved the previous nine-agent set into a **Master-led organisation**: two cross-domain reviewers, seven Team Leads, and 37 focused workers, plus a **Capability Maintenance** team for skill, agent and tool upkeep. V0.7 fine-tunes how that organisation works together: nested delegation is configured by the installer, every agent carries specialist knowledge drawn from the custom, Microsoft and Kurt skills, the teams share one WORK ORDER / WORK RESULT contract, destructive work is gated behind explicit approval tokens, and the vendor skill refresh is more robust. The architecture remains additive: users still download the same two installer files and receive the same clean workspace shape.
 
 Then I thought: *this should be replicable*. Not just for me — for anyone who works with Fabric and wants an AI-powered development workflow. So I packaged everything into a one-click installer and a shareable agent configuration.
 
@@ -104,14 +104,15 @@ Then I thought: *this should be replicable*. Not just for me — for anyone who 
 >
 > **Early stage — use with care:** This is very much a pre-release version. It has been tested and works, but it is at the beginning of its life. Given the level of AI involvement in its creation, there may be bugs, edge cases, or behaviours that do not work as expected in your specific environment. **Do not use this in production environments without fully understanding what the scripts do.** Always review the code before running it.
 >
-> **Third-party skill dependencies:** This workspace clones and depends on two external repositories — [microsoft/skills-for-fabric](https://github.com/microsoft/skills-for-fabric) and [data-goblin/power-bi-agentic-development](https://github.com/data-goblin/power-bi-agentic-development). These are independent open-source projects maintained by their respective owners. This project has no control over their content, availability, or future changes. The agents are **resilient to these repos restructuring or renaming their internal folders** — skills are discovered dynamically at runtime (list the repo root, search by keyword) rather than from fixed paths. However, if a whole repository is **renamed, moved, or removed** at the GitHub level, or its history diverges so `git pull --ff-only` fails, the clone/update step will break until the references are updated.
+> **Third-party skill dependencies:** This workspace clones and depends on two external repositories — [microsoft/skills-for-fabric](https://github.com/microsoft/skills-for-fabric) and [data-goblin/power-bi-agentic-development](https://github.com/data-goblin/power-bi-agentic-development). These are independent open-source projects maintained by their respective owners. This project has no control over their content, availability, or future changes. The agents are **resilient to these repos restructuring or renaming their internal folders** — every skill folder is registered natively at install time, each agent's pinned skill paths are re-resolved on every run (a renamed folder is matched by prefix and annotated, a missing one falls back to keyword discovery), and new upstream skills auto-attach to the right specialist by topic keywords. However, if a whole repository is **renamed, moved, or removed** at the GitHub level, the clone/update step will break until the references are updated.
 >
 > **Licensing & provenance:** `skills-for-fabric` is MIT-licensed; `power-bi-agentic-development` is **GPL-3.0** and is used **only as a locally cloned, gitignored reference** that agents read at runtime — it is never copied, AI-rewritten, or redistributed inside this project. The custom embedded skills (`fabric-tmdl`, `fabric-pipelines`, and `fabric-cli-policy`) are **original maintainer-authored works in this repository** — written from scratch (`fabric-tmdl` and `fabric-cli-policy` from my own best practices; `fabric-pipelines` derived from Microsoft sources combined with my working experience). Always check those repos directly for their own licensing terms and usage conditions.
 >
 > This project is used regularly by the maintainer in real Microsoft Fabric work,
 > including local, live, and hybrid workflows on a locked-down corporate Windows
-> machine. It is still pre-release: validation is currently manual and
-> experience-based rather than backed by a formal automated test suite.
+> machine. It is still pre-release: the structure is covered by an automated test
+> suite and the organisation has been exercised end-to-end (including a live Fabric
+> publish), but agent *behaviour* is prompt-driven and keeps being tuned from real use.
 >
 > That said — it is a practical starting point, and I hope it saves you time and sparks ideas. Feedback, bug reports, and contributions are very welcome.
 
@@ -311,19 +312,17 @@ falling over the first time a tool is missing or a skill folder gets renamed ups
 | **Bounded scope, single responsibility** | One agent owns one workload; no two agents fight over the same work | Master assigns one writer per artifact; Team Leads delegate narrowly scoped implementation or validation work |
 | **Deterministic tool gating** | Never assume a CLI/MCP exists — check first, then use it or fall back | Every agent reads `.github/agent-docs/tool-status.json` and uses a tool only when `<key>.found` is true |
 | **Graceful degradation** | A missing tool slows you down, it never blocks you | Every owned tool has a **documented fallback** (e.g. Tabular Editor → fabric-tmdl checklist; `fab` admin → portal + `az rest`; `pbir` → direct PBIR JSON edit) |
-| **Minimum-necessary context (anti-soup)** | Load only what the current subtask needs, never "read all skills" | Each specialist has a "Skill loading — minimum necessary" block: identify the subtask, load its **one** skill, act |
+| **Minimum-necessary context (anti-soup)** | Load only what the current subtask needs, never "read all skills" | Each agent's Knowledge section pins the few skills for its role; workers receive a lean operating contract and a self-contained WORK ORDER instead of re-reading the flow documents |
 | **Topic-based routing** | The right specialist is chosen by *task type*, never by what happens to be installed | Master routes by topic; a missing tool never changes the owner — the specialist falls back instead |
-| **Deterministic startup with self-correction** | Initialization is mandatory, repeatable, and recovers from read/tool errors | Master follows the mandatory starting flow, checks before every response that startup was resolved, and retries a failed mandatory read once before showing VS Code recovery guidance |
-| **Safety guardrails** | Irreversible actions get a confirmation; secrets never get hardcoded | Confirm-before-destructive on capacity/deploy/Git/tool operations; IDs and secrets stay external; review agents remain read-only by default |
+| **Lean, deterministic startup** | One status call, then work — never a menu | The Master runs `Get-SessionStatus.ps1` once per session and acts on the request in the same turn |
+| **Safety guardrails** | Irreversible actions get an explicit token; secrets never get hardcoded | Deletes/drops/PROD/release/security changes require `APPROVED:<ACTION>:<artifact>` from the user; dispatched agents without the token return `NEEDS APPROVAL`; IDs and secrets stay external; review agents remain read-only |
 | **Skill precedence on conflict** | When two sources disagree, the tie-break is explicit | House style (`fabric-tmdl`) wins on *"how we do it here"*; upstream skills win on *"is this valid?"* |
-| **Resilient discovery** | Don't fail just because an upstream folder moved | Cloned-repo paths are treated as **last-known hints**: list the repo root, search by keyword for the current `SKILL.md`, pick the closest match |
+| **Resilient discovery** | Don't fail just because an upstream folder moved | Skill paths are re-resolved on every installer run (renames matched by prefix, new skills auto-attached by keyword); a still-missing path falls back to keyword discovery under the clones |
 
-> **The standout: the Master's startup protocol.** The Master agent assumes the failure
-> mode LLMs actually have — *skipping initialization when the user's first message already
-> contains a task*. So it combines an **unconditional starting-flow instruction** with a
-> **self-check before every response**. A task in the first message is saved, startup runs
-> to completion, and only then is the task answered. This is the single most important
-> reason sessions start consistently.
+> **The standout: the team works as a team.** Nested delegation is enabled by the
+> installer, every hop speaks the same WORK ORDER / WORK RESULT contract, only the agent you
+> selected can talk to you, and destructive work stops until you hand over a literal approval
+> token. This flow was verified end-to-end — including a live Fabric publish — for v0.7.0.
 
 These principles are deliberately enforced *inside the agent bodies* (the
 [Agent → tools → skills matrix](#agent--tools--skills-matrix) above shows the per-agent
@@ -462,13 +461,27 @@ Once VS Code opens:
 
 1. Open **Copilot Chat** (sidebar or `Ctrl+Shift+I`)
 2. Select **000 - Fabric Workspace Master** from the agent dropdown
-3. In a blank chat type a greeting (e.g., Hi agent!) — the agent takes over from here
+3. Describe what you need (or just say hi) — the Master takes over from here
 
-On first message the agent will:
-- Check when each skill source was last updated
-- Offer to run skill maintenance (light or deep)
-- Check your identity (`fab auth status`, falling back to `az account show`)
-- Present a topic menu to route you to the right specialist
+> Open the workspace from the installer-generated `.code-workspace` file (VS Code
+> offers to save it). It carries `chat.subagents.allowInvocationsFromSubagents: true`,
+> the VS Code setting that lets Team Leads dispatch their workers; without it only the
+> first level of delegation (Master → Team Lead) is available.
+
+On the first message the Master runs **one** status script and shows one compact block:
+- Skill freshness (real upstream commit dates for the two clones, install date for the custom skills)
+- Registered skill locations and whether nested dispatch is enabled
+- Identity (`fab auth status`, falling back to `az account show`) — informational, never blocking
+- Live tool check (refreshes `tool-status.json` if something was installed or removed since setup)
+- MCP servers: *installed* vs *connected* — installed is never presented as callable
+
+Then it acts on your request by dispatching the owning Team Lead(s). When the work
+needs a **live semantic model**, the Master first opens the Power BI modeling MCP
+connection itself in the main chat (that is where a sign-in prompt can be answered)
+and hands the connection name down to the team; if it cannot connect, the team is
+told to use the REST fallback up front. You never switch
+agent for normal work; the only optional switch is the **Run capability maintenance**
+handoff button when you want skills and tools refreshed.
 
 ### 4. Keeping it up to date
 
@@ -503,16 +516,33 @@ That's it. Reopen the workspace in VS Code and you're on the latest version.
 
 ### Guided session startup
 
-You don't configure anything manually. On your **first message** each session, the master agent is instructed to:
+You don't configure anything manually. On your **first message** each session, the Master runs `.github/agent-docs/Get-SessionStatus.ps1` once and reports skill freshness, registered skills, nested-dispatch status, identity and live tool availability in one block — then goes straight to your request. Maintenance is offered only when upstream skills are more than 30 days old, and only as a one-line hint.
 
-1. **Check skill freshness** — show when each skill source was last updated locally
-2. **Offer maintenance** — optionally switch to Capability Maintenance for skill, agent, installer and tool upkeep
-3. **Check identity** — run `fab auth status` (falling back to `az account show`) to verify your login
-4. **Present topic selection** — route you to the specialist agent for your task
+### How a request flows through the team
+
+Every request is delivered *through* the organisation; the Master never edits an artifact itself.
+
+| Loop | When | Path |
+|---|---|---|
+| **Simple** | one team, one artifact | Master → Team Lead → worker → Lead validates → Master → you |
+| **Designed** | cross-domain or a design change | Master → **001 Architect** (PLAN) → Team Lead(s) in plan order → **002 QA** (VERDICT) → Master → you |
+| **Blocked** | approval / input / design question mid-work | worker → Lead relays → Master asks **you** → re-dispatch with the answer |
+
+Every hop uses the same **WORK ORDER** (goal, artifact, mode, constraints, expected validation, approvals granted, context) and **WORK RESULT** (`DONE | DONE WITH RISKS | NEEDS APPROVAL | NEEDS INPUT | NEEDS ARCHITECT | OUT OF SCOPE | FAILED`, changed, validation, risks, request) contract, defined in `.github/agent-docs/working-flow-reference.md`. The WORK RESULT block is the mandatory last message of every dispatched agent; a turn that ends without it is re-dispatched once, never patched over by the parent. Only the agent *you* selected can talk to you; everyone else bubbles questions up.
+
+**Destructive work needs a token.** Deleting or dropping anything — a measure, a table, a file, a role, a branch, a live item — is destructive even if you asked for it in plain words. The Master states exactly what will be destroyed (including collateral) and asks you to reply with `APPROVED:<ACTION>:<artifact>`; workers without that token in their WORK ORDER stop and return `NEEDS APPROVAL`, and they only execute what the token names.
 
 ### Specialist agents
 
-Once routed, each specialist handles its domain with a bounded tool set and selective skill loading. For the full breakdown — capabilities, owned CLIs/MCP servers, and which skills each agent reads — see the [Agent → tools → skills matrix](#agent--tools--skills-matrix) above.
+Each of the 47 agents is generated from a **knowledge catalog** in the installer, so a worker is a real specialist rather than a job title:
+
+- **Knowledge and skills** — the artifacts it owns, its write permission, and the exact custom / Microsoft / Kurt skill paths to read (resolved at install time), plus upstream skills **auto-discovered** by topic keywords from the live skill catalogue.
+- **Playbook** — the numbered steps for its kind of work.
+- **Validation you must run before reporting** — concrete checks; an agent may never claim a check it did not run.
+- **Tool ladder** — preferred → fallback → last resort, gated by `tool-status.json` (e.g. DAX: Modeling MCP → REST `executeQueries` → local TMDL).
+- **Avoid** — the anti-patterns for that role.
+
+Team Leads additionally get a roster of their workers and dispatch rules; the Architect returns a structured PLAN, QA a VERDICT. For the per-team overview see the [Agent → tools → skills matrix](#agent--tools--skills-matrix) above.
 
 ### Skill-based development
 
@@ -528,8 +558,10 @@ The skills come from three sources:
 | Source | What it covers | Updated |
 |---|---|---|
 | **Custom embedded** (`.github/skills/`) | TMDL syntax, pipeline JSON, CLI policy — original to this repo | Re-run installer or edit directly |
-| **Microsoft** (`skills-for-fabric/`) | Spark, SQL, Eventhouse, medallion, CLI | Offered on session start / via Capability Maintenance |
-| **Data-goblin** — [Kurt Buhler](https://www.linkedin.com/in/kurtbuhler/) (`power-bi-agentic-development/`) | PBIP, DAX, reports, Fabric CLI/admin | Offered on session start / via Capability Maintenance |
+| **Microsoft** (`skills-for-fabric/`) | Spark, SQL Warehouse/Database, Eventhouse/Eventstream/Activator, Dataflows, pipelines, deployment pipelines, Git integration, OneLake governance, medallion, Power BI reports, semantic models, FabricIQ | Mirrored to upstream on every installer run / via Capability Maintenance |
+| **Data-goblin** — [Kurt Buhler](https://www.linkedin.com/in/kurtbuhler/) (`power-bi-agentic-development/`) | PBIP/TMDL/PBIR, DAX, semantic models, reports, themes, Deneb/custom visuals, paginated, Tabular Editor, Fabric CLI/admin | Mirrored to upstream on every installer run / via Capability Maintenance |
+
+All skill folders from both clones are registered in VS Code's `chat.agentSkillsLocations`, so every agent sees the full catalogue natively and VS Code loads a skill's text on demand. A skill *updated* upstream is used immediately after the next installer run; a *new* skill in a registered folder needs nothing at all; a *new folder* is registered on the next installer run or at the next session start (the status script self-heals the registration).
 
 > **Why git clone instead of npm install?** Corporate environments typically
 > block npm global installs and require admin approval. This workspace clones
@@ -559,8 +591,9 @@ Fabric Workspaces/
 │   │   ├── 070-capability-maintenance-team-lead.agent.md
 │   │   └── <37 delegated worker .agent.md files>
 │   ├── agent-docs/
-│   │   ├── starting-flow.md                           ← session startup phases
-│   │   ├── working-flow-reference.md                  ← skill discovery table
+│   │   ├── starting-flow.md                           ← lean session startup (one status call)
+│   │   ├── working-flow-reference.md                  ← team protocol, routing map, WORK ORDER/RESULT
+│   │   ├── Get-SessionStatus.ps1                      ← status script (skills, identity, live tool re-check)
 │   │   ├── local/
 │   │   │   └── repository-map.local.json              ← local business-repo map (gitignored)
 │   │   └── tool-status.json                           ← tool inventory (gitignored)
@@ -770,31 +803,32 @@ A: The installer writes `.github/agent-docs/tool-status.json` — a gitignored, 
 
 ---
 
-## Current status (v0.6.2)
+## Current status (v0.7.0)
 
 | Area | Status |
 |---|---|
-| One-click setup (.bat + .ps1) | **Validated manually** — the setup flow is maintainer-used on Windows 10/11, including a locked-down corporate laptop; v0.6 regression remains manual |
-| Master Agent session startup flow | **Implemented as agent instructions** — intent classification, skill freshness, maintenance handoff, identity and topic routing |
-| Hierarchical routing | **Implemented in v0.6.0** — 10 numbered user-facing entries and 37 delegated workers with explicit child allowlists |
-| Agent → tools → skills model | **Implemented** — each agent owns a bounded responsibility/toolset and loads only the skills its subtask needs |
-| Tool inventory (`tool-status.json`) | **Implemented** — installer detects real executable paths/versions; Capability Maintenance owns refresh, approved installation/update, PATH recovery and locked-down follow-up |
+| One-click setup (.bat + .ps1) | **Validated manually** — the setup flow is maintainer-used on Windows 10/11, including a locked-down corporate laptop |
+| Master Agent session startup flow | **Lean since v0.7.0** — one `Get-SessionStatus.ps1` call (skill freshness, registered skills, nested-dispatch check, identity, live tool re-check), one compact status block, then straight to work; no blocking menus |
+| Hierarchical routing | **Fine-tuned in v0.7.0** — the installer now configures nested delegation, so the full Master → Team Lead → Worker → Lead → Master path is available out of the box; verified with single-team, multi-team (Architect PLAN + QA VERDICT) and approval-bubble scenarios |
+| Agent → tools → skills model | **Implemented** — every agent carries a Knowledge section (resolved custom/Microsoft/Kurt skill paths + auto-discovered upstream skills), a Playbook, mandatory validation, a tool ladder and an Avoid list |
+| Team protocol | **Implemented in v0.7.0** — WORK ORDER / WORK RESULT contracts, three loops (Simple / Designed / Blocked), strict `APPROVED:<ACTION>:<artifact>` tokens for destructive work, session ledger |
+| Tool inventory (`tool-status.json`) | **Implemented** — installer detects real executable paths/versions; refreshed live at every session start; Capability Maintenance owns approved installation/update and PATH recovery |
 | GitHub / Azure DevOps repository onboarding | **Implemented in v0.6.0** — optional independent clones from a clone URL, live-branch mirroring, safe re-runs, and a preserved multi-root VS Code workspace |
 | Opt-in specialist CLIs | **Implemented** — `pbir`, Tabular Editor CLI, `pbi-tools`, `sqlcmd`, `gh`, `az devops` are detect → explain → Y/N → best-effort install; never silent; declined choices remembered |
 | ALM & DevOps Team | **Implemented** — GitHub, Azure DevOps, Fabric Git, deployments/releases and Power BI ALM with five focused workers |
 | Capability Maintenance Team | **Implemented** — repo sync, skill inventory/mapping, agent coverage, tools, installer regression and managed-file review |
-| Manifest schema + CI tests | **Implemented in v0.6.1** — a draft-07 JSON Schema plus a Pester suite (manifest integrity, hierarchy, least-privilege tools, version) run in GitHub Actions on every push/PR; the installer also self-tests generated agents and stamps an integrity manifest |
+| Manifest schema + CI tests | **Implemented in v0.6.1, widened in v0.7.0** — JSON Schema plus a Pester suite (manifest, hierarchy, least-privilege, version, generated-file content, settings) run in GitHub Actions on every push/PR; the installer also self-tests generated agents and stamps an integrity manifest |
 | Custom TMDL skill | **Used in real work** — comprehensive syntax and validation rules, maintained from practical modelling experience |
 | Custom Pipelines skill | **Used in real work** — activity reference plus operational practices from production pipeline work |
 | Custom CLI-policy skill | **Used in real work** — `fab`-first / `az`-fallback decision rule that every agent reads before a CLI/REST task |
 | CLI deep-dive (`CLI-FUNCTIONALITIES.md`) | **Expanded** — two-part mini-book: `fab`/`az` workload guide plus a chapter per specialist CLI |
-| Three ways of working (local / live / hybrid) | **Documented and maintainer-used** — diagrams, installer guidance, and soft MCP checks; still requires human review/testing |
-| Microsoft skills-for-fabric integration | **Implemented** — cloned and updated locally when network/Git access allows |
-| Data-goblin skills integration | **Implemented** — cloned and updated locally when network/Git access allows |
+| Three ways of working (local / live / hybrid) | **Documented and verified** — live mode exercised in v0.7.0 testing (semantic model published to Fabric via REST, refreshed, regression DAX run) |
+| Microsoft skills-for-fabric integration | **Implemented; refresh hardened in v0.7.0** — the clone is mirrored to upstream on every run with explicit success/failure reporting, and every skill folder is registered natively for the agents |
+| Data-goblin skills integration | **Implemented; refresh hardened in v0.7.0** — as above |
 | Idempotent re-run (update mode) | **Implemented** — managed files refreshed; existing-repository Git commits are limited to installer-owned paths; user files and unrelated Git work are untouched |
 | Authoritative install + self-pruning | **Implemented in v0.6.2** — vendor skill repos force-refreshed to upstream (local edits auto-stashed); managed files overwritten every run; obsolete installer files purged via a strict `installed-manifest.json` diff; user files, Fabric workspaces and business clones never touched |
 | Portable download/rollback safety | **Implemented in v0.6.0** — staged extraction, executable validation, official checksums/signatures where available, and prior-version restoration on activation failure |
-| Automated regression tests | **Implemented in v0.6.1** — a 42-test Pester suite (manifest integrity, hierarchy, least-privilege tools, version/doc consistency, and a real generator dry-run) runs locally and in CI; broader end-to-end install validation remains manual |
+| Automated regression tests | **Widened in v0.7.0** — the Pester suite now also asserts the generated agents' content (Knowledge/Playbook/Return-contract sections, approval-token rule, no unresolved skill references), the emitted settings (nested dispatch, skill locations), the status script and the handoff; end-to-end live validation remains manual |
 
 This is a pre-release. It is genuinely useful today, but expect rough edges. If something breaks, [open an issue](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/issues).
 
@@ -808,12 +842,16 @@ the installer, and several independent layers keep it honest:
 - **JSON Schema (`schema/agent-manifest.schema.json`, draft-07)** — defines the
   shape every agent entry must satisfy (required fields, the closed capability-token
   set, allowed properties). The manifest is validated against it in CI.
-- **Pester test suite (`tests/`)** — 42 tests / 1 CI-only skip covering manifest
+- **Pester test suite (`tests/`)** — covers manifest
   integrity (exactly 47 agents, 3 / 7 / 37 tiers, unique ids and prefixes), the
   delegation hierarchy (single root, no cycles, resolvable children), least-privilege
   tools (explicit per-agent tools, read-only default, only executives and team-leads
-  may delegate), and version/doc consistency (installer, manifest, README and
-  CHANGELOG all agree).
+  may delegate), version/doc consistency (installer, manifest, README and
+  CHANGELOG all agree), and — since v0.7.0 — the **content** of the generated files:
+  every agent has its Knowledge / Playbook / Return-contract sections, workers carry the
+  approval-token rule, the Master carries the maintenance handoff and only its nine
+  children in `agents:`, the emitted settings enable nested dispatch, and
+  `Get-SessionStatus.ps1` is shipped.
 - **Real generator smoke test (`tests/Generated.Tests.ps1`)** — runs the installer
   in a safe dry-run mode (`-EmitAgentsTo <dir>`, no prerequisites, cloning, tool
   installs or launch) and asserts on the **actual generated agent files**, so the
@@ -835,7 +873,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "Import-Module Pester; In
 
 What this does **not** cover: a full end-to-end install against a live Fabric /
 VS Code environment, and the *behavioural* quality of an agent's prompt (only its
-structure and safety). Those remain validated by real-world use.
+structure, content sections and safety rules). Behaviour is validated by real-world use;
+the v0.7.0 release was checked with three end-to-end scenarios in a real workspace
+(single-team TMDL edit, multi-team Architect → Leads → QA with a live semantic-model
+publish and regression DAX, and a two-way destructive-action approval bubble).
 
 ---
 

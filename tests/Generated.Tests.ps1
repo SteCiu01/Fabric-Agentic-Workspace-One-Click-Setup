@@ -124,4 +124,203 @@ Describe 'Generated agent frontmatter' {
             $script:GenBySlug[$slug].Tools | Should -Not -Contain 'agent' -Because "$($agent.filename) is a worker and must not delegate"
         }
     }
+
+    It 'the Master lists only its declared children in agents: (no direct-to-worker fallback)' {
+        $master = $script:Manifest.agents | Where-Object { $_.id -eq 'fabric-workspace-master' }
+        $slug = $master.filename -replace '^\d+-', ''
+        $head = (Get-Content -LiteralPath $script:GenBySlug[$slug].Path -TotalCount 20) -join "`n"
+        $line = [regex]::Match($head, '(?m)^agents:\s*\[(.*)\]').Groups[1].Value
+        $listed = @($line -split ',' | ForEach-Object { $_.Trim().Trim("'") } | Where-Object { $_ })
+        $listed.Count | Should -Be @($master.allowedChildren).Count -Because 'the Master must not list workers in agents:'
+        foreach ($w in ($script:Manifest.agents | Where-Object { $_.level -eq 'worker' })) {
+            ($listed -join '|') | Should -Not -Match ([regex]::Escape($w.displayName)) -Because "worker $($w.displayName) must not be directly dispatchable by the Master"
+        }
+    }
+
+    It 'the Master carries a capability-maintenance handoff' {
+        $master = $script:Manifest.agents | Where-Object { $_.id -eq 'fabric-workspace-master' }
+        $slug = $master.filename -replace '^\d+-', ''
+        $head = (Get-Content -LiteralPath $script:GenBySlug[$slug].Path -TotalCount 25) -join "`n"
+        $head | Should -Match '(?m)^handoffs:'
+        $head | Should -Match 'Capability Maintenance Team Lead'
+    }
+}
+
+Describe 'Generated agent content (specialist knowledge and team protocol)' {
+
+    BeforeAll {
+        $script:BodyBySlug = @{}
+        foreach ($k in $script:GenBySlug.Keys) {
+            $script:BodyBySlug[$k] = Get-Content -LiteralPath $script:GenBySlug[$k].Path -Raw
+        }
+    }
+
+    It 'every agent has a Knowledge and skills section with at least one skill reference' {
+        foreach ($agent in $script:Manifest.agents) {
+            $slug = $agent.filename -replace '^\d+-', ''
+            $body = $script:BodyBySlug[$slug]
+            $body | Should -Match '(?m)^## Knowledge and skills' -Because "$($agent.filename) must not be an empty shell"
+            $body | Should -Match '(?m)^- `[^`]+` ' -Because "$($agent.filename) must list at least one skill path"
+        }
+    }
+
+    It 'every agent has a Playbook and a Validation section' {
+        foreach ($agent in $script:Manifest.agents) {
+            $slug = $agent.filename -replace '^\d+-', ''
+            $body = $script:BodyBySlug[$slug]
+            $body | Should -Match '(?m)^## Playbook' -Because $agent.filename
+            $body | Should -Match '(?m)^## Validation you must run before reporting' -Because $agent.filename
+        }
+    }
+
+    It 'every non-Master agent ends with the WORK RESULT return contract' {
+        foreach ($agent in ($script:Manifest.agents | Where-Object { $_.id -ne 'fabric-workspace-master' })) {
+            $slug = $agent.filename -replace '^\d+-', ''
+            $body = $script:BodyBySlug[$slug]
+            $body | Should -Match 'WORK RESULT' -Because $agent.filename
+            $body | Should -Match 'NEEDS APPROVAL' -Because $agent.filename
+            $body | Should -Match 'final message must be the WORK RESULT block' -Because "$($agent.filename) must treat a block-less turn as a failure"
+        }
+    }
+
+    It 'every agent that can execute carries the terminal-hygiene rule' {
+        foreach ($agent in ($script:Manifest.agents | Where-Object { @($_.tools) -contains 'execute' })) {
+            $slug = $agent.filename -replace '^\d+-', ''
+            $script:BodyBySlug[$slug] | Should -Match 'Terminal hygiene' -Because "$($agent.filename) runs commands"
+        }
+    }
+
+    It 'every agent that can delegate handles agent-not-found retries and empty returns' {
+        foreach ($agent in ($script:Manifest.agents | Where-Object { @($_.tools) -contains 'agent' })) {
+            $slug = $agent.filename -replace '^\d+-', ''
+            $body = $script:BodyBySlug[$slug]
+            $body | Should -Match 'not found' -Because "$($agent.filename) dispatches and must retry registry flakes"
+            $body | Should -Match 'ended without a WORK RESULT' -Because "$($agent.filename) must re-dispatch on empty returns"
+        }
+    }
+
+    It 'semantic-model agents reuse the Master-opened MCP connection instead of probing' {
+        foreach ($agent in ($script:Manifest.agents | Where-Object { $_.department -eq 'semantic-model' })) {
+            $slug = $agent.filename -replace '^\d+-', ''
+            $body = $script:BodyBySlug[$slug]
+            $body | Should -Match 'mcp connection' -Because $agent.filename
+            $body | Should -Not -Match 'first-use probe' -Because "$($agent.filename) must not probe with ListConnections"
+        }
+        $master = ($script:Manifest.agents | Where-Object { $_.id -eq 'fabric-workspace-master' }).filename -replace '^\d+-', ''
+        $script:BodyBySlug[$master] | Should -Match 'ConnectFabric'
+    }
+
+    It 'every worker carries the approval-token rule and the scope boundary' {
+        foreach ($agent in ($script:Manifest.agents | Where-Object { $_.level -eq 'worker' })) {
+            $slug = $agent.filename -replace '^\d+-', ''
+            $body = $script:BodyBySlug[$slug]
+            $body | Should -Match 'APPROVED:DELETE' -Because "$($agent.filename) must know the token format"
+            $body | Should -Match 'phrasing is NOT the token' -Because "$($agent.filename) must not treat user wording as approval"
+            $body | Should -Match '(?m)^## Scope boundary' -Because $agent.filename
+            $body | Should -Not -Match '(?m)^## Delegation' -Because "$($agent.filename) is a worker"
+        }
+    }
+
+    It 'every team lead has a roster table and dispatch rules' {
+        foreach ($agent in ($script:Manifest.agents | Where-Object { $_.level -eq 'team-lead' })) {
+            $slug = $agent.filename -replace '^\d+-', ''
+            $body = $script:BodyBySlug[$slug]
+            $body | Should -Match '(?m)^## Your team' -Because $agent.filename
+            $body | Should -Match '(?m)^## How you dispatch' -Because $agent.filename
+            $body | Should -Match '(?m)^## Delegation' -Because $agent.filename
+        }
+    }
+
+    It 'the Architect returns a PLAN and QA returns a VERDICT' {
+        $arch = ($script:Manifest.agents | Where-Object { $_.id -eq 'fabric-solution-architect' }).filename -replace '^\d+-', ''
+        $qa   = ($script:Manifest.agents | Where-Object { $_.id -eq 'integration-qa-change-controller' }).filename -replace '^\d+-', ''
+        $script:BodyBySlug[$arch] | Should -Match '(?m)^## Your output: a PLAN'
+        $script:BodyBySlug[$qa]   | Should -Match '(?m)^## Your output: a VERDICT'
+    }
+
+    It 'the Master describes the three loops, the session ledger and the destructive-request confirmation' {
+        $slug = ($script:Manifest.agents | Where-Object { $_.id -eq 'fabric-workspace-master' }).filename -replace '^\d+-', ''
+        $body = $script:BodyBySlug[$slug]
+        $body | Should -Match '(?m)^## The three loops you run'
+        $body | Should -Match '(?m)^## Session ledger'
+        $body | Should -Match 'Confirm destructive requests up front'
+        $body | Should -Not -Match 'Degraded-mode' -Because 'the direct-to-worker fallback was removed'
+    }
+
+    It 'no agent references the non-existent skill name fabric-tool-policy' {
+        foreach ($k in $script:BodyBySlug.Keys) {
+            $script:BodyBySlug[$k] | Should -Not -Match 'fabric-tool-policy' -Because $k
+        }
+    }
+
+    It 'custom skill references always resolve (no re-discover marker on .github paths)' {
+        foreach ($k in $script:BodyBySlug.Keys) {
+            $script:BodyBySlug[$k] | Should -Not -Match '`\.github/[^`]+` \*\(not present' -Because "$k references a managed file that the installer always writes"
+        }
+    }
+
+    It 'every section heading is preceded by a blank line (markdown renders correctly)' {
+        foreach ($k in $script:BodyBySlug.Keys) {
+            $lines = $script:BodyBySlug[$k] -split "`r?`n"
+            for ($i = 1; $i -lt $lines.Count; $i++) {
+                if ($lines[$i] -like '## *') { $lines[$i - 1].Trim() | Should -Be '' -Because "$k line $($i + 1)" }
+            }
+        }
+    }
+}
+
+Describe 'Generated configuration (settings, docs, status script)' {
+
+    It 'emits Get-SessionStatus.ps1 and it parses' {
+        $p = Join-Path $script:EmitDir '.github\agent-docs\Get-SessionStatus.ps1'
+        Test-Path -LiteralPath $p | Should -BeTrue
+        $errors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile($p, [ref]$null, [ref]$errors) | Out-Null
+        @($errors).Count | Should -Be 0
+    }
+
+    It 'status script reports MCP separately from CLI tools and persists a fallback snapshot' {
+        $p = Join-Path $script:EmitDir '.github\agent-docs\Get-SessionStatus.ps1'
+        $text = Get-Content -LiteralPath $p -Raw
+        $text | Should -Match '"MCP\s+' -Because 'MCP installed-vs-connected must be its own line'
+        $text | Should -Match 'connected: none' -Because 'installed must never be reported as connected'
+        $text | Should -Match 'session-status\.last\.txt' -Because 'the block must survive a wedged shell'
+    }
+
+    It 'the starting flow makes the Master open the MCP connection, not list it' {
+        $p = Join-Path $script:EmitDir '.github\agent-docs\starting-flow.md'
+        $text = Get-Content -LiteralPath $p -Raw
+        $text | Should -Match 'ConnectFabric'
+        $text | Should -Not -Match 'Power BI modeling MCP: list connections'
+    }
+
+    It 'emits the lean starting flow (no blocking menus, one status call)' {
+        $p = Join-Path $script:EmitDir '.github\agent-docs\starting-flow.md'
+        $text = Get-Content -LiteralPath $p -Raw
+        $text | Should -Match 'Get-SessionStatus\.ps1'
+        $text | Should -Not -Match 'Enter 1 or 2'
+        $text | Should -Not -Match 'Please switch to the corresponding agent'
+    }
+
+    It 'emits the working-flow reference with the team protocol' {
+        $p = Join-Path $script:EmitDir '.github\agent-docs\working-flow-reference.md'
+        $text = Get-Content -LiteralPath $p -Raw
+        $text | Should -Match '(?m)^## Team protocol'
+        $text | Should -Match '(?m)^### WORK ORDER'
+        $text | Should -Match '(?m)^### WORK RESULT'
+        $text | Should -Not -Match 'handle it inline if they decline'
+    }
+
+    It 'enables nested subagent dispatch and registers skill locations in .vscode/settings.json' {
+        $p = Join-Path $script:EmitDir '.vscode\settings.json'
+        Test-Path -LiteralPath $p | Should -BeTrue
+        $s = Get-Content -LiteralPath $p -Raw | ConvertFrom-Json
+        $s.'chat.subagents.allowInvocationsFromSubagents' | Should -BeTrue
+        $s.'chat.agentSkillsLocations'.'.github/skills' | Should -BeTrue
+        # Extension skill dirs are discovered on disk, never pinned: every ~/ entry must exist.
+        foreach ($loc in $s.'chat.agentSkillsLocations'.PSObject.Properties.Name | Where-Object { $_ -like '~/*' }) {
+            $full = Join-Path $env:USERPROFILE ($loc.Substring(2) -replace '/', '\')
+            Test-Path -LiteralPath $full | Should -BeTrue -Because "registered skill location $loc must exist on this machine"
+        }
+    }
 }

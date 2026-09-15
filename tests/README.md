@@ -21,7 +21,7 @@ location (`%~dp0`), so it works for any user on any machine — no hard-coded pa
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Import-Module Pester; Invoke-Pester -Path '<path-to>\tests' -Output Detailed"
 ```
 
-Expect **42 passed / 1 skipped** on Windows PowerShell 5.1. The one skip is the
+Expect **all tests passed / 1 skipped** on Windows PowerShell 5.1. The one skip is the
 JSON-Schema test, which needs PowerShell 7 (`Test-Json -Schema`); GitHub Actions
 runs on PowerShell 7, so it runs there and the full suite is exercised in CI.
 
@@ -35,13 +35,15 @@ runs on PowerShell 7, so it runs there and the full suite is exercised in CI.
 | `Tools.Tests.ps1` | Every `tools` entry uses only known capability tokens, no duplicates, and the delegation (`agent`) tool is never granted to a worker or to the default set. | Keeps the capability model well-formed. |
 | `Tools.LeastPrivilege.Tests.ps1` | Every agent declares an **explicit** `tools` array (nothing relies on the default), the manifest default is **read-only** (`read`, `search`), only executives / team-leads may delegate, and read-only diagnostic roles are never granted `edit`. | Enforces least-privilege: broad capabilities are opt-in per role, not inherited. |
 | `Version.Tests.ps1` | The installer's `$productVersion`, the embedded manifest `productVersion`, the README status heading, and the top CHANGELOG entry all agree. | Prevents version drift across the ~5 places a version is written. |
-| `Generated.Tests.ps1` | Runs the installer in dry-run (`-EmitAgentsTo`) into a temp folder and checks the **actual generated agent files**: 47 files exist, filenames match the manifest, each opens with YAML frontmatter, and each file's declared `tools` match the manifest. | Validates the real product the generator emits — not just the manifest contract. |
+| `Generated.Tests.ps1` | Runs the installer in dry-run (`-EmitAgentsTo`) into a temp folder and checks the **actual generated files**: 47 agents exist, filenames match the manifest, frontmatter and `tools` match, the Master lists only its children (no direct-to-worker fallback) and carries the maintenance handoff; every agent has `Knowledge and skills` / `Playbook` / `Validation` sections and the WORK RESULT contract as mandatory final message; workers carry the approval-token rule and no delegation; every `execute` agent carries the terminal-hygiene rule; every delegating agent handles `agent not found` retries and empty returns; semantic-model agents reuse the Master-opened MCP connection (no `ListConnections` probe); leads have a roster and dispatch rules; Architect/QA have PLAN/VERDICT; no `fabric-tool-policy` or unresolved `.github` references; headings are well-formed. Also checks the emitted `starting-flow.md` (lean, Master connects via `ConnectFabric`), `working-flow-reference.md` (team protocol), `Get-SessionStatus.ps1` (present, parses, MCP line separate from tools, writes `session-status.last.txt`) and `.vscode/settings.json` (nested dispatch on, skill locations registered, no phantom extension paths). | Validates the real product the generator emits — structure **and** the specialist content — not just the manifest contract. |
+| `VendorClone.Tests.ps1` | Loads `Update-VendorClone` from the installer and runs it against a throwaway local bare repository: a stale clone must reach `origin/HEAD` under `$ErrorActionPreference = 'Stop'`, local edits must be stashed (not lost), the call must be idempotent and must not change the caller's error preference. | Regression guard for the refresh hardening in v0.7.0 (git's stderr progress under strict mode could interrupt the refresh before the reset step). |
 
 ## What these tests do **not** cover
 
-They validate the manifest **contract**, the generated files, and consistency with
-the docs. They do not run the installer end-to-end against a real Fabric / VS Code
-environment (no network, no cloning, no tool installs), and they do not judge the
-*behavioural* quality of an agent's prompt — only its structure and safety.
+They validate the manifest **contract**, the generated files (structure and content
+sections), the emitted settings and the vendor-refresh function. They do not run the
+installer end-to-end against a real Fabric / VS Code
+environment (no network, no tool installs), and they do not judge the
+*behavioural* quality of an agent's prompt — only its structure, required sections and safety rules.
 Behavioural quality is validated by real-world use and the installer's
 post-generation self-test (`guardrail-status.json`).

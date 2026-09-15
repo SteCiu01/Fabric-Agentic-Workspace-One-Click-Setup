@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.7.0] - 2026-09-13
+
+This release fine-tunes how the 47-agent organisation works together: nested delegation is configured by the installer, every agent becomes a documented specialist, the teams share one work protocol, and the vendor skill refresh is hardened. Verified end-to-end in a real workspace: single-team TMDL work, a multi-team plan (Architect → Semantic + Data Engineering leads → QA) with a live semantic model published to Fabric and regression DAX run against it, and a two-way approval bubble for destructive actions.
+
+### Fixed
+
+- **Vendor skill refresh could silently stop short.** In `Update-VendorClone`, git's normal stderr progress combined with the script-wide `$ErrorActionPreference = 'Stop'` could interrupt the refresh before the `reset --hard origin/HEAD` step, leaving a clone behind upstream without any message. The function now runs with a local `Continue` preference, checks `$LASTEXITCODE`, prints `refreshed: <old> -> <new>` / `already at upstream`, and falls back to `@{upstream}` for clones without `origin/HEAD`. The same stderr handling is applied to `git clone`/`init`/`add`, and a dedicated regression test covers the refresh.
+- **Nested delegation is now configured by the installer.** VS Code only lets subagents spawn further subagents when `chat.subagents.allowInvocationsFromSubagents` is `true`; the installer now writes it into both the generated `.code-workspace` (required for multi-root windows) and `.vscode/settings.json`, so the Team Lead → Worker hop is available out of the box. The earlier direct-to-worker fallback on the Master is no longer needed and has been removed.
+- **Commit result reporting** at the end of Step 9 now checks whether `HEAD` moved instead of relying on a stale `$LASTEXITCODE`.
+- **Manifest skill name** `fabric-tool-policy` corrected to the real custom skill `fabric-cli-policy` across all agents.
+- **Maintenance policy wording** aligned between the Capability Maintenance lead and the Upstream Repository Sync worker (stash local edits, then mirror `origin/HEAD`).
+
+### Added
+
+- **Per-agent specialist knowledge.** Every generated agent now carries a `Knowledge and skills` section (owned artifacts, write permission, the exact custom / Microsoft / Kurt skill paths to read and why), a numbered `Playbook`, `Validation you must run before reporting`, a `Tool ladder` (preferred → fallback → last resort, gated by `tool-status.json`) and `Avoid`. Skill paths are resolved at install time; a renamed upstream folder is self-healed by prefix match (e.g. `spark-authoring-cli` → `spark-cli`) and annotated, a missing one is marked *re-discover by keyword*.
+- **Auto-discovered skills.** Each agent has topic keywords; at install time all upstream `SKILL.md` files are indexed (name + description) and matches are appended as *"Also relevant – auto-discovered"* with the skill's own description. New Microsoft/Kurt skills therefore attach to the right specialist on the next installer run without a catalog edit.
+- **Native skill registration.** `chat.agentSkillsLocations` now lists every skill container found in both clones (plus the Synapse extension's skills, detected by version), so agents see the full skill catalogue natively instead of `ls`/grep hunting on every hop. `Get-SessionStatus.ps1` re-registers new upstream folders at session start.
+- **Team protocol.** `working-flow-reference.md` defines the three loops (Simple, Designed with Architect PLAN + QA VERDICT, Blocked with approval bubble), the routing map, and the `WORK ORDER` / `WORK RESULT` contracts (`DONE | DONE WITH RISKS | NEEDS APPROVAL | NEEDS INPUT | NEEDS ARCHITECT | OUT OF SCOPE | FAILED`). Team Leads get a roster table and dispatch rules; the Architect returns a structured PLAN and may be consulted mid-work by a Lead; QA returns a VERDICT.
+- **Strict destructive-action approval.** Deleting or dropping any artifact, table, column, measure, relationship, role, item, branch or file is destructive *even when the user asked for it in plain words*. The Master confirms once and requires a literal `APPROVED:<ACTION>:<artifact>` token; dispatched agents without the token return `NEEDS APPROVAL` and change nothing. Verified: a worker refused to delete a file that the token did not name.
+- **`Get-SessionStatus.ps1`** — one deterministic call replaces the previous ~8 startup probes: skill freshness (git commit dates), registered skill locations + self-heal, nested-dispatch check, identity (`fab` → `az`), and a live tool re-check that refreshes `tool-status.json` in place. CWD-independent. Reports MCP servers on their own line as *installed / connected: none yet* (installed is never presented as callable) and persists the block to `.github/agent-docs/session-status.last.txt` so the Master can read it even when the shared shell swallows stdout.
+- **Master owns the live-model connection.** Dispatched agents cannot answer sign-in prompts and an empty `ListConnections` on a fresh session is not "not callable", so for live semantic-model work the Master opens the Power BI modeling MCP connection itself (`connection_operations` → `ConnectFabric`) in the main chat and passes `mcp connection: <name>` down in every WORK ORDER; Leads and workers reuse it as rung 1 of their tool ladder and go straight to the REST fallback when the context says `none`. Fabric MCP keeps the lazy first-use probe by the owning Lead.
+- **WORK RESULT is the mandatory final message.** A dispatched turn that ends without the block, or ends on a statement of intent, is treated as `FAILED`; parents re-dispatch the same agent once with a resume instruction instead of doing the work themselves. `Requested agent '<name>' not found` with an exact name is documented as a retry-safe registry flake (pause, up to 3 retries, never substitute another agent).
+- **Terminal hygiene for every agent that can execute:** multi-statement PowerShell goes into a `.ps1` under `scripts/` and runs with `-File`; results are read from files; a wedged shell means a new terminal.
+- **Routing map:** documents, decks and briefings built from Fabric data (Word/Excel/PowerPoint/PDF) are owned by 060 Applications & Integration with QA by 002.
+- **Handoff button** on the Master for capability maintenance (the one legitimate "switch agent" case).
+
+### Changed
+
+- **Lean startup.** No blocking menus: one status-script call, one compact status block, then straight to the user's request. MCP servers are probed lazily by the owning Team Lead on first live use instead of at every session start. The topic menu and "switch agent in the dropdown" instructions are gone; the Master routes everything itself.
+- **Tier-aware operating contracts.** Workers receive a lean contract (their WORK ORDER is the complete brief; they never re-read flow docs and cannot ask the user); Leads/executives keep the full contract including dispatch-health guidance. The Master lists only its nine children in `agents:`.
+- **Skill catalog aligned to upstream restructuring** (Microsoft 2026-09-10): merged `*-authoring/consumption/operations-cli` skills, new `deployment-pipelines-authoring-cli`, `git-integration-operations-cli`, `onelake-catalog-govern-cli`, `variable-library-cli`, `e2e-fabric-cost-estimation`, `eventschemaset-cli`; Kurt `goblin-mode` plugin.
+- Generated agent files now carry role-specific guidance in addition to the shared operating contract.
+
 ## [v0.6.2] - 2026-07-25
 
 ### Added
