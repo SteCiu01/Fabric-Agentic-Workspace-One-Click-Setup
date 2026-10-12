@@ -210,6 +210,84 @@ Describe 'Generated agent content (specialist knowledge and team protocol)' {
         $script:BodyBySlug[$master] | Should -Match 'ConnectFabric'
     }
 
+    It 'every instruction to use a tool is backed by a grant in the same agent''s frontmatter' {
+        # The bug class behind v0.7.1: a body telling the agent to call something its tools: list excludes.
+        foreach ($k in $script:GenBySlug.Keys) {
+            $tools = $script:GenBySlug[$k].Tools
+            $body  = $script:BodyBySlug[$k]
+            # Strip the frontmatter so `tools:` itself does not count as an instruction.
+            $prose = ($body -split '(?m)^---\s*$', 3)[2]
+            if ($prose -match 'ConnectFabric|connection_operations|dax_query|powerbi-modeling-mcp') {
+                $tools | Should -Contain 'powerbi-modeling-mcp/*' -Because "$k tells itself to use the Power BI modeling MCP"
+            }
+            if ($prose -match 'Fabric MCP/\*') {
+                $tools | Should -Contain 'Fabric MCP/*' -Because "$k tells itself to use the Fabric MCP wildcard"
+            }
+            if ($prose -match '\*\*Terminal hygiene\.\*\*') {
+                $tools | Should -Contain 'execute' -Because "$k carries the execute hygiene rule"
+            }
+            if ($prose -match '(?m)^## Delegation|^## How you dispatch') {
+                $tools | Should -Contain 'agent' -Because "$k has a delegation section"
+            }
+        }
+    }
+
+    It 'the MCP-connection bullet is emitted only to agents that hold the modeling MCP' {
+        foreach ($k in $script:GenBySlug.Keys) {
+            $tools = $script:GenBySlug[$k].Tools
+            $prose = ($script:BodyBySlug[$k] -split '(?m)^---\s*$', 3)[2]
+            $hasBullet = $prose -match 'Never (try to )?open a connection yourself'
+            if ($tools -contains 'powerbi-modeling-mcp/*') { $hasBullet | Should -BeTrue -Because "$k holds the modeling MCP" }
+            else { $hasBullet | Should -BeFalse -Because "$k does not hold the modeling MCP - lean contract must not carry the bullet" }
+        }
+    }
+
+    It 'delegating agents carry the retry-after-write and parallel-dispatch rules' {
+        foreach ($agent in ($script:Manifest.agents | Where-Object { @($_.tools) -contains 'agent' })) {
+            $slug = $agent.filename -replace '^\d+-', ''
+            $body = $script:BodyBySlug[$slug]
+            $body | Should -Match 'Retries must not repeat writes' -Because $agent.filename
+            $body | Should -Match 'at most one of them needs the terminal' -Because $agent.filename
+        }
+    }
+
+    It 'maintenance agents carry ONE vendor-refresh policy (stop conditions, no blanket never-reset)' {
+        foreach ($agent in ($script:Manifest.agents | Where-Object { $_.department -eq 'capability-maintenance' })) {
+            $slug = $agent.filename -replace '^\d+-', ''
+            $body = $script:BodyBySlug[$slug]
+            $body | Should -Match 'Stop and report instead of resetting' -Because $agent.filename
+            $body | Should -Match 'rev-parse --show-toplevel' -Because "$($agent.filename) must check the repository root before any reset"
+            $body | Should -Not -Match 'never reset or overwrite it' -Because "$($agent.filename) must not contradict the refresh rule"
+            $body | Should -Match 'source-control-repositories/[^\r\n]*never' -Because 'business repositories stay protected'
+        }
+    }
+
+    It 'terminal hygiene matches what the agent can actually do (edit vs execute-only)' {
+        foreach ($agent in ($script:Manifest.agents | Where-Object { @($_.tools) -contains 'execute' })) {
+            $slug = $agent.filename -replace '^\d+-', ''
+            $body = $script:BodyBySlug[$slug]
+            $body | Should -Not -Match 'Use your OWN terminal' -Because 'the shell is shared; a per-agent terminal cannot be guaranteed'
+            if (@($agent.tools) -contains 'edit') {
+                $body | Should -Match '\*\*Terminal hygiene\.\*\*' -Because $agent.filename
+                $body | Should -Match 'scripts/<agent>-<purpose>' -Because "$($agent.filename) can write scripts"
+            } else {
+                $body | Should -Match 'Terminal hygiene \(execute without edit\)' -Because "$($agent.filename) cannot create files"
+                $body | Should -Match 'hand it to an edit-capable worker' -Because "$($agent.filename) must escalate instead of improvising scripts"
+            }
+        }
+    }
+
+    It 'PLAN and VERDICT travel inside the WORK RESULT payload field' {
+        $arch = ($script:Manifest.agents | Where-Object { $_.id -eq 'fabric-solution-architect' }).filename -replace '^\d+-', ''
+        $qa   = ($script:Manifest.agents | Where-Object { $_.id -eq 'integration-qa-change-controller' }).filename -replace '^\d+-', ''
+        $script:BodyBySlug[$arch] | Should -Match 'complete PLAN block verbatim in the ``?payload:``?'
+        $script:BodyBySlug[$qa]   | Should -Match 'complete VERDICT block verbatim in the ``?payload:``?'
+        foreach ($agent in ($script:Manifest.agents | Where-Object { $_.id -ne 'fabric-workspace-master' })) {
+            $slug = $agent.filename -replace '^\d+-', ''
+            $script:BodyBySlug[$slug] | Should -Match '(?m)^payload: ' -Because "$($agent.filename) return contract must define the field"
+        }
+    }
+
     It 'every worker carries the approval-token rule and the scope boundary' {
         foreach ($agent in ($script:Manifest.agents | Where-Object { $_.level -eq 'worker' })) {
             $slug = $agent.filename -replace '^\d+-', ''
@@ -308,7 +386,10 @@ Describe 'Generated configuration (settings, docs, status script)' {
         $text | Should -Match '(?m)^## Team protocol'
         $text | Should -Match '(?m)^### WORK ORDER'
         $text | Should -Match '(?m)^### WORK RESULT'
+        $text | Should -Match '(?m)^payload: ' -Because 'the PLAN/VERDICT wrapper must be in the shared protocol'
         $text | Should -Not -Match 'handle it inline if they decline'
+        $text | Should -Not -Match 'One terminal PER AGENT' -Because 'the shared-shell rule replaced the per-agent terminal assumption'
+        $text | Should -Not -Match 'INFO\.VIEW\.MEASURES\(\)[^\r\n]*instead' -Because 'REST executeQueries does not support INFO functions; no workaround may be promised'
     }
 
     It 'enables nested subagent dispatch and registers skill locations in .vscode/settings.json' {

@@ -29,7 +29,7 @@ param(
 
 # Keep the window open on any error so the user can read it
 $ErrorActionPreference = 'Stop'
-$productVersion = '0.7.0'
+$productVersion = '0.7.1'
 $workspaceFileName = 'Fabric-Agentic-Workspace.code-workspace'
 
 # SHA256 helper that does not hard-depend on the Get-FileHash cmdlet. A Windows
@@ -56,37 +56,71 @@ function Get-Sha256Hex ([string]$LiteralPath) {
 # edit is deliberately discarded so the references never drift. To stay
 # recoverable, a dirty working tree (including untracked files) is stashed onto
 # a timestamped stash BEFORE the hard reset, so nothing is ever silently lost.
-function Update-VendorClone ([string]$Repo, [string]$Label) {
+function Update-VendorClone ([string]$Repo, [string]$Label, [string]$ExpectedRemote = $null) {
     if (-not (Test-Path -LiteralPath $Repo)) { return }
     # git writes progress to stderr; under the script-wide EAP=Stop, `2>&1` turns
     # that into a terminating error and the reset below would never run.
     $ErrorActionPreference = 'Continue'
     try {
+        # Identity guard: the folder must be the ROOT of its own repository. A vendor
+        # folder that lost its .git (or a stray directory of the same name) would make
+        # git discover the OUTER workspace repository and stash/reset THAT instead.
+        $top = (& git -C $Repo rev-parse --show-toplevel 2>$null | Select-Object -First 1)
+        $repoFull = [IO.Path]::GetFullPath($Repo).TrimEnd('\', '/')
+        $topFull = if ($top) { try { [IO.Path]::GetFullPath(([string]$top).Replace('/', '\')).TrimEnd('\', '/') } catch { '' } } else { '' }
+        if (-not $topFull -or -not $topFull.Equals($repoFull, [StringComparison]::OrdinalIgnoreCase)) {
+            Write-Host "    ${Label}: folder is not the root of its own Git repository -- left untouched (move it aside to let the installer re-clone)." -ForegroundColor Yellow
+            return
+        }
+        if ($ExpectedRemote) {
+            $originUrl = (& git -C $Repo config --get remote.origin.url 2>$null | Select-Object -First 1)
+            $norm = { param($u) $v = ([string]$u).Trim().Replace('\', '/').TrimEnd('/'); if ($v.EndsWith('.git', [StringComparison]::OrdinalIgnoreCase)) { $v = $v.Substring(0, $v.Length - 4) }; $v.ToLowerInvariant() }
+            if (-not $originUrl -or ((& $norm $originUrl) -ne (& $norm $ExpectedRemote))) {
+                Write-Host "    ${Label}: origin is '$originUrl', expected '$ExpectedRemote' -- not the vendor repository; left untouched." -ForegroundColor Yellow
+                return
+            }
+        }
         & git -C $Repo fetch --prune origin 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) {
             Write-Host "    ${Label}: fetch failed (offline or blocked) -- keeping the current clone." -ForegroundColor Yellow
             return
         }
         $dirty = @(& git -C $Repo status --porcelain 2>$null)
+        $stashName = $null
         if ($dirty.Count -gt 0) {
             $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-            & git -C $Repo stash push -u -m "installer-autostash $stamp" 2>$null | Out-Null
+            $stashName = "installer-autostash $stamp"
+            & git -C $Repo stash push -u -m $stashName 2>$null | Out-Null
+            $stashExit = $LASTEXITCODE
+            # Never hard-reset over edits we failed to preserve.
+            if ($stashExit -ne 0 -or @(& git -C $Repo status --porcelain 2>$null).Count -gt 0) {
+                Write-Host "    ${Label}: local edits could not be stashed (git stash exit $stashExit) -- clone left untouched. Commit or discard them, then re-run." -ForegroundColor Yellow
+                return
+            }
             Write-Host "    $Label had local edits  -- stashed before refresh (recover via 'git -C <repo> stash list')." -ForegroundColor Yellow
         }
         # origin/HEAD tracks the upstream default branch; reset --hard makes the
         # clone identical to live upstream regardless of prior local state.
         $before = (& git -C $Repo rev-parse --short HEAD 2>$null)
-        & git -C $Repo reset --hard origin/HEAD 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) {
+        $target = 'origin/HEAD'
+        & git -C $Repo reset --hard $target 2>$null | Out-Null
+        $resetExit = $LASTEXITCODE
+        if ($resetExit -ne 0) {
             # Older clones may lack origin/HEAD; fall back to the current branch's upstream.
-            & git -C $Repo reset --hard '@{upstream}' 2>$null | Out-Null
+            $target = '@{upstream}'
+            & git -C $Repo reset --hard $target 2>$null | Out-Null
+            $resetExit = $LASTEXITCODE
         }
-        $after = (& git -C $Repo rev-parse --short HEAD 2>$null)
-        if ($LASTEXITCODE -eq 0 -and $after) {
+        # Success = the reset returned 0 AND HEAD really is the resolved upstream commit.
+        $targetSha = (& git -C $Repo rev-parse --verify -q $target 2>$null)
+        $headSha   = (& git -C $Repo rev-parse --verify -q HEAD 2>$null)
+        if ($resetExit -eq 0 -and $targetSha -and $headSha -and $headSha -eq $targetSha) {
+            $after = $headSha.Substring(0, 7)
             if ($before -ne $after) { Write-Host "    $Label refreshed: $before -> $after" -ForegroundColor Green }
             else { Write-Host "    $Label already at upstream ($after)." -ForegroundColor DarkGray }
         } else {
-            Write-Host "    ${Label}: could not reset to upstream -- clone left as-is." -ForegroundColor Yellow
+            Write-Host "    ${Label}: could not reset to upstream (git reset exit $resetExit) -- clone left as-is." -ForegroundColor Yellow
+            if ($stashName) { Write-Host "    ${Label}: your local edits are safe in stash '$stashName' (git -C <repo> stash list / stash pop)." -ForegroundColor Yellow }
         }
     } catch {
         Write-Host "    ${Label}: refresh error -- $($_.Exception.Message)" -ForegroundColor Yellow
@@ -142,7 +176,7 @@ if ($VerifyRoot) {
 $agentManifestJson = @'
 {
   "schemaVersion": 1,
-  "productVersion": "0.7.0",
+  "productVersion": "0.7.1",
   "defaults": {
     "mode": "both",
     "tools": ["read","search"],
@@ -393,14 +427,17 @@ function Sync-ToolPaths {
 # the executable directly -- so a tool installed by this OR a previous run is
 # recognised in the SAME run, without forcing the user to re-launch the installer.
 function Test-CliResilient {
-    param([string]$Name, [int]$Retries = 4)
+    param([string]$Name, [int]$Retries = 4, [string]$VersionPattern = $null)
     $isRunnable = {
         param([string]$CommandName)
         $cmd = Get-Command $CommandName -ErrorAction SilentlyContinue
         if (-not $cmd) { return $false }
         try {
             $output = & $cmd.Source --version 2>$null | Out-String
-            return ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($output))
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($output)) { return $false }
+            # Same-named impostors exist (pyinvoke ships a `fab`): require the product's own banner.
+            if ($VersionPattern -and ($output -notmatch $VersionPattern)) { return $false }
+            return $true
         } catch { return $false }
     }
     for ($i = 0; $i -lt $Retries; $i++) {
@@ -859,7 +896,7 @@ function Invoke-OptionalToolPrompt {
         Set-ToolStatus -Key $Key -Found $true -Command $hit2.command -Path $hit2.path -Version $ver -Category $Category -InstallMode 'ask' -AliasesChecked $Aliases
     } else {
         Write-Host "  ${Name}: install did not complete -- install manually: $Provider" -ForegroundColor Yellow
-        Write-Host "         Or finish it later in VS Code: select '10 - Capability Maintenance" -ForegroundColor DarkGray
+        Write-Host "         Or finish it later in VS Code: select '070 - Capability Maintenance" -ForegroundColor DarkGray
         Write-Host "         Team Lead', name this failed tool, and approve its recovery plan." -ForegroundColor DarkGray
         Set-ToolStatus -Key $Key -Found $false -Reason 'install attempted; not detected' -Category $Category -InstallMode 'ask' -AliasesChecked $Aliases
     }
@@ -1175,13 +1212,18 @@ function Install-StagedToolPayload {
             }
             $activated = $true
             Add-DirToPath $installed.DirectoryName
-            if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Recurse -Force }
-            return $true
         } catch {
             if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Recurse -Force -ErrorAction SilentlyContinue }
             if (Test-Path -LiteralPath $backup) { Move-Item -LiteralPath $backup -Destination $dest -Force }
             throw
         }
+        # Post-commit housekeeping: a failure here must never roll back the
+        # validated replacement (a half-deleted backup is not a restore candidate).
+        if (Test-Path -LiteralPath $backup) {
+            try { Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction Stop }
+            catch { Write-Host "         Installed, but the previous copy could not be fully removed: $backup (delete it manually)." -ForegroundColor DarkGray }
+        }
+        return $true
     } catch {
         Write-Host "         Portable activation failed; the previous version was preserved: $($_.Exception.Message)" -ForegroundColor DarkGray
         return $false
@@ -1298,6 +1340,7 @@ function Install-ViaWingetDownload {
             # Wait-Process(-Timeout) lets us kill a stalled transfer and fall through.
             $so = Join-Path $env:TEMP ("wgo_" + [IO.Path]::GetRandomFileName() + ".txt")
             $se = "$so.err"
+            $completedOk = $false
             try {
                 $proc = Start-Process -FilePath $wg.Source -ArgumentList @(
                     'download', '--id', $WingetId, '--exact', '--skip-dependencies',
@@ -1307,10 +1350,15 @@ function Install-ViaWingetDownload {
                 $exited = $true
                 try { $proc | Wait-Process -Timeout $TimeoutSec -ErrorAction Stop } catch { $exited = $false }
                 if (-not $exited) { try { $proc | Stop-Process -Force -ErrorAction SilentlyContinue } catch { } }
+                # Only a normal, zero exit proves winget finished its manifest/hash checks;
+                # a killed or failed run can still leave a partial MSI/ZIP behind.
+                $completedOk = ($exited -and $proc.HasExited -and $proc.ExitCode -eq 0)
             } catch { }
             Remove-Item $so, $se -Force -ErrorAction SilentlyContinue
-            $fetched = Get-ChildItem $dl -Recurse -File -ErrorAction SilentlyContinue |
-                       Where-Object { $_.Extension -in '.msi', '.zip' } | Select-Object -First 1
+            if ($completedOk) {
+                $fetched = Get-ChildItem $dl -Recurse -File -ErrorAction SilentlyContinue |
+                           Where-Object { $_.Extension -in '.msi', '.zip' } | Select-Object -First 1
+            }
         }
         if (-not $fetched) { return $false }
         Write-Host "         winget verified the publisher manifest and installer hash before extraction." -ForegroundColor DarkGray
@@ -1515,7 +1563,7 @@ function Invoke-ToolUpdateCheck {
 
     # Tabular Editor 2 (GitHub release) -- GUI: read exe FileVersion, never launch.
     if ($script:ToolStatus['tabularEditor'] -and $script:ToolStatus['tabularEditor'].found) {
-        & $checkOne 'tabularEditor' 'Tabular Editor CLI' (Get-ExeFileVersion (& $probeTarget 'tabularEditor')) (Get-LatestGitHubVersion 'TabularEditor/TabularEditor') `
+        & $checkOne 'tabularEditor' 'Tabular Editor 2' (Get-ExeFileVersion (& $probeTarget 'tabularEditor')) (Get-LatestGitHubVersion 'TabularEditor/TabularEditor') `
             {
                 if (-not (Install-ViaWingetDownload -WingetId 'TabularEditor.TabularEditor.2' -ExeName 'TabularEditor.exe' -DestName 'TabularEditor')) {
                     $u = Get-GitHubReleaseAssetUrl -Repo 'TabularEditor/TabularEditor' -NamePattern 'TabularEditor\.Portable\.zip$'
@@ -1555,19 +1603,35 @@ function Invoke-ToolUpdateCheck {
     Write-Host "  Python is handled separately as a CLI prerequisite, and VS Code manages extension/MCP updates; this review changes neither." -ForegroundColor DarkGray
 }
 
+# -- Helper: parse JSON that VS Code accepts (comments, trailing commas) ----
+# ConvertFrom-Json rejects JSONC, which is the default dialect of settings.json
+# and .code-workspace files. Strip // and /* */ comments outside string literals
+# and trailing commas, then parse. Returns $null when the text is genuinely broken.
+function ConvertFrom-JsonLenient ([string]$Text) {
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+    try { return ($Text | ConvertFrom-Json) } catch { }
+    try {
+        $stripped = [regex]::Replace($Text, '(?s)"(?:\\.|[^"\\])*"|//[^\r\n]*|/\*.*?\*/', { param($m) if ($m.Value.StartsWith('"')) { $m.Value } else { '' } })
+        $stripped = [regex]::Replace($stripped, ',(\s*[}\]])', '$1')
+        return ($stripped | ConvertFrom-Json)
+    } catch { return $null }
+}
+
 # -- Helper: merge installer-owned keys into existing JSON settings -----
 function Merge-JsonSettings ([string]$Path, [hashtable]$Required) {
     $existing = [ordered]@{}
     if (Test-Path $Path) {
-        try {
-            $parsed = Get-Content $Path -Raw | ConvertFrom-Json
+        $raw = Get-Content $Path -Raw
+        $parsed = ConvertFrom-JsonLenient $raw
+        if ($null -ne $parsed) {
             foreach ($prop in $parsed.PSObject.Properties) {
                 $existing[$prop.Name] = $prop.Value
             }
-        } catch {
-            # Malformed JSON -- back up and start fresh
+            if ($raw -match '(?m)^\s*//|/\*') { Write-Host "  Note: comments in $(Split-Path $Path -Leaf) are not preserved by the merge (values are)." -ForegroundColor DarkGray }
+        } else {
+            # Genuinely malformed -- back up and start fresh
             Copy-Item $Path "$Path.bak" -Force
-            Write-Host "  Backed up malformed settings.json to settings.json.bak" -ForegroundColor Yellow
+            Write-Host "  Backed up malformed $(Split-Path $Path -Leaf) to $(Split-Path $Path -Leaf).bak" -ForegroundColor Yellow
         }
     }
     foreach ($key in $Required.Keys) {
@@ -1584,7 +1648,89 @@ function Merge-JsonSettings ([string]$Path, [hashtable]$Required) {
     $json = $existing | ConvertTo-Json -Depth 10
     $dir = Split-Path $Path -Parent
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-    Set-Content -Path $Path -Value $json -Encoding UTF8
+    [System.IO.File]::WriteAllText($Path, $json, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+# -- Helper: canonical form of a chat.agentSkillsLocations key ---------------
+# Keys may be workspace-relative, absolute or ~/-prefixed; compare them as one form.
+function ConvertTo-SkillLocationKey ([string]$Location, [string]$BaseDir) {
+    $p = [string]$Location
+    if ($p -match '^~[\\/](.*)$') { $p = Join-Path $env:USERPROFILE $Matches[1] }
+    elseif (-not [IO.Path]::IsPathRooted($p)) { $p = Join-Path $BaseDir $p }
+    try { return [IO.Path]::GetFullPath($p).TrimEnd('\').ToLowerInvariant() } catch { return $null }
+}
+
+# -- Helper: saved .code-workspace files that open a given root ------------
+# `chat.subagents.allowInvocationsFromSubagents` and `chat.agentSkillsLocations`
+# are WINDOW-scoped: when VS Code is opened from a multi-root workspace file, the
+# folder's .vscode/settings.json is ignored and they must live in THAT file. Users
+# commonly keep their own saved workspace files, so find every one VS Code has ever
+# opened that includes this root and report what it lacks.
+function Get-UserWorkspaceFilesForRoot {
+    param([string]$RootPath, [string]$StorageRoot = $null, [string[]]$RequiredSkillLocations = @())
+    if (-not $StorageRoot) { $StorageRoot = Join-Path $env:APPDATA 'Code\User\workspaceStorage' }
+    $result = @()
+    if (-not (Test-Path -LiteralPath $StorageRoot)) { return $result }
+    $rootNorm = [IO.Path]::GetFullPath($RootPath).TrimEnd('\').ToLowerInvariant()
+    $seen = @{}
+    Get-ChildItem -LiteralPath $StorageRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+        $wj = Join-Path $_.FullName 'workspace.json'
+        if (-not (Test-Path -LiteralPath $wj)) { return }
+        $w = ConvertFrom-JsonLenient (Get-Content -LiteralPath $wj -Raw -ErrorAction SilentlyContinue)
+        if (-not $w -or -not $w.workspace) { return }
+        $uri = [string]$w.workspace
+        if ($uri -notmatch '^file:///') { return }
+        $file = [Uri]::UnescapeDataString($uri.Substring(8)).Replace('/', '\')
+        if ($seen.ContainsKey($file.ToLowerInvariant()) -or -not (Test-Path -LiteralPath $file)) { return }
+        $seen[$file.ToLowerInvariant()] = $true
+        $wsj = ConvertFrom-JsonLenient (Get-Content -LiteralPath $file -Raw -ErrorAction SilentlyContinue)
+        if (-not $wsj) { return }
+        $dir = Split-Path $file -Parent
+        $opensRoot = $false
+        foreach ($f in @($wsj.folders)) {
+            if (-not $f -or -not $f.path) { continue }
+            $p = [string]$f.path
+            if (-not [IO.Path]::IsPathRooted($p)) { $p = Join-Path $dir $p }
+            try { $p = [IO.Path]::GetFullPath($p).TrimEnd('\').ToLowerInvariant() } catch { continue }
+            if ($p -eq $rootNorm) { $opensRoot = $true }
+        }
+        if (-not $opensRoot) { return }
+        $n = $null; if ($wsj.settings) { $n = $wsj.settings.'chat.subagents.allowInvocationsFromSubagents' }
+        $have = @{}
+        if ($wsj.settings -and $wsj.settings.'chat.agentSkillsLocations') {
+            foreach ($prop in $wsj.settings.'chat.agentSkillsLocations'.PSObject.Properties) {
+                $k = ConvertTo-SkillLocationKey $prop.Name $RootPath
+                if ($k) { $have[$k] = $true }
+            }
+        }
+        $missing = @($RequiredSkillLocations | Where-Object {
+            $k = ConvertTo-SkillLocationKey $_ $RootPath
+            $k -and -not $have.ContainsKey($k)
+        })
+        $result += [pscustomobject]@{ Path = $file; NestedDispatch = ($n -eq $true); MissingSkillLocations = $missing }
+    }
+    return $result
+}
+
+# -- Helper: add only what a saved .code-workspace lacks ----------------------
+function Update-UserWorkspaceFile {
+    param([string]$Path, [string[]]$SkillLocations = @())
+    $raw = Get-Content -LiteralPath $Path -Raw
+    $wsj = ConvertFrom-JsonLenient $raw
+    if (-not $wsj) { throw "unreadable: $Path" }
+    if (-not $wsj.settings) { $wsj | Add-Member -NotePropertyName settings -NotePropertyValue ([pscustomobject]@{}) -Force }
+    $wsj.settings | Add-Member -NotePropertyName 'chat.subagents.allowInvocationsFromSubagents' -NotePropertyValue $true -Force
+    if ($SkillLocations.Count -gt 0) {
+        if (-not $wsj.settings.'chat.agentSkillsLocations') {
+            $wsj.settings | Add-Member -NotePropertyName 'chat.agentSkillsLocations' -NotePropertyValue ([pscustomobject]@{}) -Force
+        }
+        foreach ($loc in $SkillLocations) {
+            $wsj.settings.'chat.agentSkillsLocations' | Add-Member -NotePropertyName $loc -NotePropertyValue $true -Force
+        }
+    }
+    [IO.File]::WriteAllText($Path, ($wsj | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding($false)))
+    # True when the original had comments, which ConvertTo-Json cannot keep.
+    return [bool]($raw -match '(?m)^\s*//|/\*')
 }
 
 # Returns workspace-relative (forward-slash) folders that directly contain skill
@@ -1698,11 +1844,11 @@ function Merge-CodeWorkspace {
     $workspace = [ordered]@{}
     $folders = @()
     if (Test-Path -LiteralPath $Path) {
-        try {
-            $parsed = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $parsed = ConvertFrom-JsonLenient (Get-Content -LiteralPath $Path -Raw)
+        if ($null -ne $parsed) {
             foreach ($prop in $parsed.PSObject.Properties) { $workspace[$prop.Name] = $prop.Value }
             $folders = @($parsed.folders)
-        } catch {
+        } else {
             $backup = "$Path.bak"
             Copy-Item -LiteralPath $Path -Destination $backup -Force
             Write-Host "  Backed up malformed workspace file to $([IO.Path]::GetFileName($backup))." -ForegroundColor Yellow
@@ -1717,9 +1863,12 @@ function Merge-CodeWorkspace {
     $merged = @()
     foreach ($folder in $folders) {
         if (-not $folder -or [string]::IsNullOrWhiteSpace([string]$folder.path)) { continue }
-        $path = ([string]$folder.path).Replace('\', '/').TrimEnd('/')
-        $key = $path.ToLowerInvariant()
+        $folderPath = ([string]$folder.path).Replace('\', '/').TrimEnd('/')
+        $key = $folderPath.ToLowerInvariant()
         if ($key -eq 'source-control-repositories' -or $key.StartsWith('source-control-repositories/')) { continue }
+        # A relative '.' root from an older in-folder workspace file would resolve
+        # against the session file's TEMP location once the primary root is absolute.
+        if ($key -eq '.' -and $primaryPath -ne '.') { continue }
         if (-not $seen.ContainsKey($key)) { $seen[$key] = $true; $merged += $folder }
     }
     if ($seen.ContainsKey($primaryKey)) {
@@ -1812,15 +1961,24 @@ Write-Host "  [1] Yes  -- I have an existing folder (I will provide the path)" -
 Write-Host "  [2] No   -- Create a new folder for me" -ForegroundColor White
 Write-Host ""
 while ($true) {
-$choice = Read-Host "  Enter 1 or 2"
+$choice = (Read-Host "  Enter 1 or 2").Trim()
+# Accept the obvious synonyms, re-ask on anything else (an empty or 'y' answer
+# used to fall straight into option 2 and surprise the user).
+if ($choice -match '^(1|y|yes)$') { $choice = '1' }
+elseif ($choice -match '^(2|n|no)$') { $choice = '2' }
+else { Write-Host "  Please answer 1 (existing folder) or 2 (create a new one)." -ForegroundColor Yellow; continue }
 
 if ($choice -eq '1') {
-    $rootPath = Read-Host "`n  Enter the full path to your existing Fabric folder"
-    $rootPath = $rootPath.Trim('"').Trim("'").TrimEnd('\')
-    if (-not (Test-Path $rootPath)) {
+    $rootPath = (Read-Host "`n  Enter the full path to your existing Fabric folder").Trim().Trim('"').Trim("'").TrimEnd('\')
+    if ([string]::IsNullOrWhiteSpace($rootPath)) { Write-Host "  No path given." -ForegroundColor Yellow; continue }
+    if (-not [System.IO.Path]::IsPathRooted($rootPath) -or $rootPath.IndexOfAny([System.IO.Path]::GetInvalidPathChars()) -ge 0) {
+        Write-Host "  That is not a valid full path (expected something like C:\Users\you\Fabric): $rootPath" -ForegroundColor Red
+        continue
+    }
+    if (-not (Test-Path -LiteralPath $rootPath)) {
         Write-Host "`n  That folder does not exist: $rootPath" -ForegroundColor Red
         $create = Read-Host "  Create it? (y/n)"
-        if ($create -ne 'y') { Write-Host "  Aborted."; exit 0 }
+        if ($create -notmatch '^(y|yes)$') { Write-Host "  Aborted."; exit 0 }
         New-Item -ItemType Directory -Path $rootPath -Force | Out-Null
         Write-Host "  Created: $rootPath" -ForegroundColor Green
     } else {
@@ -1831,10 +1989,22 @@ if ($choice -eq '1') {
     $defaultName = "Fabric Workspaces"
     Write-Host ""
     Write-Host "  New folder will be created at: $defaultParent\" -ForegroundColor DarkGray
-    $folderName = Read-Host "  Enter a name (default: $defaultName)"
+    Write-Host "  (type just a folder name, or a full path like D:\Work\Fabric to put it elsewhere)" -ForegroundColor DarkGray
+    $folderName = (Read-Host "  Enter a name (default: $defaultName)").Trim().Trim('"').Trim("'")
     if ([string]::IsNullOrWhiteSpace($folderName)) { $folderName = $defaultName }
-    $rootPath = Join-Path $defaultParent $folderName
-    if (-not (Test-Path $rootPath)) {
+    if ([System.IO.Path]::IsPathRooted($folderName)) {
+        # A full path was typed: honour it instead of nesting it under the profile.
+        $rootPath = $folderName.TrimEnd('\')
+    } else {
+        $safeName = ConvertTo-SafeFolderName -Name $folderName -Default $defaultName
+        if ($safeName -ne $folderName) { Write-Host "  Folder name adjusted to: $safeName" -ForegroundColor DarkGray }
+        $rootPath = Join-Path $defaultParent $safeName
+    }
+    try { $rootPath = [System.IO.Path]::GetFullPath($rootPath) } catch {
+        Write-Host "  That is not a valid folder name or path: $folderName" -ForegroundColor Red
+        continue
+    }
+    if (-not (Test-Path -LiteralPath $rootPath)) {
         New-Item -ItemType Directory -Path $rootPath -Force | Out-Null
         Write-Host "  Created: $rootPath" -ForegroundColor Green
     } else {
@@ -2135,7 +2305,7 @@ if ($tmdlExtFound) {
 # Fabric CLI (fab) -- RECOMMENDED (optional). Primary CLI for Fabric control-plane:
 # item lifecycle, jobs, export/import, OneLake file ops, table ops. Not required --
 # the core workflow (Fabric extension + agents editing local files) needs no CLI.
-if (-not (Test-CliResilient -Name 'fab')) {
+if (-not (Test-CliResilient -Name 'fab' -VersionPattern '(?im)^\s*fab version')) {
     Write-Host "  Fabric CLI (fab): not found (recommended)" -ForegroundColor Yellow
     Write-Host "         Primary CLI for Fabric API, jobs, export/import, OneLake and table ops." -ForegroundColor DarkGray
     Write-Host "         Needs Python 3.10-3.13. Reference: https://github.com/microsoft/fabric-cli" -ForegroundColor DarkGray
@@ -2244,8 +2414,11 @@ if (Test-Path $priorToolStatusPath) {
 
 # -- Core tools (auto best-effort above) -- record their final detected state.
 $fabHit = Resolve-ToolCommand -Aliases @('fab')
-if ($fabHit) {
-    Set-ToolStatus -Key 'fab' -Found $true -Command $fabHit.command -Path $fabHit.path -Version (Get-ToolVersion -Exe 'fab') -Category 'core-cli' -InstallMode 'auto'
+$fabVersion = if ($fabHit) { Get-ToolVersion -Exe $(if ($fabHit.path) { $fabHit.path } else { 'fab' }) } else { $null }
+if ($fabHit -and $fabVersion -match '(?im)^\s*fab version') {
+    Set-ToolStatus -Key 'fab' -Found $true -Command $fabHit.command -Path $fabHit.path -Version $fabVersion -Category 'core-cli' -InstallMode 'auto'
+} elseif ($fabHit) {
+    Set-ToolStatus -Key 'fab' -Found $false -Category 'core-cli' -InstallMode 'auto' -Reason "a different 'fab' command is on PATH ($($fabHit.path)); Microsoft Fabric CLI (ms-fabric-cli) not detected"
 } else {
     Set-ToolStatus -Key 'fab' -Found $false -Category 'core-cli' -InstallMode 'auto' -Reason 'not installed'
 }
@@ -2292,12 +2465,14 @@ Invoke-OptionalToolPrompt -Key 'sqlcmd' -Name 'sqlcmd' `
         Install-PortableZipTool -Url $u -DestName 'sqlcmd' -ExeName 'sqlcmd.exe' | Out-Null
     }
 
-# Tabular Editor CLI -- semantic-model validation / BPA / automation (Agent 3).
-# GUI app -> do not probe --version (would launch the UI).
-Invoke-OptionalToolPrompt -Key 'tabularEditor' -Name 'Tabular Editor CLI' `
+# Tabular Editor 2 -- semantic-model validation / BPA / automation (free, MIT).
+# GUI app -> do not probe --version (would launch the UI). TE3 (paid) and the new
+# cross-platform `te` CLI are DIFFERENT products: detected separately below, never
+# "updated" with a TE2 release.
+Invoke-OptionalToolPrompt -Key 'tabularEditor' -Name 'Tabular Editor 2' `
     -Purpose 'Semantic model validation, Best Practice Analyzer, and automation.' `
     -Provider 'https://tabulareditor.com (TE2 is free; TE3 is paid)' `
-    -Aliases @('TabularEditor.exe','TabularEditor2.exe','TabularEditor3.exe','te') `
+    -Aliases @('TabularEditor.exe','TabularEditor2.exe') `
     -SearchRoots @("$env:LOCALAPPDATA\Programs","$env:ProgramFiles","${env:ProgramFiles(x86)}") `
     -ProbeVersion $false -Prior $priorToolStatus -Install {
         # TE2 -- free, open-source (MIT). winget id 'TabularEditor.TabularEditor.2';
@@ -2326,6 +2501,25 @@ Invoke-OptionalToolPrompt -Key 'tabularEditor' -Name 'Tabular Editor CLI' `
         Write-Host "         Note: corporate security may return the zip EMPTY or block it; an IT/download approval can be required." -ForegroundColor Yellow
         Write-Host "         Tip: drop the zip in Downloads and re-run to auto-pick it up, or ask '070 - Capability Maintenance Team Lead' in VS Code." -ForegroundColor DarkGray
     }
+
+# Detect-only siblings of TE2 so agents can tell the three products apart.
+# `te` = cross-platform Tabular Editor CLI (preview; separate binary, separate release
+# train); TE3 = paid desktop product. Neither is installed or updated by this installer.
+$teHit = Resolve-ToolCommand -Aliases @('te') -SearchRoots @("$env:LOCALAPPDATA\Programs\te")
+if ($teHit) {
+    $teVer = Get-ToolVersion -Exe $(if ($teHit.path) { $teHit.path } else { $teHit.command })
+    Write-Host "  Tabular Editor CLI (te): found" -ForegroundColor Green
+    Set-ToolStatus -Key 'teCli' -Found $true -Command $teHit.command -Path $teHit.path -Version $teVer -InstallMode 'detect' -AliasesChecked @('te')
+} else {
+    Set-ToolStatus -Key 'teCli' -Found $false -Reason 'not installed (detect-only; see power-bi-agentic-development te-cli skill)' -InstallMode 'detect' -AliasesChecked @('te')
+}
+$te3Hit = Resolve-ToolCommand -Aliases @('TabularEditor3.exe') -SearchRoots @("$env:LOCALAPPDATA\Programs\Tabular Editor 3", "$env:ProgramFiles\Tabular Editor 3", "${env:ProgramFiles(x86)}\Tabular Editor 3")
+if ($te3Hit) {
+    Write-Host "  Tabular Editor 3: found" -ForegroundColor Green
+    Set-ToolStatus -Key 'tabularEditor3' -Found $true -Command $te3Hit.command -Path $te3Hit.path -Version (Get-ExeFileVersion $te3Hit.path) -InstallMode 'detect' -AliasesChecked @('TabularEditor3.exe')
+} else {
+    Set-ToolStatus -Key 'tabularEditor3' -Found $false -Reason 'not installed (paid product; detect-only)' -InstallMode 'detect' -AliasesChecked @('TabularEditor3.exe')
+}
 
 # pbir CLI -- Power BI report (PBIR) editing (Agent 7). Installed into a short
 # user-profile venv (%USERPROFILE%\.fabric-pbir) to dodge the MAX_PATH overflow
@@ -2502,8 +2696,15 @@ $businessRepositoriesRoot = Join-Path $rootPath 'source-control-repositories'
 $workspaceFilePath = Join-Path $rootPath $workspaceFileName
 # The multi-root workspace is opened UNSAVED so the generated folder stays clean:
 # it is written to a session file in TEMP (with an absolute primary root) and the
-# user decides where -- if anywhere -- to Save Workspace As.
-$sessionWorkspaceFilePath = Join-Path ([IO.Path]::GetTempPath()) $workspaceFileName
+# user decides where -- if anywhere -- to Save Workspace As. The file is keyed to
+# THIS root path so re-runs merge into the right file and two workspaces installed
+# on the same machine never inherit each other's roots.
+$rootKey = ([BitConverter]::ToString([Security.Cryptography.SHA1]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes(([IO.Path]::GetFullPath($rootPath)).ToLowerInvariant()))) -replace '-', '').Substring(0, 8)
+$sessionWorkspaceFilePath = Join-Path ([IO.Path]::GetTempPath()) ("$(Split-Path $rootPath -Leaf)-$rootKey.code-workspace")
+# Earlier builds used one shared TEMP file name for every workspace; drop it so it
+# cannot be launched by mistake.
+$legacySessionWorkspace = Join-Path ([IO.Path]::GetTempPath()) $workspaceFileName
+if (Test-Path -LiteralPath $legacySessionWorkspace) { Remove-Item -LiteralPath $legacySessionWorkspace -Force -ErrorAction SilentlyContinue }
 $allBusinessRepositories = @()
 $existingRepositoryMap = $null
 $repositoryMapReadable = $true
@@ -2698,15 +2899,12 @@ if ($businessRepoPlans.Count -gt 0 -and $repositoryMapReadable) {
 
 # Always (re)build the multi-root workspace, but as an UNSAVED session file kept
 # OUTSIDE the generated folder so nothing is committed there. Existing user-added
-# roots/settings in a prior session file are preserved; only missing managed roots
-# are added. Any stale copy previously written into the folder is removed so the
-# generated workspace stays clean.
+# roots/settings in a prior session file are preserved by the merge (it is NOT
+# deleted first); only missing managed roots/settings are added. Any stale copy
+# previously written into the folder is removed so the generated workspace stays clean.
 if ($repositoryMapReadable) {
     if (Test-Path -LiteralPath $workspaceFilePath) {
         Remove-Item -LiteralPath $workspaceFilePath -Force -ErrorAction SilentlyContinue
-    }
-    if (Test-Path -LiteralPath $sessionWorkspaceFilePath) {
-        Remove-Item -LiteralPath $sessionWorkspaceFilePath -Force -ErrorAction SilentlyContinue
     }
     Merge-CodeWorkspace -Path $sessionWorkspaceFilePath -WorkspaceName (Split-Path $rootPath -Leaf) -PrimaryRootPath $rootPath
     Write-Host "  Workspace ready (opens unsaved -- use File > Save Workspace As to keep it)." -ForegroundColor Green
@@ -2741,7 +2939,7 @@ try {
         }
     } else {
         Write-Host "  skills-for-fabric/ already exists  -- force-refreshing to upstream..." -ForegroundColor Green
-        Update-VendorClone "$rootPath\skills-for-fabric" 'skills-for-fabric'
+        Update-VendorClone "$rootPath\skills-for-fabric" 'skills-for-fabric' -ExpectedRemote 'https://github.com/microsoft/skills-for-fabric.git'
     }
     # Touch files so LastWriteTime reflects sync time, not upstream commit time.
     # A freshly-cloned file may still be locked by antivirus/indexer; this touch is
@@ -2764,7 +2962,7 @@ try {
         }
     } else {
         Write-Host "  power-bi-agentic-development/ already exists  -- force-refreshing to upstream..." -ForegroundColor Green
-        Update-VendorClone "$rootPath\power-bi-agentic-development" 'power-bi-agentic-development'
+        Update-VendorClone "$rootPath\power-bi-agentic-development" 'power-bi-agentic-development' -ExpectedRemote 'https://github.com/data-goblin/power-bi-agentic-development.git'
     }
     # Touch files so LastWriteTime reflects sync time, not upstream commit time.
     # A freshly-cloned file may still be locked by antivirus/indexer; this touch is
@@ -2827,7 +3025,7 @@ Every Semantic Model in Git integration follows this exact layout:
 ```
 <Name>.SemanticModel/
     definition/
-        database.tmdl          <- compatibilityLevel only (always 1604)
+        database.tmdl          <- compatibilityLevel only (preserve the existing value)
         model.tmdl             <- culture, collation, annotations, ref table list
         expressions.tmdl       <- M/Power Query data source expressions
         relationships.tmdl     <- ALL relationships (never inside table files)
@@ -2843,7 +3041,11 @@ Every Semantic Model in Git integration follows this exact layout:
 database
 	compatibilityLevel: 1604
 ```
-Always `1604`. Nothing else in this file.
+Nothing else in this file. **Preserve the existing level** - never lower it, and
+never bump it "to be safe". `1604` is the Direct Lake baseline (XMLA tools need
+1604+ for Direct Lake metadata); newer engine features need higher levels (for
+example DAX user-defined functions need 1702+). Change it only when a feature you
+are adding requires it, and say so in your result.
 
 ### model.tmdl
 ```tmdl
@@ -3244,7 +3446,7 @@ docs - this skill intentionally does not duplicate that depth.
 |------|--------|
 | `definition.pbism` | Connection metadata -- editing breaks deployment |
 | `.platform` | Fabric platform metadata -- auto-managed |
-| `database.tmdl` | Always just `compatibilityLevel: 1604` |
+| `database.tmdl` | Only `compatibilityLevel` - preserve it; raise only for a feature that needs it |
 | `cultures/en-US.tmdl` | Linguistic metadata -- rarely needs changes |
 
 ---
@@ -3309,8 +3511,9 @@ description: "Use when: editing or creating Data Factory pipeline JSON files (pi
 - **To update this skill**: check `skills-for-fabric/common/ITEM-DEFINITIONS-CORE.md` for new
   activity types, and review https://learn.microsoft.com/en-us/fabric/data-factory/
   for updated typeProperties. Then re-run the installer or edit this file directly.
-- **Note**: when `skills-for-fabric` or `power-bi-agentic-development` eventually publish
-  a pipeline skill, the Fabric Master Agent starting flow will pull it in automatically.
+- **Note**: Microsoft's `skills-for-fabric/skills/pipeline-migration` covers migration
+  (ADF/Synapse -> Fabric) and expression gotchas; this skill stays the authoring
+  reference for `pipeline-content.json`. Read both when migrating.
 
 ---
 
@@ -4126,7 +4329,7 @@ Expressions use `@` prefix and are wrapped in expression objects:
 
 Common patterns:
 - `@pipeline().parameters.ParamName` -- access pipeline parameter
-- `@pipeline().variables.VarName` -- access pipeline variable
+- `@variables('VarName')` -- access a pipeline variable (NOT `pipeline().variables`; that accessor does not exist)
 - `@pipeline().libraryVariables.VarName` -- access Variable Library value
 - `@activity('ActivityName').output` -- access activity output
 - `@greater(value1, value2)` -- comparison function
@@ -4195,13 +4398,23 @@ A common mistake is to refresh an upstream / "gold" lakehouse endpoint expecting
 **Direct Lake** model to pick up new data. It will not, unless that lakehouse **is the
 model's own** lakehouse.
 
-- A Direct Lake model reads Delta from **one specific lakehouse** - the one its source
-  expression points at (`Sql.Database(..., <endpointId>)`, "Direct Lake on OneLake").
-- When ETL writes Delta into **that** lakehouse, the model reframes on the next query
-  and serves new data, usually within seconds, with **no explicit refresh required**.
-- The SQL analytics endpoint has a background metadata-sync that can briefly lag a
-  write. For **deterministic** freshness, `RefreshSQLEndpoint` on the **model's own
-  lakehouse** (not an upstream layer), or trigger a model reframe, then read.
+- A Direct Lake model reads Delta from the **specific source(s)** its table partitions
+  point at. Two variants exist and behave differently:
+  - **Direct Lake on SQL** (`Sql.Database(<endpoint>, <endpointId>)` expression, one
+    source): table/permission discovery goes through the SQL analytics endpoint, so
+    endpoint metadata sync matters, and unsupported cases fall back to DirectQuery.
+  - **Direct Lake on OneLake** (OneLake/`AzureStorage` style source, one or more Fabric
+    items): reads Delta directly, never falls back to DirectQuery, and the SQL endpoint
+    sync is irrelevant to it.
+- New data becomes visible only after the model **reframes** to the newer Delta
+  version. With **automatic updates enabled** (the default) this happens shortly after
+  the write; with automatic updates **disabled** the model keeps serving the last
+  framed version until something refreshes it (`PBISemanticModelRefresh`, REST
+  refresh, or a manual refresh). Check the setting before promising "no refresh needed".
+- For Direct Lake on SQL, the endpoint has a background metadata-sync that can briefly
+  lag a write. For **deterministic** freshness run `RefreshSQLEndpoint` on the
+  **model's own** source (not an upstream layer), then refresh/reframe the model, then
+  read. For Direct Lake on OneLake the endpoint refresh is a no-op for the model.
 - Refreshing a *different* lakehouse's endpoint (e.g. an intermediate layer the model
   does not read) has **zero** effect on the model.
 
@@ -4352,7 +4565,9 @@ When a SQL/TDS call fails, decide which of these it is -- they need different fi
    remote Spark kernel** -- preferred for build -> run -> read -> amend -> rerun loops.
    Spark SQL can query the same lakehouse/tables without touching 1433. Note: Spark
    SQL is not T-SQL -- warehouse-only T-SQL (procs, MERGE, certain DDL) will not run
-   on a Spark kernel; route those to REST/XMLA or the portal query editor, or flag them.
+   on a Spark kernel. XMLA is NOT a T-SQL channel either (it reaches semantic models
+   only). When TDS is blocked, run warehouse T-SQL via a Script/Lookup activity in a
+   pipeline (`fab job run`) or the portal SQL query editor, or flag it as blocked.
 3. **Headless / one-shot run:** trigger the notebook via the Fabric REST
    *run-on-demand* job API (`fab job run ...`), **poll job status**, and read results
    from the **portal run snapshot** or from a Lakehouse output table the notebook
@@ -4468,25 +4683,96 @@ if (Test-Path -LiteralPath $settingsPath) {
         if ($newlyRegistered.Count -gt 0) { [IO.File]::WriteAllText($settingsPath, ($s | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding($false))) }
         $skillLocCount = @($loc.PSObject.Properties | Where-Object { $_.Value -eq $true }).Count
         $n = $s.'chat.subagents.allowInvocationsFromSubagents'
-        $nesting = if ($n -eq $true) { 'enabled in .vscode/settings.json (also required in the .code-workspace when opened as multi-root)' } else { 'NOT set in .vscode/settings.json -> Team Leads cannot dispatch workers; re-run the installer' }
+        $nesting = if ($n -eq $true) { 'enabled in .vscode/settings.json' } else { 'NOT set in .vscode/settings.json -> Team Leads cannot dispatch workers; re-run the installer' }
     } catch { }
 }
 $out.Add("CONFIG   Skill locations registered: $skillLocCount | Nested dispatch: $nesting")
 if ($newlyRegistered.Count -gt 0) { $out.Add("         Newly registered skill folders (reload window to load them): $(($newlyRegistered | Sort-Object -Unique) -join ', ')") }
 
-# -- Identity (fab first, az fallback; never blocks) --
+# -- Saved .code-workspace files that open this root --
+# The nesting setting is WINDOW-scoped: opened from a multi-root workspace file, the
+# folder's settings.json is ignored and the setting must be in that file. Name the
+# culprit so the Master never blames settings.json by mistake.
+$storageRoot = if ($env:FABRIC_AGENTIC_WORKSPACE_STORAGE) { $env:FABRIC_AGENTIC_WORKSPACE_STORAGE } else { Join-Path $env:APPDATA 'Code\User\workspaceStorage' }
+$wsMissing = @(); $wsOk = @()
+if (Test-Path -LiteralPath $storageRoot) {
+    $rootNorm = $root.TrimEnd('\').ToLowerInvariant()
+    $seenWs = @{}
+    Get-ChildItem -LiteralPath $storageRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+        $wj = Join-Path $_.FullName 'workspace.json'
+        if (-not (Test-Path -LiteralPath $wj)) { return }
+        try { $w = Get-Content -LiteralPath $wj -Raw | ConvertFrom-Json } catch { return }
+        if (-not $w.workspace) { return }
+        $uri = [string]$w.workspace
+        if ($uri -notmatch '^file:///') { return }
+        $file = [Uri]::UnescapeDataString($uri.Substring(8)).Replace('/', '\')
+        if ($seenWs.ContainsKey($file.ToLowerInvariant()) -or -not (Test-Path -LiteralPath $file)) { return }
+        $seenWs[$file.ToLowerInvariant()] = $true
+        $rawWs = Get-Content -LiteralPath $file -Raw -ErrorAction SilentlyContinue
+        $wsj = $null
+        try { $wsj = $rawWs | ConvertFrom-Json } catch {
+            try { $wsj = ([regex]::Replace($rawWs, '(?s)"(?:\\.|[^"\\])*"|//[^\r\n]*|/\*.*?\*/', { param($m) if ($m.Value.StartsWith('"')) { $m.Value } else { '' } }) -replace ',(\s*[}\]])', '$1') | ConvertFrom-Json } catch { return }
+        }
+        if (-not $wsj) { return }
+        $dir = Split-Path $file -Parent
+        $opensRoot = $false
+        foreach ($f in @($wsj.folders)) {
+            if (-not $f -or -not $f.path) { continue }
+            $p = [string]$f.path
+            if (-not [IO.Path]::IsPathRooted($p)) { $p = Join-Path $dir $p }
+            try { $p = [IO.Path]::GetFullPath($p).TrimEnd('\').ToLowerInvariant() } catch { continue }
+            if ($p -eq $rootNorm) { $opensRoot = $true }
+        }
+        if (-not $opensRoot) { return }
+        $n = $null; if ($wsj.settings) { $n = $wsj.settings.'chat.subagents.allowInvocationsFromSubagents' }
+        if ($n -eq $true) { $wsOk += $file } else { $wsMissing += $file }
+    }
+}
+if ($wsMissing.Count -gt 0) {
+    $out.Add("         WARNING: saved workspace file(s) that open this folder LACK the nested-dispatch setting: $($wsMissing -join ' ; ')")
+    $out.Add('         If the VS Code title bar ends with "(Workspace)" you opened one of these and Team Leads cannot reach workers. Fix: add "chat.subagents.allowInvocationsFromSubagents": true inside its "settings" block (or re-run the installer and answer Y when it offers to patch saved workspace files), then Developer: Reload Window. Opening the folder directly (File > Open Folder) also works.')
+} elseif ($wsOk.Count -gt 0) {
+    $out.Add("         Saved workspace file(s) opening this folder carry the setting: $($wsOk -join ' ; ')")
+}
+
+# -- Identity (fab first, az fallback; bounded, never blocks) --
+# Use the executables recorded by the installer (a bare `fab`/`az` can resolve to a
+# different same-named tool) and cap each probe: a stuck SSO/proxy prompt must not
+# hang session start.
+$toolStatusPath = Join-Path $root '.github/agent-docs/tool-status.json'
+$recorded = $null
+if (Test-Path -LiteralPath $toolStatusPath) { try { $recorded = Get-Content -LiteralPath $toolStatusPath -Raw | ConvertFrom-Json } catch { } }
+function Get-RecordedExe([string]$key, [string]$fallback) {
+    $e = if ($recorded) { $recorded.$key } else { $null }
+    if (-not $e) { return $fallback }
+    if ($e.found -eq $false) { return $null }
+    if ($e.path -and (Test-Path -LiteralPath $e.path)) { return [string]$e.path }
+    $c = if ($e.command) { Get-Command ([string]$e.command).Split(' ')[0] -ErrorAction SilentlyContinue } else { $null }
+    if ($c -and $c.Source) { return [string]$c.Source }
+    return $null
+}
+function Invoke-Bounded([string]$exe, [string[]]$argList, [int]$seconds) {
+    if (-not $exe) { return '' }
+    try {
+        $job = Start-Job -ScriptBlock { param($e, $a) & $e @a 2>&1 | Out-String } -ArgumentList $exe, $argList
+        if (Wait-Job $job -Timeout $seconds) { $r = Receive-Job $job -ErrorAction SilentlyContinue | Out-String } else { $r = "(timed out after ${seconds}s)" }
+        Remove-Job $job -Force -ErrorAction SilentlyContinue
+        return [string]$r
+    } catch { return '' }
+}
 $identity = 'not logged in (run `fab auth login`, or `az login` for the az fallback)'
-$fabStatus = & fab auth status 2>&1 | Out-String
+$fabStatus = Invoke-Bounded (Get-RecordedExe 'fab' 'fab') @('auth', 'status') 10
 if ($fabStatus -match '(?im)^\s*(Account|User|Signed in|Logged in)[^\r\n]*') { $identity = 'fab: ' + $Matches[0].Trim() }
 elseif ($fabStatus -match '(?i)[\w.+-]+@[\w.-]+') { $identity = 'fab: ' + $Matches[0] }
 else {
-    $azJson = & az account show --output json 2>$null | Out-String
-    if ($azJson -match '"name"') { try { $a = $azJson | ConvertFrom-Json; $identity = "az: $($a.user.name) on $($a.name)" } catch { } }
+    # fab failed, timed out (proxy/SSO) or is absent: az is the documented fallback.
+    $azJson = Invoke-Bounded (Get-RecordedExe 'az' 'az') @('account', 'show', '--output', 'json') 20
+    if ($azJson -match '"name"') { try { $a = ($azJson -replace '(?s)^.*?(\{.*\}).*$', '$1') | ConvertFrom-Json; $identity = "az: $($a.user.name) on $($a.name)" } catch { } }
+    if ($fabStatus -match 'timed out') { $identity += ' (fab auth status timed out - proxy/SSO?)' }
 }
 $out.Add("IDENTITY $identity")
 
 # -- Live tool re-check + tool-status.json refresh --
-$toolStatusPath = Join-Path $root '.github/agent-docs/tool-status.json'
 $present = @(); $missing = @(); $changed = @(); $mcpInstalled = @(); $mcpMissing = @()
 if (Test-Path -LiteralPath $toolStatusPath) {
     try {
@@ -4506,14 +4792,16 @@ if (Test-Path -LiteralPath $toolStatusPath) {
             if ($t.path -and (Test-Path -LiteralPath $t.path)) { $ok = $true }
             elseif ($t.command) {
                 $cmd = Get-Command ($t.command -split ' ')[0] -ErrorAction SilentlyContinue
-                if ($cmd) { $ok = $true; if (-not $t.path -and $cmd.Source) { $t | Add-Member -NotePropertyName path -NotePropertyValue $cmd.Source -Force } }
+                # A stale recorded path (tool moved/reinstalled) is replaced by the live one.
+                if ($cmd) { $ok = $true; if ($cmd.Source) { $t | Add-Member -NotePropertyName path -NotePropertyValue $cmd.Source -Force } }
             }
             if ($ok -ne [bool]$t.found) {
                 $changed += "$($prop.Name): $([bool]$t.found) -> $ok"
                 $t.found = $ok
                 $t.reason = if ($ok) { '' } else { "not found at session check $(Get-Date -Format yyyy-MM-dd)" }
             }
-            if ($ok) { $present += $prop.Name } else { $missing += $prop.Name }
+            # Detect-only products (te CLI, TE3) are reported when present, never nagged about.
+            if ($ok) { $present += $prop.Name } elseif ($t.installMode -ne 'detect') { $missing += $prop.Name }
         }
         $ts._meta | Add-Member -NotePropertyName lastSessionCheck -NotePropertyValue ((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')) -Force
         [IO.File]::WriteAllText($toolStatusPath, ($ts | ConvertTo-Json -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
@@ -4580,6 +4868,11 @@ Rules:
 - If the script says nested dispatch is NOT set, warn the user in one line that Team
   Leads cannot reach their workers until the workspace is re-opened from the
   installer-generated `.code-workspace` (or the setting is added), then continue.
+- If the CONFIG block carries a WARNING naming saved workspace file(s) that LACK the
+  setting, relay that exact file path and the one-line fix in your status block. The
+  setting is window-scoped: `.vscode/settings.json` having it does NOT help when the
+  window was opened from a `.code-workspace` file that lacks it. Never tell the user
+  `settings.json` is missing the setting without having read that file.
 - If the script itself fails, fall back to the two cheapest checks (`fab auth status`,
   then `az account show`) and say the status script was unavailable. Never block.
 - Identity is informational: the local file-first workflow needs no CLI login.
@@ -4597,22 +4890,31 @@ BEFORE dispatching** - dispatched agents cannot answer sign-in prompts, and
 `ListConnections` on a fresh session is always empty (an empty list is NOT "not
 callable"). Steps:
 
-1. Call the Power BI modeling MCP `connection_operations` tool with
+1. `ConnectFabric` needs the **exact display names**, not GUIDs. If the user gave a
+   URL or ids (`app.powerbi.com/groups/<workspaceGuid>/datasets/<datasetGuid>`),
+   resolve them first: `fab api workspaces/<workspaceGuid>` -> `displayName`, and
+   `fab api workspaces/<workspaceGuid>/items/<datasetGuid>` -> `displayName` (REST
+   `GET /v1/workspaces/{id}` / `/items/{id}` with an `az` token if `fab` is unusable).
+2. Call the Power BI modeling MCP `connection_operations` tool with
    `operation: ConnectFabric`, `workspaceName: <exact workspace name>`,
    `semanticModelName: <exact model name>`. Answer any sign-in prompt. This also
-   auto-starts the server on first use.
-2. On success, note the returned connection name and put it in every WORK ORDER as
+   auto-starts the server on first use. You hold this server **only** for
+   connection management and read-only checks - never edit a model through it;
+   that is the Semantic Model team's job.
+3. On success, note the returned connection name and put it in every WORK ORDER as
    `context: mcp connection: <name> (Power BI modeling MCP, ConnectFabric)`. The Lead
    and its workers pass `connectionName` on every MCP call; MCP is rung 1 of their
    tool ladder.
-3. If the tool is not listed at all: ask the user once (Command Palette ->
+4. If the tool is not listed at all: ask the user once (Command Palette ->
    `MCP: List Servers` -> start "powerbi-modeling-mcp" / "Fabric MCP"; tick them in
    the chat Tools picker; turn off unrelated tool groups if the ~128-tool budget is
-   full), then retry step 1.
-4. If it still fails (auth blocked, policy, budget): say so in one line and put
-   `context: mcp connection: none - use REST fallback` in the WORK ORDER. REST
-   (`az account get-access-token` + Power BI `executeQueries`, `fab api`) fully
-   covers live read/compare work.
+   full), then retry step 2.
+5. If it still fails (auth blocked, policy, budget): say so in one line and put
+   `context: mcp connection: none - reason: <error> - use REST fallback` in the
+   WORK ORDER. Leads treat `none` as final (no probing). REST
+   (`az account get-access-token` + Power BI `executeQueries`, `fab api`) covers
+   live DAX value reads/compares; metadata comes from `getDefinition` (TMDL), not
+   from REST queries.
 
 For Fabric MCP (items, OneLake, definitions) no connection object exists: the owning
 Lead makes ONE cheap read-only call (list workspaces) on first use and falls back to
@@ -4735,7 +5037,11 @@ changed: <files / live objects, or none>
 validation: <what was run and the outcome>
 risks: <or none>
 request: <exact approval token, question, design decision, or correct owner - only when status is not DONE>
+payload: <Architect: full PLAN block | QA: full VERDICT block | everyone else: omit>
 ```
+
+The Architect's PLAN and QA's VERDICT travel verbatim in `payload` - the wrapper
+is mandatory, the specialist block inside it is never summarised away.
 
 Parents relay a child's `request` upward unchanged. Only the top-level agent asks
 the user; it then re-dispatches the same Lead with the answer in `approvals granted`
@@ -4846,13 +5152,21 @@ name in `context`, not by the file. If none, use the REST/CLI fallback below.
 tool groups in the chat Tools picker so the Fabric + Power BI MCP tools stay within
 the ~128-tool limit. A fat tool list is the usual reason MCP tools go missing.
 
-**REST/CLI fallback quirks (confirmed) - use these to avoid dead ends:**
+**REST/CLI fallback - what it covers and what it does not:**
 - Live DAX without MCP: `az account get-access-token --resource https://analysis.windows.net/powerbi/api`
-  then POST to the Power BI `executeQueries` REST endpoint.
-- `INFO.MEASURES()` is blocked via `executeQueries`; use `INFO.VIEW.MEASURES()`
-  (or a DMV / `fab api ... getDefinition` for TMDL) instead.
+  then POST to the Power BI `executeQueries` REST endpoint. Per Microsoft's contract it
+  runs **DAX `EVALUATE` queries only** - no MDX, no DMVs, no `INFO.*` functions - with one
+  query per call, one result table, max 100,000 rows / 1,000,000 values / 15 MB, 120
+  calls per minute, and it needs the tenant setting *Dataset Execute Queries REST API*
+  plus Build permission. It covers value comparisons; it does **not** cover metadata.
+- Model metadata without MCP: use `fab api ... getDefinition` (TMDL) or
+  `power-bi-agentic-development/plugins/fabric-cli/skills/fabric-cli/scripts/export_semantic_model_as_pbip.py`;
+  DMVs need an XMLA client (Tabular Editor / `te`), not REST. If an `INFO.VIEW.*`
+  query happens to work on your endpoint treat it as a convenience, not a contract.
 - Do not pipe REST JSON through `Get-Content -Raw` into `ConvertFrom-Json` blindly:
   PSObject decoration can corrupt it. Capture the raw string and parse that.
+- Report what you could NOT verify through the fallback instead of declaring the
+  comparison complete.
 
 ---
 
@@ -4869,15 +5183,22 @@ the ~128-tool limit. A fat tool list is the usual reason MCP tools go missing.
 
 ### Terminal & tooling hygiene
 
-- Reuse ONE terminal per session; do not spawn a new terminal per command. Kill
-  stale/wedged terminals instead of leaving them (a "Command produced no output"
-  terminal is wedged - kill it and use a fresh single one).
-- The persistent shell corrupts inline `$`-variables in `-Command` strings and a
+- The integrated terminal is ONE shared shell. Parents sequence terminal work (at
+  most one child at a time runs commands); a child never runs a command while another
+  agent may be using the shell. Do not spawn a new terminal per command.
+- Run one simple command per call, synchronously, and read the output it returns.
+  The persistent shell corrupts inline `$`-variables in `-Command` strings and a
   multi-statement one-liner can wedge it into a `>>` continuation state (after which
-  even built-in cmdlets report "not recognized"). Put anything longer than one simple
-  command in a `.ps1` under the project's `scripts/` folder and run it via
-  `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/<name>.ps1`; write
-  results to a file and read that file. If the shell is wedged, open a NEW terminal.
+  even built-in cmdlets report "not recognized"). Anything with loops, here-strings
+  or more than two statements goes in a `.ps1` under `scripts/` (unique name) and runs
+  via `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/<name>.ps1 > scripts/<name>.out.txt 2>&1`;
+  then read the `.out.txt`. Agents without `edit` cannot write that file: they keep to
+  single statements and ask their Lead for an edit-capable worker when a script is needed.
+- "Command produced no output" is NOT proof the shell is wedged (many commands are
+  silent). Re-run once with `| Out-String`. Only when built-in cmdlets report "not
+  recognized" is the shell wedged: run the command as a child process
+  (`powershell -NoProfile -ExecutionPolicy Bypass -File ...`) or open a fresh terminal
+  if your tooling offers one; kill the wedged one.
 - For fast-changing result/output files, read them with terminal `Get-Content`,
   not the cached file reader - the cache can serve stale content for a file you
   just rewrote. Prefer unique, single-use output file names.
@@ -4934,6 +5255,8 @@ foreach ($entry in $orderedAgents) {
 # workers do NOT inherit a Team Lead's tools, so every authorised agent is granted
 # explicitly here.
 $powerBiModelingMcpAgents = @(
+    # The Master holds the server only to open/close the connection in the main chat (sign-in prompts).
+    'fabric-workspace-master',
     'semantic-model-team-lead', 'model-architecture-agent', 'relationships-storage-mode-agent',
     'tmdl-agent', 'dax-agent', 'semantic-security-ai-metadata-agent', 'semantic-validation-performance-agent'
 )
@@ -5109,7 +5432,7 @@ $agentKnowledge = @{
             @{ ref = "$MS/semantic-model-authoring"; why = 'running EVALUATE queries via REST for regression checks' }
         )
         playbook = @('Read the measure table and the related columns/relationships first; confirm the filter context the measure will run in.', 'Write the measure with explicit formatString and displayFolder per house style; prefer variables and CALCULATE over nested iterators.', 'Build a regression DAX query (EVALUATE with SUMMARIZECOLUMNS on the key dimensions) and run it live if a model is available (MCP dax_query, else executeQueries REST).', 'Report before/after values for changed measures.')
-        validate = @('Measure compiles; regression query returns expected totals; no BLANK explosions on key slicers; formatString set; INFO.VIEW.MEASURES() used instead of INFO.MEASURES() over REST.')
+        validate = @('Measure compiles; regression query returns expected totals; no BLANK explosions on key slicers; formatString set; over REST executeQueries use EVALUATE value queries only (no INFO/DMV) and read metadata from getDefinition.')
         tools = @('powerbi-modeling-mcp/* (measure + dax_query operations) with the connectionName from your WORK ORDER context; REST executeQueries via az access token when context says no connection; local TMDL edit when no live model.')
         avoid = @('Measures without a regression query when a live model exists.', 'Calculated columns where a measure is intended.', 'Editing tables or relationships - that is 013/012.')
     }
@@ -5144,19 +5467,17 @@ $agentKnowledge = @{
             @{ ref = "$KP/reports/skills/pbir-cli"; why = 'pbir CLI - primary report mutation tool' },
             @{ ref = "$KP/pbip/skills/pbir-format"; why = 'PBIR JSON format' },
             @{ ref = "$KP/reports/skills/pbi-report-design"; why = 'design principles' },
-            @{ ref = "$MS/powerbi-report-planning"; why = 'Microsoft planning guidance' },
-            @{ ref = "$MS/powerbi-report-management"; why = 'report lifecycle via REST' }
+            @{ ref = "$MS/powerbi-report-cli"; why = 'Microsoft report lifecycle skill (modes: planning / design / authoring / management via REST) - read the mode reference it points to' }
         )
-        playbook = @('Decompose: requirements/pages/visual choice -> 021; visuals and pages -> 022; theme/format -> 023; Deneb/SVG/custom -> 024; paginated -> 025; verification -> 026.', 'Serialize ownership: 022 and 023 never edit the same visual concurrently - sequence them.', 'Require 026 verification (pbir validate + Desktop check when available) before returning success.')
+        playbook = @('Decompose: requirements/pages/visual choice -> 021; visuals and pages -> 022; theme/format -> 023; Deneb/SVG/custom -> 024; paginated -> 025; verification -> 026.', 'Serialize ownership: 022 and 023 never edit the same visual concurrently - sequence them.', 'Tool precedence for report mutation is fixed: pbir CLI first (house standard); Microsoft''s powerbi-report-author CLI only when pbir is missing from tool-status AND the user agrees to install it; direct PBIR JSON editing is the last resort and must be disclosed in the WORK RESULT.', 'Require 026 verification (pbir validate + Desktop check when available) before returning success.')
         validate = @('pbir validate passes on the report folder; no broken field bindings to the semantic model; no overlapping visuals.')
-        tools = @('pbir CLI (check tool-status found/path); direct PBIR JSON edit only as controlled fallback; semantic dependencies go to 010 via the Master.')
+        tools = @('pbir CLI (check tool-status found/path); direct PBIR JSON edit only as a disclosed last resort; semantic dependencies go to 010 via the Master.')
         avoid = @('Inventing measures - request them from 010 through the Master.')
     }
     'report-planning-ux-agent' = @{
         skills = @(
-            @{ ref = "$MS/powerbi-report-planning"; why = 'audience and business-question planning' },
-            @{ ref = "$KP/reports/skills/pbi-report-design"; why = 'visual selection, layout, accessibility' },
-            @{ ref = "$MS/powerbi-report-design"; why = 'Microsoft design guidance' }
+            @{ ref = "$MS/powerbi-report-cli"; why = 'Microsoft planning + design modes (references/planning.md, references/design.md): audience, business questions, archetypes, approval gate' },
+            @{ ref = "$KP/reports/skills/pbi-report-design"; why = 'visual selection, layout, accessibility' }
         )
         playbook = @('Capture audience, business questions, KPIs and interactions.', 'Produce a page plan: pages, visuals per page with field bindings, navigation, filters, accessibility notes, and the list of measures that must exist (for 010).', 'Return the plan as the design contract for 022/023/024.')
         validate = @('Every visual maps to an existing or requested measure/column; every page answers a stated question.')
@@ -5168,10 +5489,10 @@ $agentKnowledge = @{
             @{ ref = "$KP/reports/skills/pbir-cli"; why = 'pbir CLI commands - use FIRST for pages/visuals' },
             @{ ref = "$KP/pbip/skills/pbir-format"; why = 'PBIR JSON schema for controlled direct edits' },
             @{ ref = "$KP/reports/skills/create-pbi-report"; why = 'end-to-end report creation flow' },
-            @{ ref = "$MS/powerbi-report-authoring"; why = 'Microsoft authoring guidance' },
+            @{ ref = "$MS/powerbi-report-cli"; why = 'Microsoft authoring mode (references/authoring.md) - PBIR semantics and validation; its powerbi-report-author CLI is an alternative to pbir, not an addition' },
             @{ ref = "$CS/fabric-cli-policy/SKILL.md"; why = 'CLI usage policy' }
         )
-        playbook = @('Check tool-status for pbir; read its current --help before use (commands change).', 'Inspect the report definition (pages, visuals, bindings) before mutating.', 'Apply changes with pbir commands one at a time; validate after EACH mutation.', 'Fall back to direct PBIR JSON edits only when pbir has no command for it, and validate immediately after.')
+        playbook = @('Check tool-status for pbir; read its current --help before use (commands change).', 'Inspect the report definition (pages, visuals, bindings) before mutating.', 'Apply changes with pbir commands one at a time; validate after EACH mutation.', 'If pbir has no command for a mutation, first check `pbir set` with the dotted property path; only if that cannot express it, edit the PBIR JSON directly, validate immediately after, and state in the WORK RESULT exactly which file you hand-edited and why.')
         validate = @('pbir validate clean after every mutation; field references exist in the semantic model; visual container positions inside page bounds.')
         tools = @('pbir CLI (primary); direct JSON edit (fallback); never Desktop automation - that is 026.')
         avoid = @('Editing theme files (023) or Deneb specs (024).', 'Batch edits without intermediate validation.')
@@ -5487,7 +5808,7 @@ $agentKnowledge = @{
             @{ ref = "$MS/semantic-model-authoring"; why = 'executeQueries / XMLA read patterns' },
             @{ ref = "$CS/fabric-cli-policy/SKILL.md"; why = 'fab api first' }
         )
-        playbook = @('Prefer fab api; fall back to az rest with the correct audience (Fabric vs Power BI vs Analysis Services).', 'For XMLA/DAX over REST remember: INFO.MEASURES() is blocked in executeQueries - use INFO.VIEW.MEASURES().', 'Capture raw JSON strings before parsing.')
+        playbook = @('Prefer fab api; fall back to az rest with the correct audience (Fabric vs Power BI vs Analysis Services).', 'executeQueries runs DAX EVALUATE only (no INFO/DMV, one query per call, 100k-row cap); metadata comes from getDefinition or an XMLA client.', 'Capture raw JSON strings before parsing.')
         validate = @('Call returns 2xx; response parsed; no token echoed.')
         tools = @('fab, az; Fabric MCP/*; execute only.')
         avoid = @('Printing tokens; storing secrets.')
@@ -5670,17 +5991,23 @@ function Resolve-KnowledgeRef {
     $full = Join-Path $rootPath ($Rel -replace '/', '\')
     if (Test-Path -LiteralPath $full) { return "$bt$Rel$bt" }
     # Self-heal upstream renames (e.g. spark-authoring-cli -> spark-cli): look for a sibling
-    # whose folder name shares the leading token(s) of the missing one.
+    # sharing the first two hyphen tokens (or the first when the name has only one); a unique
+    # hit is offered as the closest sibling, clearly labelled so the agent verifies before use.
     $leaf = Split-Path $Rel -Leaf
     $parentRel = ($Rel -replace '/[^/]+$', '')
     $parentFull = Join-Path $rootPath ($parentRel -replace '/', '\')
     if (Test-Path -LiteralPath $parentFull) {
-        $stem = ($leaf -split '-')[0]
-        $candidates = @(Get-ChildItem -LiteralPath $parentFull -Directory -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -like "$stem*" -and (Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md')) } |
-            Sort-Object { $_.Name.Length } | Select-Object -First 1)
-        if ($candidates.Count -eq 1) {
-            return "$bt$parentRel/$($candidates[0].Name)$bt *(upstream renamed $bt$leaf$bt - resolved at install time)*"
+        $tokens = $leaf -split '-'
+        $stems = @()
+        if ($tokens.Count -ge 2) { $stems += ($tokens[0..1] -join '-') }
+        $stems += $tokens[0]
+        foreach ($stem in $stems) {
+            $candidates = @(Get-ChildItem -LiteralPath $parentFull -Directory -ErrorAction SilentlyContinue |
+                Where-Object { ($_.Name -eq $stem -or $_.Name -like "$stem-*") -and (Test-Path -LiteralPath (Join-Path $_.FullName 'SKILL.md')) })
+            if ($candidates.Count -eq 1) {
+                return "$bt$parentRel/$($candidates[0].Name)$bt *(upstream no longer has $bt$leaf$bt; closest sibling resolved at install time - confirm it covers the topic before relying on it)*"
+            }
+            if ($candidates.Count -gt 1) { break }
         }
     }
     return "$bt$Rel$bt *(not present at install time - re-discover by keyword $bt$leaf$bt)*"
@@ -5827,18 +6154,25 @@ handoffs:
     $contractBullets.Add('- Work only in the artifact paths assigned to you. Never edit downloaded vendor skill repositories.')
     $contractBullets.Add('- Validate every mutation and return concise evidence, risks, and any remaining action.')
     $contractBullets.Add('- Never expose secrets. Treat PROD as read-only unless the user explicitly approves a production change.')
+    $hasModelingMcp = ($toolNames -contains 'powerbi-modeling-mcp/*')
     if ($isWorker) {
         $contractBullets.Add('- Destructive, irreversible, security-sensitive, release, PROD and environment-changing actions need an explicit approval token in your WORK ORDER (`approvals granted: <token>`). Deleting or dropping any artifact, table, column, measure, relationship, role, item, branch or file counts as destructive even when the user asked for it in plain words - the user''s phrasing is NOT the token. Without the token: stop, change nothing, return `NEEDS APPROVAL` with the exact action and a proposed token such as `APPROVED:DELETE:<artifact>`.')
         $contractBullets.Add('- Bound every live call with a timeout; on breach switch transport (e.g. Modeling MCP -> REST -> local files) instead of looping. Network blocks are machine-specific - report the failing channel, never assume it is blocked everywhere.')
-        $contractBullets.Add('- Live semantic models: use the `mcp connection: <name>` from your WORK ORDER `context` as `connectionName` on every Power BI modeling MCP call (rung 1). If `context` says `mcp connection: none`, go straight to the REST fallback. Never open a connection yourself - you cannot answer its sign-in prompt.')
+        if ($hasModelingMcp) { $contractBullets.Add('- Live semantic models: use the `mcp connection: <name>` from your WORK ORDER `context` as `connectionName` on every Power BI modeling MCP call (rung 1). If `context` says `mcp connection: none`, go straight to the REST fallback. Never open a connection yourself - you cannot answer its sign-in prompt.') }
     } else {
         $contractBullets.Add('- Destructive, irreversible, security-sensitive, release, PROD and environment-changing actions need explicit user approval captured as a literal token (e.g. `APPROVED:DELETE:<artifact>`). Deleting/dropping any artifact, table, column, measure, relationship, role, item, branch or file is destructive even when the user asked for it in plain words: the request itself is not the approval. Only the top-level agent (the one the user selected) can ask the user - it confirms once ("This deletes X and Y; reply APPROVED:DELETE:... to proceed"), then puts the token in `approvals granted`. Every dispatched agent without the token must return `NEEDS APPROVAL` with the exact action and let it bubble up.')
-        $contractBullets.Add('- **Dispatch health.** If the `agent` tool is missing when you must delegate, the workspace was opened without `chat.subagents.allowInvocationsFromSubagents: true` (it lives in the `.code-workspace` and `.vscode/settings.json` written by the installer). Report that exact cause; do not improvise the work yourself. Retry-safe failures: transport errors (`ERR_HTTP2_SERVER_REFUSED_STREAM`, dropped streams) and `Requested agent ''<name>'' not found` with an exact frontmatter name (agent-list reload / tool-budget flake) - pause briefly and retry up to 3 times, never substitute a different agent. A child that returns empty or without a WORK RESULT block is re-dispatched ONCE with `context: your previous turn ended without a WORK RESULT; resume and end with the WORK RESULT block` before you conclude anything.')
-        $contractBullets.Add('- **Live semantic models go through the connection the Master opened.** When the WORK ORDER `context` carries `mcp connection: <name>`, pass that `connectionName` on every Power BI modeling MCP call and treat MCP as rung 1; an empty `ListConnections` is not proof of failure. When `context` says `mcp connection: none`, use the REST fallback without probing. Never try to open a connection yourself when dispatched - you cannot answer its sign-in prompt.')
+        $contractBullets.Add('- **Dispatch health.** If the `agent` tool is missing when you must delegate, or a Lead comes back empty twice, the window was opened without `chat.subagents.allowInvocationsFromSubagents: true`. The setting is WINDOW-scoped: the installer writes it into `.vscode/settings.json` AND its generated `.code-workspace`, but a window opened from a *user-saved* `.code-workspace` that lacks it ignores `settings.json` entirely. The status script''s CONFIG block names any such saved file (`WARNING: saved workspace file(s) ... LACK the nested-dispatch setting`) - quote that path and the one-line fix (add the setting to that file''s `settings` block, reload) instead of guessing; never claim `settings.json` lacks the setting without reading it. Do not improvise the work yourself. Retry-safe failures: transport errors (`ERR_HTTP2_SERVER_REFUSED_STREAM`, dropped streams) and `Requested agent ''<name>'' not found` with an exact frontmatter name (agent-list reload / tool-budget flake) - pause briefly and retry up to 3 times, never substitute a different agent. A child that returns empty or without a WORK RESULT block is re-dispatched ONCE with `context: your previous turn ended without a WORK RESULT; resume and end with the WORK RESULT block` before you conclude anything.')
+        $contractBullets.Add('- **Retries must not repeat writes.** A retry is blind only when the failure happened before the child could act (agent not found, stream refused at dispatch). If a write-capable dispatch drops mid-turn or returns without a block, the child may already have created, edited or deployed something: re-dispatch it with `context: your previous attempt may have partially completed - inspect the current state of <artifact> first and do not repeat operations that are already done`, and require the WORK RESULT to list what it found already in place.')
+        $contractBullets.Add('- **Parallel dispatch.** Dispatch children in parallel only when their artifacts are independent AND at most one of them needs the terminal; otherwise sequence them (the shell is shared - two agents running commands at once interleave and wedge it). Every child that runs commands must use unique file names (`scripts/<agent>-<purpose>-<yyyyMMdd-HHmmss>.ps1`, matching `.out.txt`) so one agent never overwrites another''s output.')
+        if ($hasModelingMcp) { $contractBullets.Add('- **Live semantic models go through the connection the Master opened.** When the WORK ORDER `context` carries `mcp connection: <name>`, pass that `connectionName` on every Power BI modeling MCP call and treat MCP as rung 1; an empty `ListConnections` is not proof of failure. When `context` says `mcp connection: none`, use the REST fallback without probing. Never try to open a connection yourself when dispatched - you cannot answer its sign-in prompt.') }
         $contractBullets.Add('- **Bound every live call; switch transport on breach.** Put a sensible timeout on each live MCP/XMLA/dispatch call. If it hangs or breaches the timeout, abort and switch transport (e.g. drop from Modeling MCP/XMLA to TMDL `getDefinition` or REST) rather than looping on the wedged channel. Network blocks are machine-specific: never assume a failing channel (e.g. SQL/TDS 1433) is blocked everywhere or implies other channels are blocked; use the fallback ladder in `fabric-cli-policy`.')
     }
     if ($toolNames -contains 'execute') {
-        $contractBullets.Add('- **Terminal hygiene.** Anything longer than one simple command goes into a `.ps1` under the project''s `scripts/` folder and runs as `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/<name>.ps1`; never chain multi-statement PowerShell inline (it wedges the shared shell into a `>>` state). Write results to a file and read the file. If the shell reports built-in cmdlets as "not recognized", open a NEW terminal.')
+        if ($toolNames -contains 'edit') {
+            $contractBullets.Add('- **Terminal hygiene.** Run ONE simple command per terminal call, synchronously, and read the output it returns; never run commands while another agent may be using the shell (your parent sequences terminal work). Anything with loops, here-strings, `$`-variables or more than two statements goes into `scripts/<agent>-<purpose>-<yyyyMMdd-HHmmss>.ps1` (unique name, never reused) and runs as `powershell -NoProfile -ExecutionPolicy Bypass -File <that file> > <same name>.out.txt 2>&1`; then read the file. `scripts/` is scratch, not a deliverable. No output where output was expected is NOT proof the shell is wedged - re-run once with `| Out-String`; only when built-in cmdlets report "not recognized" is it wedged: then run the command as a child process (`powershell -NoProfile -ExecutionPolicy Bypass -File ...`) or open a fresh terminal if your tooling offers one.')
+        } else {
+            $contractBullets.Add('- **Terminal hygiene (execute without edit).** You cannot create files, so keep every terminal call to ONE simple statement (a single pipeline with `|` is fine; no loops, here-strings, `$`-variable juggling or multi-statement chains), run it synchronously and read the returned output. Never run commands while another agent may be using the shell. Prefer scripts that already exist (vendor skill `scripts/`, `.github/agent-docs/Get-SessionStatus.ps1`). If a task genuinely needs a multi-step script, hand it to an edit-capable worker (dispatch one if you can delegate; otherwise return `NEEDS INPUT` naming the edit-capable worker who should write it) - do not improvise with inline one-liners. No output is NOT proof the shell is wedged - re-run once with `| Out-String`; only "not recognized" for built-in cmdlets means wedged: then run via `powershell -NoProfile -ExecutionPolicy Bypass -Command "<one statement>"` as a child process.')
+        }
     }
     $operatingContract = ($contractBullets -join "`n")
 
@@ -5890,9 +6224,9 @@ Dispatched agents (Leads, workers, Architect, QA) cannot ask the user anything. 
 2. **Designed (cross-domain or design change):** Master -> Architect (PLAN) -> Master -> Team Lead(s) in the PLAN's order (parallel where the PLAN allows) -> each Lead -> worker -> Lead validates -> Master -> QA (VERDICT) -> Master consolidates -> client. If QA rejects, re-dispatch only the owning Lead with the defects.
 3. **Blocked (approval / input / design question mid-work):** worker -> Lead relays ``request`` -> Master asks the client (or dispatches the Architect for a design question) -> Master re-dispatches the SAME Lead with the answer in ``approvals granted`` / ``context`` -> Lead -> worker resumes.
 
-Rules: pass results down as ``context`` so nobody re-discovers facts; never dispatch two Leads to write the same artifact; when the PLAN says steps are dependent, wait for the WORK RESULT before dispatching the next.
+Rules: pass results down as ``context`` so nobody re-discovers facts; never dispatch two Leads to write the same artifact; when the PLAN says steps are dependent, wait for the WORK RESULT before dispatching the next. Run Leads in parallel only when their artifacts are independent AND at most one of them needs the terminal - otherwise sequence them (parallel agents sharing one shell interleave commands and overwrite each other's output files).
 
-**Live semantic models: connect before you dispatch.** Dispatched agents cannot answer sign-in prompts, so when a request needs a live model (live DAX, metadata, measure edits on a running model) YOU open the Power BI modeling MCP connection first, here in the main chat: ``connection_operations`` -> ``ConnectFabric`` with the exact ``workspaceName`` and ``semanticModelName``. Put the returned name in every WORK ORDER as ``context: mcp connection: <name>``. If it cannot connect (tool not listed, auth blocked, budget), say so in one line and send ``context: mcp connection: none - use REST fallback``. Never let a Lead discover "no connection" on its own and misread it as "MCP not callable".
+**Live semantic models: connect before you dispatch.** Dispatched agents cannot answer sign-in prompts, so when a request needs a live model (live DAX, metadata, measure edits on a running model) YOU open the Power BI modeling MCP connection first, here in the main chat: resolve any GUIDs to exact display names (``fab api workspaces/<id>``, ``.../items/<id>``), then ``connection_operations`` -> ``ConnectFabric`` with ``workspaceName`` and ``semanticModelName``. You hold this server only for connection management and read-only checks - you never edit a model through it. Put the returned name in every WORK ORDER as ``context: mcp connection: <name>``. If it cannot connect (tool not listed, auth blocked, budget), say so in one line and send ``context: mcp connection: none - reason: <error> - use REST fallback``; Leads treat that as final. Never let a Lead discover "no connection" on its own and misread it as "MCP not callable".
 
 **Empty or block-less returns are not results.** If a Lead comes back with no output or without a WORK RESULT block, re-dispatch the same Lead once with ``context: your previous turn ended without a WORK RESULT; resume from where you stopped and end with the WORK RESULT block``. Only if that also fails do you report the gap to the client - you never fill it by doing the work or the verification yourself.
 
@@ -5957,7 +6291,7 @@ risks: <grain / storage mode / breaking measures or visuals / schedules / PROD e
 decisions for the user: <only genuine choices, with a recommendation each>
 ``````
 
-Return the PLAN to whoever dispatched you (Master or a Team Lead). Do not execute it unless the Master explicitly instructs you to run it through the Team Leads.
+Return the PLAN to whoever dispatched you (Master or a Team Lead) **inside your WORK RESULT**: ``status: DONE`` (or ``NEEDS INPUT`` when a decision blocks planning), ``changed: none``, and the complete PLAN block verbatim in the ``payload:`` field. Never send the PLAN without the WORK RESULT wrapper, and never compress it into the other fields. Do not execute it unless the Master explicitly instructs you to run it through the Team Leads.
 
 ## Two ways you are used
 
@@ -5980,6 +6314,8 @@ environment/branch: <aligned | mismatch details>
 security/privacy: <ok | findings>
 remaining approvals: <or none>
 ``````
+
+Return it **inside your WORK RESULT**: ``status: DONE`` for ACCEPT / ACCEPT WITH RISKS, ``status: DONE WITH RISKS`` for REJECT (the defects are the risks), ``changed: none``, and the complete VERDICT block verbatim in the ``payload:`` field. Never send the VERDICT without the wrapper and never summarise defects away.
 "@
     }
 
@@ -6010,14 +6346,19 @@ Before GitHub, Azure DevOps, branch, PR, Fabric Git, deployment, or release work
 
 This team owns the workspace's established capability lifecycle: upstream Microsoft and Kurt repository refresh, dynamic skill inventory, agent coverage, installer health, and all supported tool detection, installation, update, PATH recovery, and validation.
 
-Preserve the installer-first experience and its locked-down-laptop fallbacks. When setup cannot install or update a tool, diagnose the exact failure, obtain explicit approval before changing software, use the approved user-scope or portable fallback, validate the real executable, and refresh ``.github/agent-docs/tool-status.json``. Vendor repository refreshes use the SAME rule as the installer (mirror-from-upstream, nothing lost): ``git fetch --prune origin``; if ``git status --porcelain`` shows local edits, ``git stash push -u -m "maintenance-autostash <timestamp>"`` first and tell the user how to recover; then ``git reset --hard origin/HEAD``. An offline or missing repository is reported and skipped. Never push to a vendor repository and never edit its files. After a refresh, re-register skill containers (``chat.agentSkillsLocations``) if new folders appeared (the session status script also does this).
+Preserve the installer-first experience and its locked-down-laptop fallbacks. When setup cannot install or update a tool, diagnose the exact failure, obtain explicit approval before changing software, use the approved user-scope or portable fallback, validate the real executable, and refresh ``.github/agent-docs/tool-status.json``.
+
+**Two kinds of repository, two rules - never mix them up:**
+
+- **Vendor skill clones** (``skills-for-fabric``, ``power-bi-agentic-development``) are mirrors of upstream and are refreshed ONLY by **071 - Upstream Repository Sync Agent**, with the installer's exact rule: first confirm the folder is the root of its own repository (``git rev-parse --show-toplevel`` equals the folder) and that ``origin`` is the expected GitHub URL; then ``git fetch --prune origin``; if ``git status --porcelain`` shows local edits, ``git stash push -u -m "maintenance-autostash <timestamp>"`` and tell the user the stash name; then ``git reset --hard origin/HEAD`` and verify ``HEAD`` equals ``origin/HEAD``. **Stop and report instead of resetting** when: the folder is not its own repository root, ``origin`` is not the expected URL, the fetch fails (offline/blocked), or the stash fails / the tree is still dirty after it. Never push to a vendor repository and never edit its files. After a refresh, re-register skill containers (``chat.agentSkillsLocations``) if new folders appeared (the session status script also does this).
+- **Business repositories** under ``source-control-repositories/`` belong to the ALM & DevOps team and are **never** stashed, reset, cleaned or overwritten by this team; a dirty or diverged one is only reported.
 
 When selected directly, first offer:
 
-1. **Light maintenance** — refresh the two upstream repositories to live upstream (stash-then-mirror, via 071), re-register skill folders, then refresh the current tool inventory.
+1. **Light maintenance** — refresh the two vendor clones to live upstream (via 071, rule above), re-register skill folders, then refresh the current tool inventory.
 2. **Deep maintenance** — light maintenance plus dynamic skill inventory/mapping, agent coverage review, installed-tool version review, and installer health checks.
 
-For either level, report a dirty, missing, offline, or diverged repository and continue with unaffected checks; never reset or overwrite it. A tool installation or update is never implied by either maintenance level: identify the exact proposed software change and obtain separate explicit approval before delegating it to Environment & Tooling Agent.
+For either level, report any repository that hits a stop condition and continue with the unaffected checks. A tool installation or update is never implied by either maintenance level: identify the exact proposed software change and obtain separate explicit approval before delegating it to Environment & Tooling Agent.
 "@
     }
 
@@ -6049,6 +6390,7 @@ changed: <files / live objects, or none>
 validation: <what was run and the outcome - never claim a check you did not run>
 risks: <or none>
 request: <exact approval token, question, design decision, or correct owner - only when status is not DONE>
+payload: <Architect: the full PLAN block | QA: the full VERDICT block | others: omit>
 ``````
 "@
     }
@@ -6099,7 +6441,10 @@ cross-domain reviewers, and seven Team Leads; they delegate to 37 focused worker
 Nested delegation (Master -> Lead -> Worker) requires the VS Code setting
 `chat.subagents.allowInvocationsFromSubagents: true`, which the installer writes into
 both `.vscode/settings.json` and the generated `.code-workspace`; open the workspace
-from that file so Team Leads can reach their workers. Dispatched agents cannot ask the
+from that file (or with File > Open Folder) so Team Leads can reach their workers.
+The setting is window-scoped: if you open the folder from your OWN saved
+`.code-workspace`, that file must contain it too (the session status block names any
+such file that lacks it). Dispatched agents cannot ask the
 user questions: approvals and open questions bubble up to the agent you selected.
 - **001 - Fabric Solution Architect** -- cross-domain design and ownership
 - **002 - Integration QA & Change Controller** -- cross-artifact acceptance
@@ -6188,8 +6533,11 @@ $agentsReadme = @'
 
 ## How to use
 
-Open the workspace from the installer-generated `.code-workspace` file (it carries the
-setting that lets Team Leads dispatch their workers).
+Open the workspace from the installer-generated `.code-workspace` file or with
+File > Open Folder (both carry the setting that lets Team Leads dispatch their
+workers). If you use your own saved `.code-workspace`, add
+`"chat.subagents.allowInvocationsFromSubagents": true` to its `settings` block - the
+setting is window-scoped, so the folder's `.vscode/settings.json` does not apply there.
 In Copilot Chat, select **000 - Fabric Workspace Master** from the agent dropdown and
 describe what you need. The Master runs a one-call session status (skills freshness,
 identity, live tool check), then routes your request through the teams itself - you
@@ -6361,6 +6709,45 @@ $existed = Test-Path $settingsPath
 Merge-JsonSettings $settingsPath $requiredSettings
 Write-Host "  $(if ($existed) {'Merged'} else {'Written'}): .vscode/settings.json" -ForegroundColor Green
 
+# -- User-saved .code-workspace files that open this folder ------------------
+# Opened from such a file, VS Code ignores .vscode/settings.json: nested dispatch
+# and the skill locations (which change whenever the vendor clones restructure)
+# must be inside that file. Runs here so the freshly discovered skill list is used.
+# Only missing entries are added, so a re-run after patching lists nothing.
+if (-not $EmitAgentsTo) {
+    $requiredSkillLocs = @($skillLocations.Keys | ForEach-Object {
+        if ($_ -match '^~[\\/]' -or [IO.Path]::IsPathRooted($_)) { $_ } else { Join-Path $rootPath ($_ -replace '/', '\') }
+    })
+    $userWsFiles = @(Get-UserWorkspaceFilesForRoot -RootPath $rootPath -RequiredSkillLocations $requiredSkillLocs |
+        Where-Object { -not $_.NestedDispatch -or $_.MissingSkillLocations.Count -gt 0 })
+    if ($userWsFiles.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  Saved VS Code workspace file(s) that open this folder are out of date" -ForegroundColor Yellow
+        Write-Host "  (opened from one, VS Code ignores .vscode/settings.json):" -ForegroundColor Yellow
+        foreach ($uw in $userWsFiles) {
+            $why = @()
+            if (-not $uw.NestedDispatch) { $why += 'nested-dispatch setting missing (Team Leads cannot dispatch workers)' }
+            if ($uw.MissingSkillLocations.Count -gt 0) { $why += "$($uw.MissingSkillLocations.Count) skill location(s) missing" }
+            Write-Host "    $($uw.Path)" -ForegroundColor Yellow
+            Write-Host "      $($why -join '; ')" -ForegroundColor DarkGray
+        }
+        $patchAns = Read-Host '  Update their settings block (adds only what is missing)? (Y/n)'
+        if ($patchAns -notmatch '^\s*(n|no)\s*$') {
+            foreach ($uw in $userWsFiles) {
+                try {
+                    $hadComments = Update-UserWorkspaceFile -Path $uw.Path -SkillLocations $uw.MissingSkillLocations
+                    $note = if ($hadComments) { ' (comments in the file were not preserved)' } else { '' }
+                    Write-Host "    Updated: $($uw.Path)$note" -ForegroundColor Green
+                } catch {
+                    Write-Host "    Could not patch $($uw.Path) -- add the settings by hand." -ForegroundColor Yellow
+                }
+            }
+        } else {
+            Write-Host '  Skipped. Open the folder directly (File > Open Folder) or add the settings to that file by hand.' -ForegroundColor DarkGray
+        }
+    }
+}
+
 # -- .github/agent-docs/tool-status.json (machine-specific tool inventory) -----
 # Written from the $script:ToolStatus map built during prerequisite detection.
 # Agents read this to decide whether a deterministic tool is available.
@@ -6476,7 +6863,10 @@ if ($selfTestPassed) {
 # this manifest.
 $integrityFiles = [System.Collections.Generic.List[object]]::new()
 $integrityTargets = @()
-$integrityTargets += @($writtenAgentFiles | ForEach-Object { $_.FullName })
+# Only agents DECLARED by this build are installer-owned. Hashing every file found
+# in .github/agents would adopt user-authored agents (and agents retired by this
+# release) into the manifest, so the old-minus-new purge below could never remove them.
+$integrityTargets += @($managedAgents | ForEach-Object { Join-Path $agentsDirPath $_ })
 foreach ($cfgRel in $managedConfigs) {
     $integrityTargets += (Join-Path $rootPath $cfgRel)
 }
@@ -6504,6 +6894,7 @@ foreach ($target in $integrityTargets) {
 #     were ever listed, and the diff is skipped entirely on an unknown schema.
 $manifestPath = "$rootPath\.github\agent-docs\installed-manifest.json"
 $previousManifestPaths = @()
+$purgedPaths = @()
 if (Test-Path -LiteralPath $manifestPath) {
     try {
         $prevManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
@@ -6531,17 +6922,24 @@ if ($previousManifestPaths.Count -gt 0) {
         '.github/agent-docs/local/repository-map.local.json'
     )
     $purged = 0
+    $rootCanonical = [IO.Path]::GetFullPath($rootPath).TrimEnd('\') + '\'
     foreach ($rel in $previousManifestPaths) {
         if ($newManifestPaths -contains $rel) { continue }
         if ($purgeExcluded -contains $rel) { continue }
+        # Reject anything that is not a plain relative path (a tampered manifest
+        # must not be able to point the purge outside the installer-owned roots).
+        if ($rel -match '(^|[\\/])\.\.([\\/]|$)' -or $rel -match '^[A-Za-z]:' -or $rel.StartsWith('/') -or $rel.StartsWith('\')) { continue }
         $inRoot = ($purgeAllowedExact -contains $rel) -or (@($purgeAllowedPrefixes | Where-Object { $rel.StartsWith($_) }).Count -gt 0)
         if (-not $inRoot) { continue }
-        $abs = Join-Path $rootPath ($rel -replace '/', '\')
+        $abs = [IO.Path]::GetFullPath((Join-Path $rootPath ($rel -replace '/', '\')))
+        if (-not $abs.StartsWith($rootCanonical, [StringComparison]::OrdinalIgnoreCase)) { continue }
         if (Test-Path -LiteralPath $abs -PathType Leaf) {
             try {
-                Remove-Item -LiteralPath $abs -Force
+                Remove-Item -LiteralPath $abs -Force -ErrorAction Stop
+                if (Test-Path -LiteralPath $abs) { throw 'still present after Remove-Item' }
                 Write-Host "  Purged obsolete installer file: $rel" -ForegroundColor DarkGray
                 $purged++
+                $purgedPaths += $rel
             } catch {
                 Write-Host "  Could not purge $rel (in use?) -- leaving in place." -ForegroundColor Yellow
             }
@@ -6605,13 +7003,18 @@ try {
                 @($managedAgents | ForEach-Object { ".github/agents/$_" })
                 @($managedSkills | ForEach-Object { ".github/skills/$_" })
                 @($managedConfigs)
+                @($legacyManagedAgents | ForEach-Object { ".github/agents/$_" })
+                @($purgedPaths)
             ) | ForEach-Object { ([string]$_).Replace('\', '/') } | Sort-Object -Unique
             foreach ($path in $declaredPaths) {
-                if (-not (Test-Path -LiteralPath (Join-Path $rootPath $path))) { continue }
+                $exists = Test-Path -LiteralPath (Join-Path $rootPath $path)
                 # Do not use `ls-files --error-unmatch` here: an intentionally
                 # ignored, untracked managed file produces a native Git error on
                 # reruns even though excluding that path is the desired result.
                 $tracked = @(& git ls-files -- $path 2>$null).Count -gt 0
+                # A retired managed file that is still tracked must have its DELETION
+                # staged, otherwise the update commit leaves it alive in history.
+                if (-not $exists -and -not $tracked) { continue }
                 & git check-ignore -q -- $path 2>$null
                 $ignored = ($LASTEXITCODE -eq 0)
                 if ($tracked -or -not $ignored) { $commitPaths += $path }

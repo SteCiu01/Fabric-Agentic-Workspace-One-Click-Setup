@@ -70,7 +70,7 @@ when it needs to be installed from scratch.
   - [A bit of history: how Fabric/Power BI work used to flow](#a-bit-of-history-how-fabricpower-bi-work-used-to-flow)
   - [Three ways of working](#three-ways-of-working)
 - [FAQ](#faq)
-- [Current status (v0.7.0)](#current-status-v070)
+- [Current status (v0.7.1)](#current-status-v071)
 - [Contributing](#contributing)
 - [Files in this repository](#files-in-this-repository)
 - [License](#license)
@@ -451,7 +451,7 @@ Follow the prompts. The script will:
 7. Clone Microsoft's skills-for-fabric and data-goblin's power-bi-agentic-development
 8. Write custom skills (TMDL, Pipelines, CLI policy)
 9. Generate all agent definitions (47 agents: 10 visible + 37 delegated workers)
-10. Write or merge configuration files (Copilot instructions, AGENTS.md, `.gitignore`, VS Code settings, the local repository map, multi-root workspace, and tool inventory)
+10. Write or merge configuration files (Copilot instructions, AGENTS.md, `.gitignore`, VS Code settings, the local repository map, multi-root workspace, and tool inventory). If you keep your **own saved VS Code workspace files** (`.code-workspace`) that open this folder, it lists those missing the nested-dispatch setting or any of the current skill locations and asks before adding only what is missing
 11. Initialise Git when needed, then create an initial commit or an installer-owned update commit when there are relevant changes
 12. Open the multi-root workspace in VS Code
 
@@ -464,13 +464,23 @@ Once VS Code opens:
 3. Describe what you need (or just say hi) — the Master takes over from here
 
 > Open the workspace from the installer-generated `.code-workspace` file (VS Code
-> offers to save it). It carries `chat.subagents.allowInvocationsFromSubagents: true`,
-> the VS Code setting that lets Team Leads dispatch their workers; without it only the
-> first level of delegation (Master → Team Lead) is available.
+> offers to save it) or with **File > Open Folder**. Both carry
+> `chat.subagents.allowInvocationsFromSubagents: true`, the VS Code setting that lets
+> Team Leads dispatch their workers; without it only the first level of delegation
+> (Master → Team Lead) is available.
+>
+> **Using your own saved `.code-workspace`?** That setting and `chat.agentSkillsLocations`
+> are *window-scoped*: when a window is opened from a workspace file, VS Code ignores the
+> folder's `.vscode/settings.json` for it, so your file must contain them too. The
+> installer offers to add whatever is missing (Step 8; re-running after the vendor skill
+> repositories change picks up new skill folders), and if the dispatch setting is still
+> missing the Master's status block names the exact file. Fix by hand: add
+> `"chat.subagents.allowInvocationsFromSubagents": true` inside that file's
+> `"settings"` block, then **Developer: Reload Window**.
 
 On the first message the Master runs **one** status script and shows one compact block:
 - Skill freshness (real upstream commit dates for the two clones, install date for the custom skills)
-- Registered skill locations and whether nested dispatch is enabled
+- Registered skill locations and whether nested dispatch is enabled (including a warning naming any saved `.code-workspace` that opens the folder without the setting)
 - Identity (`fab auth status`, falling back to `az account show`) — informational, never blocking
 - Live tool check (refreshes `tool-status.json` if something was installed or removed since setup)
 - MCP servers: *installed* vs *connected* — installed is never presented as callable
@@ -610,7 +620,6 @@ Fabric Workspaces/
 │   ├── settings.json
 │   └── tasks.json
 ├── AGENTS.md                                          ← quick-reference guide
-├── Fabric-Agentic-Workspace.code-workspace            ← local multi-root file (gitignored)
 ├── source-control-repositories/                       ← independent business clones (gitignored)
 ├── skills-for-fabric/                                 ← Microsoft skills (gitignored)
 │   ├── skills/
@@ -803,13 +812,13 @@ A: The installer writes `.github/agent-docs/tool-status.json` — a gitignored, 
 
 ---
 
-## Current status (v0.7.0)
+## Current status (v0.7.1)
 
 | Area | Status |
 |---|---|
 | One-click setup (.bat + .ps1) | **Validated manually** — the setup flow is maintainer-used on Windows 10/11, including a locked-down corporate laptop |
-| Master Agent session startup flow | **Lean since v0.7.0** — one `Get-SessionStatus.ps1` call (skill freshness, registered skills, nested-dispatch check, identity, live tool re-check), one compact status block, then straight to work; no blocking menus |
-| Hierarchical routing | **Fine-tuned in v0.7.0** — the installer now configures nested delegation, so the full Master → Team Lead → Worker → Lead → Master path is available out of the box; verified with single-team, multi-team (Architect PLAN + QA VERDICT) and approval-bubble scenarios |
+| Master Agent session startup flow | **Lean since v0.7.0** — one `Get-SessionStatus.ps1` call (skill freshness, registered skills, nested-dispatch check incl. any user-saved `.code-workspace` that opens the folder without the setting, identity, live tool re-check), one compact status block, then straight to work; no blocking menus |
+| Hierarchical routing | **Fine-tuned in v0.7.0, hardened in v0.7.1** — the installer configures nested delegation, so the full Master → Team Lead → Worker → Lead → Master path is available out of the box; verified with single-team, multi-team (Architect PLAN + QA VERDICT) and approval-bubble scenarios. Since v0.7.1 parents dispatch children in parallel only when their artifacts are independent and at most one needs the terminal (the shell is shared and terminal work is sequenced), every executing agent uses uniquely named script/output files, and a dropped write-capable dispatch is resumed with an inspect-first instruction instead of a blind retry |
 | Agent → tools → skills model | **Implemented** — every agent carries a Knowledge section (resolved custom/Microsoft/Kurt skill paths + auto-discovered upstream skills), a Playbook, mandatory validation, a tool ladder and an Avoid list |
 | Team protocol | **Implemented in v0.7.0** — WORK ORDER / WORK RESULT contracts, three loops (Simple / Designed / Blocked), strict `APPROVED:<ACTION>:<artifact>` tokens for destructive work, session ledger |
 | Tool inventory (`tool-status.json`) | **Implemented** — installer detects real executable paths/versions; refreshed live at every session start; Capability Maintenance owns approved installation/update and PATH recovery |
@@ -823,12 +832,12 @@ A: The installer writes `.github/agent-docs/tool-status.json` — a gitignored, 
 | Custom CLI-policy skill | **Used in real work** — `fab`-first / `az`-fallback decision rule that every agent reads before a CLI/REST task |
 | CLI deep-dive (`CLI-FUNCTIONALITIES.md`) | **Expanded** — two-part mini-book: `fab`/`az` workload guide plus a chapter per specialist CLI |
 | Three ways of working (local / live / hybrid) | **Documented and verified** — live mode exercised in v0.7.0 testing (semantic model published to Fabric via REST, refreshed, regression DAX run) |
-| Microsoft skills-for-fabric integration | **Implemented; refresh hardened in v0.7.0** — the clone is mirrored to upstream on every run with explicit success/failure reporting, and every skill folder is registered natively for the agents |
-| Data-goblin skills integration | **Implemented; refresh hardened in v0.7.0** — as above |
-| Idempotent re-run (update mode) | **Implemented** — managed files refreshed; existing-repository Git commits are limited to installer-owned paths; user files and unrelated Git work are untouched |
-| Authoritative install + self-pruning | **Implemented in v0.6.2** — vendor skill repos force-refreshed to upstream (local edits auto-stashed); managed files overwritten every run; obsolete installer files purged via a strict `installed-manifest.json` diff; user files, Fabric workspaces and business clones never touched |
-| Portable download/rollback safety | **Implemented in v0.6.0** — staged extraction, executable validation, official checksums/signatures where available, and prior-version restoration on activation failure |
-| Automated regression tests | **Widened in v0.7.0** — the Pester suite now also asserts the generated agents' content (Knowledge/Playbook/Return-contract sections, approval-token rule, no unresolved skill references), the emitted settings (nested dispatch, skill locations), the status script and the handoff; end-to-end live validation remains manual |
+| Microsoft skills-for-fabric integration | **Implemented; refresh hardened in v0.7.0 and v0.7.1** — the clone is mirrored to upstream on every run with explicit success/failure reporting (a failed stash leaves the clone untouched; success is only claimed when `HEAD` verifiably equals the upstream commit), and every skill folder is registered natively for the agents |
+| Data-goblin skills integration | **Implemented; refresh hardened in v0.7.0 and v0.7.1** — as above |
+| Idempotent re-run (update mode) | **Implemented; hardened in v0.7.1** — managed files refreshed; the session `.code-workspace` and JSONC `settings.json` are merged (user roots, settings and comments-as-values survive); existing-repository Git commits are limited to installer-owned paths and now also stage deletions of retired managed files; user files and unrelated Git work are untouched |
+| Authoritative install + self-pruning | **Implemented in v0.6.2, hardened in v0.7.1** — vendor skill repos force-refreshed to upstream only after verifying the folder is its own repository root with the expected `origin` (local edits auto-stashed, stash name reported); managed files overwritten every run; obsolete installer files purged via a strict `installed-manifest.json` diff that hashes only declared agents and checks canonical path containment; user files, user-authored agents, Fabric workspaces and business clones never touched |
+| Portable download/rollback safety | **Implemented in v0.6.0, hardened in v0.7.1** — staged extraction, executable validation, official checksums/signatures where available, prior-version restoration on activation failure (cleanup of the old copy happens only after activation is committed), and winget payloads accepted only after a clean exit |
+| Automated regression tests | **Widened in v0.7.0 and v0.7.1** — the Pester suite asserts the generated agents' content (Knowledge/Playbook/Return-contract sections, approval-token rule, no unresolved skill references, every tool an agent is told to use is actually granted in its frontmatter, one maintenance refresh policy, tier-aware terminal rules, PLAN/VERDICT inside the WORK RESULT), the emitted settings (nested dispatch, skill locations), the vendor refresh failure and identity-guard paths, update-mode safety (JSONC settings, workspace merge, purge containment) and the emitted status script run offline against a scratch workspace; end-to-end live validation remains manual |
 
 This is a pre-release. It is genuinely useful today, but expect rough edges. If something breaks, [open an issue](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/issues).
 

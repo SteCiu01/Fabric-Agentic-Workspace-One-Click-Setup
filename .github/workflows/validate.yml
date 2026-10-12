@@ -9,12 +9,16 @@ on:
       - 'fabric-agentic-installer/**'
       - 'schema/**'
       - 'tests/**'
+      - 'README.md'
+      - 'CHANGELOG.md'
       - '.github/workflows/validate.yml'
   pull_request:
     paths:
       - 'fabric-agentic-installer/**'
       - 'schema/**'
       - 'tests/**'
+      - 'README.md'
+      - 'CHANGELOG.md'
       - '.github/workflows/validate.yml'
   workflow_dispatch:
 
