@@ -29,7 +29,7 @@ param(
 
 # Keep the window open on any error so the user can read it
 $ErrorActionPreference = 'Stop'
-$productVersion = '0.7.1'
+$productVersion = '0.7.2'
 $workspaceFileName = 'Fabric-Agentic-Workspace.code-workspace'
 
 # SHA256 helper that does not hard-depend on the Get-FileHash cmdlet. A Windows
@@ -176,7 +176,7 @@ if ($VerifyRoot) {
 $agentManifestJson = @'
 {
   "schemaVersion": 1,
-  "productVersion": "0.7.1",
+  "productVersion": "0.7.2",
   "defaults": {
     "mode": "both",
     "tools": ["read","search"],
@@ -1731,6 +1731,167 @@ function Update-UserWorkspaceFile {
     [IO.File]::WriteAllText($Path, ($wsj | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding($false)))
     # True when the original had comments, which ConvertTo-Json cannot keep.
     return [bool]($raw -match '(?m)^\s*//|/\*')
+}
+
+# -- Helper: VS Code user settings.json (default profile) ----------------------
+function Get-VsCodeUserSettingsPath {
+    if ($env:FABRIC_AGENTIC_USER_SETTINGS) { return $env:FABRIC_AGENTIC_USER_SETTINGS }
+    return (Join-Path $env:APPDATA 'Code\User\settings.json')
+}
+
+# Settings files of custom VS Code Profiles (each profile has its own settings.json).
+function Get-VsCodeProfileSettingsPaths {
+    $profiles = Join-Path $env:APPDATA 'Code\User\profiles'
+    if (-not (Test-Path -LiteralPath $profiles)) { return @() }
+    return @(Get-ChildItem -LiteralPath $profiles -Directory -ErrorAction SilentlyContinue |
+        ForEach-Object { Join-Path $_.FullName 'settings.json' } | Where-Object { Test-Path -LiteralPath $_ })
+}
+
+# Index just past the matching close brace of the object that opens at $OpenIndex,
+# skipping string literals and // or /* */ comments. -1 when unbalanced.
+function Find-JsonObjectEnd ([string]$Text, [int]$OpenIndex) {
+    $depth = 0; $i = $OpenIndex; $n = $Text.Length
+    while ($i -lt $n) {
+        $c = $Text[$i]
+        if ($c -eq '"') {
+            $i++
+            while ($i -lt $n -and $Text[$i] -ne '"') { if ($Text[$i] -eq '\') { $i++ }; $i++ }
+        } elseif ($c -eq '/' -and $i + 1 -lt $n -and $Text[$i + 1] -eq '/') {
+            while ($i -lt $n -and $Text[$i] -ne "`n") { $i++ }
+            continue
+        } elseif ($c -eq '/' -and $i + 1 -lt $n -and $Text[$i + 1] -eq '*') {
+            $end = $Text.IndexOf('*/', $i + 2); if ($end -lt 0) { return -1 }; $i = $end + 2; continue
+        } elseif ($c -eq '{' -or $c -eq '[') { $depth++ }
+        elseif ($c -eq '}' -or $c -eq ']') { $depth--; if ($depth -eq 0) { return $i + 1 } }
+        $i++
+    }
+    return -1
+}
+
+# Index of the first `//` outside a string literal in one line, or -1.
+function Find-LineCommentStart ([string]$Line) {
+    $inStr = $false
+    for ($i = 0; $i -lt $Line.Length; $i++) {
+        $c = $Line[$i]
+        if ($inStr) { if ($c -eq '\') { $i++ } elseif ($c -eq '"') { $inStr = $false }; continue }
+        if ($c -eq '"') { $inStr = $true; continue }
+        if ($c -eq '/' -and $i + 1 -lt $Line.Length -and $Line[$i + 1] -eq '/') { return $i }
+    }
+    return -1
+}
+
+# Insert "$Member" as the last property of the object whose closing brace is at
+# $CloseIndex, adding the separating comma only when needed. Trailing comments
+# before the brace are left where they are.
+function Add-JsonMemberBeforeClose ([string]$Text, [int]$CloseIndex, [string]$Member, [string]$Indent, [string]$Nl) {
+    $before = $Text.Substring(0, $CloseIndex)
+    # Walk back over whitespace and comments (whole-line, trailing and block) to the last value character.
+    $probe = $before
+    while ($true) {
+        $probe = $probe.TrimEnd()
+        $ls = $probe.LastIndexOf("`n") + 1
+        $ci = Find-LineCommentStart ($probe.Substring($ls))
+        if ($ci -ge 0) { $probe = $probe.Substring(0, $ls + $ci); continue }
+        $m2 = [regex]::Match($probe, '(?s)/\*(?:(?!\*/).)*\*/$')
+        if ($m2.Success) { $probe = $probe.Substring(0, $m2.Index); continue }
+        break
+    }
+    $insertAt = $probe.Length
+    $last = if ($insertAt -gt 0) { $probe[$insertAt - 1] } else { '{' }
+    $comma = if ($last -eq '{' -or $last -eq ',' -or $last -eq '[') { '' } else { ',' }
+    $closeIndent = ''
+    $lineStart = $before.LastIndexOf("`n") + 1
+    if ($lineStart -le $CloseIndex) { $closeIndent = $before.Substring($lineStart) -replace '[^ \t].*$', '' }
+    return $before.Substring(0, $insertAt) + $comma + $Nl + $closeIndent + $Indent + $Member + $before.Substring($insertAt) + $Text.Substring($CloseIndex)
+}
+
+# -- Helper: enable the agent team in VS Code USER settings, editing in place -------
+# Writes exactly two things and nothing else: `chat.subagents.allowInvocationsFromSubagents`
+# = true (window-scoped, so user level is the only scope that reaches every window,
+# including untitled/saved multi-root workspaces) and the given WORKSPACE-RELATIVE
+# skill locations merged into `chat.agentSkillsLocations` (VS Code resolves relative
+# entries against the open workspace folders, so they activate only where this
+# workspace is open). Text is edited in place: comments, order and formatting of the
+# user's file survive. Idempotent. Returns @{ Changed; FlagAdded; LocationsAdded }.
+function Update-UserSettingsInPlace {
+    param([string]$Path, [string[]]$SkillLocations = @())
+    $flagKey = 'chat.subagents.allowInvocationsFromSubagents'
+    $locKey  = 'chat.agentSkillsLocations'
+    $result = @{ Changed = $false; FlagAdded = $false; LocationsAdded = @() }
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    $SkillLocations = @($SkillLocations | Where-Object { $_ -and -not [IO.Path]::IsPathRooted($_) -and $_ -notmatch '^~[\\/]' } | ForEach-Object { $_.Replace('\', '/') } | Sort-Object -Unique)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        $locs = ($SkillLocations | ForEach-Object { "        `"$_`": true" }) -join ",`r`n"
+        $body = "{`r`n    `"$flagKey`": true"
+        if ($SkillLocations.Count -gt 0) { $body += ",`r`n    `"$locKey`": {`r`n$locs`r`n    }" }
+        $body += "`r`n}`r`n"
+        $dir = Split-Path $Path -Parent
+        if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        [IO.File]::WriteAllText($Path, $body, $utf8)
+        $result.Changed = $true; $result.FlagAdded = $true; $result.LocationsAdded = $SkillLocations
+        return $result
+    }
+
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    $hadBom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
+    $text = [Text.Encoding]::UTF8.GetString($bytes); if ($hadBom) { $text = $text.Substring(1) }
+    if ([string]::IsNullOrWhiteSpace($text)) { $text = "{`r`n}`r`n" }
+    $parsed = ConvertFrom-JsonLenient $text
+    if ($null -eq $parsed) { throw "user settings file is not valid JSON/JSONC: $Path" }
+    $nl = if ($text -match "`r`n") { "`r`n" } else { "`n" }
+    $indentMatch = [regex]::Match($text, '(?m)^([ \t]+)"')
+    $indent = if ($indentMatch.Success) { $indentMatch.Groups[1].Value } else { '    ' }
+
+    # 1) dispatch flag: flip an existing value, or append the key to the root object.
+    $flagRx = [regex]::new('"' + [regex]::Escape($flagKey) + '"\s*:\s*(true|false)')
+    $fm = $flagRx.Match($text)
+    if ($fm.Success) {
+        if ($fm.Groups[1].Value -ne 'true') {
+            $text = $text.Substring(0, $fm.Groups[1].Index) + 'true' + $text.Substring($fm.Groups[1].Index + $fm.Groups[1].Length)
+            $result.Changed = $true; $result.FlagAdded = $true
+        }
+    } else {
+        $rootClose = $text.LastIndexOf('}')
+        if ($rootClose -lt 0) { throw "user settings file has no root object: $Path" }
+        $text = Add-JsonMemberBeforeClose $text $rootClose ("`"$flagKey`": true") $indent $nl
+        $result.Changed = $true; $result.FlagAdded = $true
+    }
+
+    # 2) workspace-relative skill locations: merge missing keys into the existing object.
+    if ($SkillLocations.Count -gt 0) {
+        $existing = @{}
+        if ($parsed.PSObject.Properties[$locKey] -and $parsed.$locKey) {
+            foreach ($p in $parsed.$locKey.PSObject.Properties) { $existing[$p.Name.Replace('\', '/').ToLowerInvariant()] = $true }
+        }
+        $missing = @($SkillLocations | Where-Object { -not $existing.ContainsKey($_.ToLowerInvariant()) })
+        if ($missing.Count -gt 0) {
+            $keyRx = [regex]::new('"' + [regex]::Escape($locKey) + '"\s*:\s*\{')
+            $km = $keyRx.Match($text)
+            if ($km.Success) {
+                $open = $km.Index + $km.Length - 1
+                $end = Find-JsonObjectEnd $text $open
+                if ($end -lt 0) { throw "could not parse $locKey in $Path" }
+                foreach ($loc in $missing) {
+                    $end = Find-JsonObjectEnd $text $open
+                    $text = Add-JsonMemberBeforeClose $text ($end - 1) ("`"$loc`": true") $indent $nl
+                }
+            } else {
+                $inner = ($missing | ForEach-Object { $indent + $indent + "`"$_`": true" }) -join (',' + $nl)
+                $block = "`"$locKey`": {" + $nl + $inner + $nl + $indent + '}'
+                $rootClose = $text.LastIndexOf('}')
+                $text = Add-JsonMemberBeforeClose $text $rootClose $block $indent $nl
+            }
+            $result.Changed = $true; $result.LocationsAdded = $missing
+        }
+    }
+
+    if ($result.Changed) {
+        if ($null -eq (ConvertFrom-JsonLenient $text)) { throw "refusing to write: edited user settings would not parse ($Path)" }
+        $enc = if ($hadBom) { New-Object System.Text.UTF8Encoding($true) } else { $utf8 }
+        [IO.File]::WriteAllText($Path, $text, $enc)
+    }
+    return $result
 }
 
 # Returns workspace-relative (forward-slash) folders that directly contain skill
@@ -4629,6 +4790,7 @@ $ErrorActionPreference = 'SilentlyContinue'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 if (-not (Test-Path -LiteralPath (Join-Path $root '.github\agents'))) { $root = (Get-Location).Path }
 $out = New-Object System.Collections.Generic.List[string]
+$out.Add("GENERATED $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss')) (local) -- a block older than ~1 hour is stale: re-run the script in a NEW terminal")
 $out.Add("ROOT     $root")
 
 function Get-RepoDate([string]$rel) {
@@ -4661,11 +4823,31 @@ $stale = @()
 foreach ($pair in @(@('Microsoft', $ms), @('Kurt', $kurt))) { $age = Get-AgeDays $pair[1]; if ($age -gt 30) { $stale += "$($pair[0]) ($age d)" } }
 if ($stale.Count -gt 0) { $out.Add("         Upstream older than 30 days: $($stale -join ', ') -> say 'run maintenance' to refresh.") }
 
+# -- USER-level settings (reach every window, incl. multi-root/untitled workspaces) --
+# Both keys are window-scoped; user level is the only scope that works however the
+# folder was opened. Relative skill locations resolve against the open workspace folders.
+function ConvertFrom-JsoncText([string]$t) {
+    if ([string]::IsNullOrWhiteSpace($t)) { return $null }
+    try { return ($t | ConvertFrom-Json) } catch { }
+    try { return (([regex]::Replace($t, '(?s)"(?:\\.|[^"\\])*"|//[^\r\n]*|/\*.*?\*/', { param($m) if ($m.Value.StartsWith('"')) { $m.Value } else { '' } }) -replace ',(\s*[}\]])', '$1') | ConvertFrom-Json) } catch { return $null }
+}
+$userSettingsPath = if ($env:FABRIC_AGENTIC_USER_SETTINGS) { $env:FABRIC_AGENTIC_USER_SETTINGS } else { Join-Path $env:APPDATA 'Code\User\settings.json' }
+$userFlag = $false; $userRelLocs = 0
+if (Test-Path -LiteralPath $userSettingsPath) {
+    $us = ConvertFrom-JsoncText (Get-Content -LiteralPath $userSettingsPath -Raw)
+    if ($us) {
+        $userFlag = ($us.'chat.subagents.allowInvocationsFromSubagents' -eq $true)
+        $ul = $us.'chat.agentSkillsLocations'
+        if ($ul) { $userRelLocs = @($ul.PSObject.Properties | Where-Object { $_.Value -eq $true -and -not [IO.Path]::IsPathRooted([string]$_.Name) -and ([string]$_.Name) -notmatch '^~[\\/]' -and (Test-Path -LiteralPath (Join-Path $root ([string]$_.Name))) }).Count }
+    }
+}
+
 # -- Registered skill locations (self-heal: register new upstream containers) --
 $settingsPath = Join-Path $root '.vscode/settings.json'
 $nesting = 'unknown'
 $skillLocCount = 0
 $newlyRegistered = @()
+$folderFlag = $false
 if (Test-Path -LiteralPath $settingsPath) {
     try {
         $s = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
@@ -4682,11 +4864,14 @@ if (Test-Path -LiteralPath $settingsPath) {
         }
         if ($newlyRegistered.Count -gt 0) { [IO.File]::WriteAllText($settingsPath, ($s | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding($false))) }
         $skillLocCount = @($loc.PSObject.Properties | Where-Object { $_.Value -eq $true }).Count
-        $n = $s.'chat.subagents.allowInvocationsFromSubagents'
-        $nesting = if ($n -eq $true) { 'enabled in .vscode/settings.json' } else { 'NOT set in .vscode/settings.json -> Team Leads cannot dispatch workers; re-run the installer' }
+        $folderFlag = ($s.'chat.subagents.allowInvocationsFromSubagents' -eq $true)
     } catch { }
 }
-$out.Add("CONFIG   Skill locations registered: $skillLocCount | Nested dispatch: $nesting")
+$nesting = if ($userFlag) { 'enabled at user level (every VS Code window)' }
+           elseif ($folderFlag) { 'enabled in .vscode/settings.json only (File > Open Folder windows; NOT windows opened from a .code-workspace file)' }
+           else { 'NOT set -> Team Leads cannot dispatch workers; re-run the installer and answer Y to the user-settings prompt' }
+$locSummary = "$skillLocCount in .vscode/settings.json" + $(if ($userRelLocs -gt 0) { " | $userRelLocs workspace-relative in user settings (every window)" } else { '' })
+$out.Add("CONFIG   Skill locations registered: $locSummary | Nested dispatch: $nesting")
 if ($newlyRegistered.Count -gt 0) { $out.Add("         Newly registered skill folders (reload window to load them): $(($newlyRegistered | Sort-Object -Unique) -join ', ')") }
 
 # -- Saved .code-workspace files that open this root --
@@ -4728,9 +4913,11 @@ if (Test-Path -LiteralPath $storageRoot) {
         if ($n -eq $true) { $wsOk += $file } else { $wsMissing += $file }
     }
 }
-if ($wsMissing.Count -gt 0) {
+if ($userFlag) {
+    if ($wsMissing.Count -gt 0) { $out.Add("         Saved workspace file(s) opening this folder need no patch: the user-level setting applies to them ($($wsMissing.Count) file(s)).") }
+} elseif ($wsMissing.Count -gt 0) {
     $out.Add("         WARNING: saved workspace file(s) that open this folder LACK the nested-dispatch setting: $($wsMissing -join ' ; ')")
-    $out.Add('         If the VS Code title bar ends with "(Workspace)" you opened one of these and Team Leads cannot reach workers. Fix: add "chat.subagents.allowInvocationsFromSubagents": true inside its "settings" block (or re-run the installer and answer Y when it offers to patch saved workspace files), then Developer: Reload Window. Opening the folder directly (File > Open Folder) also works.')
+    $out.Add('         If the VS Code title bar ends with "(Workspace)" you opened one of these and Team Leads cannot reach workers. Fix (pick one): re-run the installer and answer Y to "Enable the agent team in your VS Code user settings" (covers every window); or add "chat.subagents.allowInvocationsFromSubagents": true inside that file''s "settings" block; or open the folder directly (File > Open Folder). Then Developer: Reload Window.')
 } elseif ($wsOk.Count -gt 0) {
     $out.Add("         Saved workspace file(s) opening this folder carry the setting: $($wsOk -join ' ; ')")
 }
@@ -4845,7 +5032,7 @@ Run exactly this, from the workspace root, in ONE terminal call:
 
   powershell -NoProfile -ExecutionPolicy Bypass -File .github/agent-docs/Get-SessionStatus.ps1
 
-It prints ROOT / SKILLS / CONFIG / MCP / IDENTITY / TOOLS lines and refreshes
+It prints GENERATED / ROOT / SKILLS / CONFIG / MCP / IDENTITY / TOOLS lines and refreshes
 `.github/agent-docs/tool-status.json` live (so the tool inventory is never a stale
 install-time snapshot). It also writes the same block to
 `.github/agent-docs/session-status.last.txt`. Relay it to the user as a compact block, for example:
@@ -4860,19 +5047,31 @@ install-time snapshot). It also writes the same block to
 Rules:
 - The status script resolves the workspace root from its own location, so run it
   exactly as written from any CWD. If it prints nothing, the persistent shell is
-  usually wedged: read `.github/agent-docs/session-status.last.txt` instead, or run
-  the same command once more in a NEW terminal. Then fall back as below.
+  usually wedged: run the same command once more in a NEW terminal. Only if that
+  also prints nothing, read `.github/agent-docs/session-status.last.txt`.
+- **Staleness guard.** Every block starts with `GENERATED <timestamp>`. Before relaying
+  a block you read from the fallback file (or recall from earlier in this chat), compare
+  that timestamp with the current time: older than ~1 hour means it predates this
+  session (an installer re-run or a settings change since then is invisible in it).
+  Say "status file is from <timestamp>, re-running" and run the script in a new
+  terminal; never present an old block as the current state. Blocks from previous
+  turns of this conversation are NOT a substitute for running the script now.
 - Do NOT ask whether to run maintenance. If the script flags upstream skills older
   than 30 days, add ONE line: "Upstream skills are >30 days old - say *run maintenance*
   whenever you want them refreshed." Then move on.
 - If the script says nested dispatch is NOT set, warn the user in one line that Team
-  Leads cannot reach their workers until the workspace is re-opened from the
-  installer-generated `.code-workspace` (or the setting is added), then continue.
+  Leads cannot reach their workers until it is enabled (re-run the installer and answer Y
+  to the user-settings prompt, or open the folder with File > Open Folder), then continue.
 - If the CONFIG block carries a WARNING naming saved workspace file(s) that LACK the
-  setting, relay that exact file path and the one-line fix in your status block. The
+  setting, relay that exact file path and the fix options in your status block. The
   setting is window-scoped: `.vscode/settings.json` having it does NOT help when the
-  window was opened from a `.code-workspace` file that lacks it. Never tell the user
-  `settings.json` is missing the setting without having read that file.
+  window was opened from a `.code-workspace` file that lacks it; only a USER-level
+  setting reaches every window. Never tell the user `settings.json` is missing the
+  setting without having read that file. You may offer to add the single line to that
+  workspace file yourself - it is a config edit outside the Fabric artifacts, so ask
+  for `APPROVED:EDIT:<file>` first, then tell the user to run Developer: Reload Window.
+- `enabled at user level` means every window on this machine is covered; no further
+  action, and saved workspace files need no patch.
 - If the script itself fails, fall back to the two cheapest checks (`fab auth status`,
   then `az account show`) and say the status script was unavailable. Never block.
 - Identity is informational: the local file-first workflow needs no CLI login.
@@ -6161,7 +6360,7 @@ handoffs:
         if ($hasModelingMcp) { $contractBullets.Add('- Live semantic models: use the `mcp connection: <name>` from your WORK ORDER `context` as `connectionName` on every Power BI modeling MCP call (rung 1). If `context` says `mcp connection: none`, go straight to the REST fallback. Never open a connection yourself - you cannot answer its sign-in prompt.') }
     } else {
         $contractBullets.Add('- Destructive, irreversible, security-sensitive, release, PROD and environment-changing actions need explicit user approval captured as a literal token (e.g. `APPROVED:DELETE:<artifact>`). Deleting/dropping any artifact, table, column, measure, relationship, role, item, branch or file is destructive even when the user asked for it in plain words: the request itself is not the approval. Only the top-level agent (the one the user selected) can ask the user - it confirms once ("This deletes X and Y; reply APPROVED:DELETE:... to proceed"), then puts the token in `approvals granted`. Every dispatched agent without the token must return `NEEDS APPROVAL` with the exact action and let it bubble up.')
-        $contractBullets.Add('- **Dispatch health.** If the `agent` tool is missing when you must delegate, or a Lead comes back empty twice, the window was opened without `chat.subagents.allowInvocationsFromSubagents: true`. The setting is WINDOW-scoped: the installer writes it into `.vscode/settings.json` AND its generated `.code-workspace`, but a window opened from a *user-saved* `.code-workspace` that lacks it ignores `settings.json` entirely. The status script''s CONFIG block names any such saved file (`WARNING: saved workspace file(s) ... LACK the nested-dispatch setting`) - quote that path and the one-line fix (add the setting to that file''s `settings` block, reload) instead of guessing; never claim `settings.json` lacks the setting without reading it. Do not improvise the work yourself. Retry-safe failures: transport errors (`ERR_HTTP2_SERVER_REFUSED_STREAM`, dropped streams) and `Requested agent ''<name>'' not found` with an exact frontmatter name (agent-list reload / tool-budget flake) - pause briefly and retry up to 3 times, never substitute a different agent. A child that returns empty or without a WORK RESULT block is re-dispatched ONCE with `context: your previous turn ended without a WORK RESULT; resume and end with the WORK RESULT block` before you conclude anything.')
+        $contractBullets.Add('- **Dispatch health.** If the `agent` tool is missing when you must delegate, or a Lead comes back empty twice, the window was opened without `chat.subagents.allowInvocationsFromSubagents: true` in effect. The setting is WINDOW-scoped: the installer offers to write it into the USER settings (reaches every window) and always writes it into `.vscode/settings.json` and its generated `.code-workspace`; a window opened from a *user-saved* `.code-workspace` ignores `settings.json` entirely, so without the user-level setting that file must carry it. The status script''s CONFIG block says which scope is in effect (`enabled at user level` / `enabled in .vscode/settings.json only` / `NOT set`) and names any saved file that lacks it (`WARNING: saved workspace file(s) ... LACK the nested-dispatch setting`) - quote that and the fix (re-run the installer and answer Y to the user-settings prompt, or add the line to that file''s `settings` block, then reload) instead of guessing; never claim `settings.json` lacks the setting without reading it. Do not improvise the work yourself. Retry-safe failures: transport errors (`ERR_HTTP2_SERVER_REFUSED_STREAM`, dropped streams) and `Requested agent ''<name>'' not found` with an exact frontmatter name (agent-list reload / tool-budget flake) - pause briefly and retry up to 3 times, never substitute a different agent. A child that returns empty or without a WORK RESULT block is re-dispatched ONCE with `context: your previous turn ended without a WORK RESULT; resume and end with the WORK RESULT block` before you conclude anything.')
         $contractBullets.Add('- **Retries must not repeat writes.** A retry is blind only when the failure happened before the child could act (agent not found, stream refused at dispatch). If a write-capable dispatch drops mid-turn or returns without a block, the child may already have created, edited or deployed something: re-dispatch it with `context: your previous attempt may have partially completed - inspect the current state of <artifact> first and do not repeat operations that are already done`, and require the WORK RESULT to list what it found already in place.')
         $contractBullets.Add('- **Parallel dispatch.** Dispatch children in parallel only when their artifacts are independent AND at most one of them needs the terminal; otherwise sequence them (the shell is shared - two agents running commands at once interleave and wedge it). Every child that runs commands must use unique file names (`scripts/<agent>-<purpose>-<yyyyMMdd-HHmmss>.ps1`, matching `.out.txt`) so one agent never overwrites another''s output.')
         if ($hasModelingMcp) { $contractBullets.Add('- **Live semantic models go through the connection the Master opened.** When the WORK ORDER `context` carries `mcp connection: <name>`, pass that `connectionName` on every Power BI modeling MCP call and treat MCP as rung 1; an empty `ListConnections` is not proof of failure. When `context` says `mcp connection: none`, use the REST fallback without probing. Never try to open a connection yourself when dispatched - you cannot answer its sign-in prompt.') }
@@ -6439,12 +6638,15 @@ and working flows. These files do NOT appear in the Copilot Chat dropdown:
 The numbered dropdown remains intentionally compact. It exposes the Master, two
 cross-domain reviewers, and seven Team Leads; they delegate to 37 focused workers.
 Nested delegation (Master -> Lead -> Worker) requires the VS Code setting
-`chat.subagents.allowInvocationsFromSubagents: true`, which the installer writes into
-both `.vscode/settings.json` and the generated `.code-workspace`; open the workspace
-from that file (or with File > Open Folder) so Team Leads can reach their workers.
-The setting is window-scoped: if you open the folder from your OWN saved
-`.code-workspace`, that file must contain it too (the session status block names any
-such file that lacks it). Dispatched agents cannot ask the
+`chat.subagents.allowInvocationsFromSubagents: true`. It is window-scoped, so the
+installer offers to write it (plus workspace-relative skill locations) into your VS Code
+USER settings - that reaches every window, however this folder is opened (Open Folder,
+Add Folder to Workspace, any saved `.code-workspace`). It also writes it into
+`.vscode/settings.json` and the generated `.code-workspace` for Open-Folder windows.
+At user level the flag applies machine-wide: in another workspace whose own custom
+agents delegate, they may nest too; default Copilot chat is unaffected (opt-out per
+workspace: set it to `false` in that `.code-workspace`). The session status block says
+which scope is in effect. Dispatched agents cannot ask the
 user questions: approvals and open questions bubble up to the agent you selected.
 - **001 - Fabric Solution Architect** -- cross-domain design and ownership
 - **002 - Integration QA & Change Controller** -- cross-artifact acceptance
@@ -6533,11 +6735,13 @@ $agentsReadme = @'
 
 ## How to use
 
-Open the workspace from the installer-generated `.code-workspace` file or with
-File > Open Folder (both carry the setting that lets Team Leads dispatch their
-workers). If you use your own saved `.code-workspace`, add
-`"chat.subagents.allowInvocationsFromSubagents": true` to its `settings` block - the
-setting is window-scoped, so the folder's `.vscode/settings.json` does not apply there.
+Open this folder any way you like - File > Open Folder, Add Folder to Workspace, or your
+own saved `.code-workspace` - provided you accepted the installer's offer to enable the
+agent team in your VS Code user settings (nested dispatch + workspace-relative skill
+locations; both are window-scoped, so user level is the only scope that reaches every
+window). If you declined, use File > Open Folder or the installer-generated workspace
+file, or add `"chat.subagents.allowInvocationsFromSubagents": true` to your own
+workspace file's `settings` block.
 In Copilot Chat, select **000 - Fabric Workspace Master** from the agent dropdown and
 describe what you need. The Master runs a one-call session status (skills freshness,
 identity, live tool check), then routes your request through the teams itself - you
@@ -6709,12 +6913,67 @@ $existed = Test-Path $settingsPath
 Merge-JsonSettings $settingsPath $requiredSettings
 Write-Host "  $(if ($existed) {'Merged'} else {'Written'}): .vscode/settings.json" -ForegroundColor Green
 
-# -- User-saved .code-workspace files that open this folder ------------------
-# Opened from such a file, VS Code ignores .vscode/settings.json: nested dispatch
-# and the skill locations (which change whenever the vendor clones restructure)
-# must be inside that file. Runs here so the freshly discovered skill list is used.
-# Only missing entries are added, so a re-run after patching lists nothing.
+# -- USER-level enablement (reaches every VS Code window) ---------------------
+# Both settings below are WINDOW-scoped. A window opened from any .code-workspace
+# file (saved, or the untitled one VS Code creates on "Add Folder to Workspace")
+# ignores the folder's .vscode/settings.json for them, so the only scope that works
+# however the user opens this folder is the USER settings.json. The skill locations
+# are written as WORKSPACE-RELATIVE paths: VS Code resolves them against the open
+# workspace folders, so they activate only in windows that contain this workspace.
+$userLevelEnabled = $false
 if (-not $EmitAgentsTo) {
+    $relativeSkillLocs = @($skillLocations.Keys | Where-Object { $_ -notmatch '^~[\\/]' -and -not [IO.Path]::IsPathRooted($_) })
+    $userSettingsPath = Get-VsCodeUserSettingsPath
+    Write-Host ""
+    Write-Host "  AGENT TEAM IN EVERY VS CODE WINDOW (recommended)" -ForegroundColor Cyan
+    Write-Host "  The two settings that make the team work are window-scoped: VS Code ignores" -ForegroundColor DarkGray
+    Write-Host "  .vscode/settings.json for them whenever a window is opened from a .code-workspace" -ForegroundColor DarkGray
+    Write-Host "  file - including the untitled one created by 'Add Folder to Workspace'. Adding" -ForegroundColor DarkGray
+    Write-Host "  them to your VS Code USER settings makes this folder work however you open it:" -ForegroundColor DarkGray
+    Write-Host "    - chat.subagents.allowInvocationsFromSubagents = true" -ForegroundColor DarkGray
+    Write-Host "      Lets a custom agent that is itself running as a sub-agent dispatch further" -ForegroundColor DarkGray
+    Write-Host "      sub-agents (Master -> Team Lead -> Worker). Applies to EVERY window on this" -ForegroundColor DarkGray
+    Write-Host "      machine: in another workspace whose own custom agents delegate, they may now" -ForegroundColor DarkGray
+    Write-Host "      nest too. Default Copilot chat and agents that never delegate are unaffected." -ForegroundColor DarkGray
+    Write-Host "      Opt-out for one workspace: set it to false in that .code-workspace file." -ForegroundColor DarkGray
+    Write-Host "    - chat.agentSkillsLocations += $($relativeSkillLocs.Count) workspace-relative folders" -ForegroundColor DarkGray
+    Write-Host "      Resolved against the open workspace folders, so the Fabric skills appear only" -ForegroundColor DarkGray
+    Write-Host "      in windows that contain this workspace - never in unrelated projects." -ForegroundColor DarkGray
+    Write-Host "  Edited in place (your other settings, comments and formatting are kept):" -ForegroundColor DarkGray
+    Write-Host "    $userSettingsPath" -ForegroundColor DarkGray
+    $userAns = Read-Host '  Enable the agent team in your VS Code user settings now? (Y/n)'
+    if ($userAns -notmatch '^\s*(n|no)\s*$') {
+        try {
+            $ur = Update-UserSettingsInPlace -Path $userSettingsPath -SkillLocations $relativeSkillLocs
+            $userLevelEnabled = $true
+            if ($ur.Changed) {
+                $what = @()
+                if ($ur.FlagAdded) { $what += 'nested dispatch enabled' }
+                if ($ur.LocationsAdded.Count -gt 0) { $what += "$($ur.LocationsAdded.Count) skill location(s) added" }
+                Write-Host "  Updated user settings: $($what -join '; ')." -ForegroundColor Green
+            } else {
+                Write-Host "  User settings already up to date." -ForegroundColor DarkGray
+            }
+            $profileFiles = @(Get-VsCodeProfileSettingsPaths)
+            if ($profileFiles.Count -gt 0) {
+                Write-Host "  Note: you use VS Code Profiles. A profile has its own settings file; if you open this" -ForegroundColor Yellow
+                Write-Host "  workspace under a profile, add the same two settings there:" -ForegroundColor Yellow
+                $profileFiles | ForEach-Object { Write-Host "    $_" -ForegroundColor Yellow }
+            }
+        } catch {
+            Write-Host "  Could not update user settings ($($_.Exception.Message))." -ForegroundColor Yellow
+            Write-Host "  Add `"chat.subagents.allowInvocationsFromSubagents`": true to that file by hand, or open the folder with File > Open Folder." -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "  Skipped. The team works in windows opened with File > Open Folder or from the installer's" -ForegroundColor DarkGray
+        Write-Host "  workspace file; your own saved workspace files are checked below." -ForegroundColor DarkGray
+    }
+}
+
+# -- Fallback: user-saved .code-workspace files that open this folder ----------
+# Only when user-level enablement was declined: patch the saved files VS Code has
+# opened before. Only missing entries are added, so a re-run after patching lists nothing.
+if (-not $EmitAgentsTo -and -not $userLevelEnabled) {
     $requiredSkillLocs = @($skillLocations.Keys | ForEach-Object {
         if ($_ -match '^~[\\/]' -or [IO.Path]::IsPathRooted($_)) { $_ } else { Join-Path $rootPath ($_ -replace '/', '\') }
     })

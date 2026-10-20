@@ -4,8 +4,7 @@
 
 | Version | Supported |
 |---|---|
-| v0.7.x (current pre-release line) | :white_check_mark: |
-| older pre-releases | :x: (upgrade by re-running the installer) |
+| v0.1.0-pre-release | :white_check_mark: |
 
 ## Reporting a Vulnerability
 

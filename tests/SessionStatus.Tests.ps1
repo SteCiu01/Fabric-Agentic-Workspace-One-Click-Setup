@@ -42,10 +42,13 @@ BeforeAll {
     } | ConvertTo-Json -Depth 5
     [IO.File]::WriteAllText((Join-Path $script:Root '.github\agent-docs\tool-status.json'), $toolStatus, (New-Object System.Text.UTF8Encoding($false)))
 
-    # 4. Run from an unrelated CWD.
+    # 4. Run from an unrelated CWD, with a controlled (absent) USER settings file so the
+    #    developer's real %APPDATA% settings cannot change the outcome.
+    $script:NoUserSettings = Join-Path $script:Root 'no-user-settings.json'
+    $env:FABRIC_AGENTIC_USER_SETTINGS = $script:NoUserSettings
     Push-Location $env:TEMP
     try { $script:Output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script:Script 2>&1 | Out-String }
-    finally { Pop-Location }
+    finally { Pop-Location; Remove-Item Env:\FABRIC_AGENTIC_USER_SETTINGS -ErrorAction SilentlyContinue }
     $script:Settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
 }
 
@@ -92,10 +95,13 @@ Describe 'Get-SessionStatus.ps1 (emitted status script)' {
         $script:Output | Should -Match 'changed since install:[^\r\n]*fab: True -> False'
     }
 
-    It 'persists the block to session-status.last.txt as a stdout fallback' {
+    It 'persists the block to session-status.last.txt as a stdout fallback, stamped with GENERATED' {
         $p = Join-Path $script:Root '.github\agent-docs\session-status.last.txt'
         Test-Path $p | Should -BeTrue
-        (Get-Content $p -Raw) | Should -Match '(?m)^MCP\s+'
+        $saved = Get-Content $p -Raw
+        $saved | Should -Match '(?m)^MCP\s+'
+        $saved | Should -Match '(?m)^GENERATED \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}'
+        $script:Output | Should -Match '(?m)^GENERATED \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}' -Because 'the timestamp is the first line of stdout too'
     }
 
     It 'reports not-logged-in without probing when the recorded CLIs are unavailable (offline-safe)' {
@@ -135,8 +141,9 @@ Describe 'Get-SessionStatus.ps1 names a user-saved .code-workspace that lacks ne
         [IO.File]::WriteAllText((Join-Path $d 'workspace.json'), (@{ folder = 'file:///c%3A/Users/x/folder' } | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
 
         $env:FABRIC_AGENTIC_WORKSPACE_STORAGE = $script:Storage
+        $env:FABRIC_AGENTIC_USER_SETTINGS = $script:NoUserSettings
         try { $script:Output2 = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script:Script 2>&1 | Out-String }
-        finally { Remove-Item Env:\FABRIC_AGENTIC_WORKSPACE_STORAGE -ErrorAction SilentlyContinue }
+        finally { Remove-Item Env:\FABRIC_AGENTIC_WORKSPACE_STORAGE, Env:\FABRIC_AGENTIC_USER_SETTINGS -ErrorAction SilentlyContinue }
     }
 
     It 'warns with the exact path of the saved workspace file that lacks the setting' {
@@ -145,7 +152,33 @@ Describe 'Get-SessionStatus.ps1 names a user-saved .code-workspace that lacks ne
         $script:Output2 | Should -Not -Match 'Other\.code-workspace' -Because 'a workspace file that does not open this root is irrelevant'
     }
 
-    It 'still reports settings.json as enabled (the two facts are independent)' {
-        $script:Output2 | Should -Match 'Nested dispatch: enabled in \.vscode/settings\.json'
+    It 'still reports settings.json as enabled (the two facts are independent) and says it is folder-only' {
+        $script:Output2 | Should -Match 'Nested dispatch: enabled in \.vscode/settings\.json only'
+    }
+}
+
+Describe 'Get-SessionStatus.ps1 with the v0.7.2 USER-level setting in effect' {
+
+    BeforeAll {
+        $script:UserSettings = Join-Path $script:Root 'user-settings.json'
+        # JSONC on purpose; one relative location that exists in the scratch root, one that does not.
+        [IO.File]::WriteAllText($script:UserSettings, "{`n  // user prefs`n  `"chat.subagents.allowInvocationsFromSubagents`": true,`n  `"chat.agentSkillsLocations`": { `"skills-for-fabric/skills`": true, `"does/not/exist`": true, `"C:/abs/skills`": true },`n}`n", (New-Object System.Text.UTF8Encoding($false)))
+        $env:FABRIC_AGENTIC_WORKSPACE_STORAGE = $script:Storage
+        $env:FABRIC_AGENTIC_USER_SETTINGS = $script:UserSettings
+        try { $script:Output3 = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script:Script 2>&1 | Out-String }
+        finally { Remove-Item Env:\FABRIC_AGENTIC_WORKSPACE_STORAGE, Env:\FABRIC_AGENTIC_USER_SETTINGS -ErrorAction SilentlyContinue }
+    }
+
+    It 'reports nested dispatch as enabled at user level' {
+        $script:Output3 | Should -Match 'Nested dispatch: enabled at user level \(every VS Code window\)'
+    }
+
+    It 'counts only workspace-relative user locations that resolve under this root' {
+        $script:Output3 | Should -Match '1 workspace-relative in user settings'
+    }
+
+    It 'no longer warns about saved workspace files (the user-level setting covers them)' {
+        $script:Output3 | Should -Not -Match 'LACK the nested-dispatch setting'
+        $script:Output3 | Should -Match 'need no patch'
     }
 }

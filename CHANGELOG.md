@@ -5,11 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.7.2] - 2026-10-14
+
+One change, driven by a field failure: the agent team must work **however you open the workspace folder** — File > Open Folder, *Add Folder to Workspace* in a blank window, or any `.code-workspace` you saved yourself — and a re-run of the installer must reach every one of those windows without patching files one by one.
+
+### Why
+
+The two VS Code settings the team depends on are **window-scoped**:
+
+- `chat.subagents.allowInvocationsFromSubagents` — without it a Team Lead (itself running as a sub-agent) cannot dispatch its workers; the Master silently ends up doing the work alone.
+- `chat.agentSkillsLocations` — registers the Microsoft and data-goblin skill folders so agents see them natively.
+
+VS Code applies window-scoped settings from folder `.vscode/settings.json` **only** in a window opened with *File > Open Folder*. Any window backed by a workspace file — a saved `.code-workspace`, **or the untitled one VS Code creates the moment you *Add Folder to Workspace*** — ignores the folder's `settings.json` for them. v0.7.1 reacted by patching saved workspace files the installer could find; that still left untitled workspaces, files saved after the last run, and anything VS Code had not opened before. Field case (2026-10-14): a workspace file saved at 16:26, installer last run 10-09, Master dispatching workers itself at 16:51.
+
+### Added
+
+- **Step 8 — "Enable the agent team in your VS Code user settings now? (Y/n)"** (default Yes, never silent). On Yes the installer edits `%APPDATA%\Code\User\settings.json` **in place** — your other settings, comments, key order, indentation, line endings and BOM are preserved; only two things change:
+  1. `"chat.subagents.allowInvocationsFromSubagents": true` is added, or an explicit `false` is flipped.
+  2. The current **workspace-relative** skill folders (`.github/skills`, `skills-for-fabric/skills`, `power-bi-agentic-development/plugins/<plugin>/skills`) are merged into `chat.agentSkillsLocations`; your own entries are kept; a re-run adds only folders that appeared upstream since. Absolute and `~/` paths (the Synapse extension skills) are **never** written at user level.
+  The edit is validated before writing (a file that would not parse is never touched) and idempotent (a second run reports "already up to date"). If VS Code Profiles are in use, the profile settings files are listed so you can repeat the two lines there.
+- **Status script** now reports which scope is in effect — `Nested dispatch: enabled at user level (every VS Code window)` / `enabled in .vscode/settings.json only (File > Open Folder windows; NOT windows opened from a .code-workspace file)` / `NOT set` — and how many workspace-relative skill folders the user settings contribute. With the user-level setting present it no longer warns about saved workspace files (they need no patch). `FABRIC_AGENTIC_USER_SETTINGS` overrides the path for tests.
+- **Master rule**: may offer to add the single line to the workspace file you are in (config edit outside the Fabric artifacts → asks for `APPROVED:EDIT:<file>` first, then *Developer: Reload Window*).
+- **Stale status can no longer be presented as current.** Field case (2026-10-15, first session after the v0.7.2 re-run): the shared shell swallowed the status script's output, the Master fell back to `session-status.last.txt` as instructed — and relayed a six-day-old block (old skill dates, "enabled in settings.json only", a saved-workspace warning that no longer applied). The block now starts with `GENERATED <local timestamp>` on stdout and in the fallback file; the starting flow tells the Master to retry in a new terminal *before* reading the file, to compare that timestamp with the current time whenever it does read it (or recalls a block from earlier in the chat), and to say "status file is from <timestamp>, re-running" instead of presenting anything older than about an hour as the current state.
+
+### Changed
+
+- The v0.7.1 saved-workspace scan/patch is now a **fallback** that runs only when the user-level prompt is declined.
+- Generated `copilot-instructions.md` / `AGENTS.md`, the Master's dispatch-health rule and the README describe the scoping model and the exact effect of the user-level setting.
+
+### What the user-level setting does and does not enable — read this
+
+Because it lives in your **user** settings, `chat.subagents.allowInvocationsFromSubagents: true` is in effect in **every VS Code window on this machine**, not only when the Fabric workspace is open. VS Code offers no per-folder conditional for a window-scoped setting, so this is the only scope that satisfies "works however I open it".
+
+| Situation | Effect of the user-level setting |
+|---|---|
+| Blank VS Code window, no folder | None. There are no workspace agents; default Copilot chat behaves exactly as before. |
+| Any workspace where you use **built-in Copilot chat / agent mode only** | None. The setting only concerns *custom* agents (`.agent.md`) that run as sub-agents. |
+| A workspace with custom agents that **never delegate** (no `agents:` list / no sub-agent tool) | None. |
+| **Another agentic workspace** (e.g. a Power Platform or app-building team) whose custom agents are **designed to delegate** to each other | **Enabled.** Their Lead-style agents may now dispatch further sub-agents, exactly as the Fabric team does. If that workspace's author expects nested delegation, it now works; if you do not want it there, set `"chat.subagents.allowInvocationsFromSubagents": false` in that workspace's `.code-workspace` (workspace scope overrides user scope). |
+| The Fabric workspace, opened any way | **Enabled** — Master → Team Lead → Worker works from the first second. |
+
+What it never does: install agents or skills anywhere, change what built-in Copilot can do, grant any agent new tools, or let an agent act without the approval tokens its own definition requires.
+
+The **skill locations** written at user level are workspace-relative, so they resolve **only** in windows that contain a folder with those sub-paths — in practice, the Fabric workspace. A blank window or an unrelated project resolves them to nothing: no Fabric skills appear there. Verified on 2026-10-14: in a multi-root window where folder-level registration was ignored, one relative user-level entry took the native skill list from 18 to 43, with no reload.
+
+### Tests
+
+- `UpdateSafety.Tests.ps1`: in-place user-settings edit on JSONC fixtures — append flag + relative block preserving comments/order/CRLF; flip `false→true` and merge only missing locations into an existing block keeping user entries (LF preserved); idempotent second run; absolute/`~` paths never written; file created when absent; BOM preserved; broken file refused and left untouched.
+- `SessionStatus.Tests.ps1`: user-settings path pinned in all runs; new scenario with a JSONC user file asserting `enabled at user level`, the workspace-relative count (only entries that resolve under the root), and that the saved-file warning is replaced by "need no patch"; the `GENERATED` stamp is asserted on stdout and in the fallback file.
+- `Generated.Tests.ps1`: the emitted starting flow carries the staleness guard.
+
 ## [v0.7.1] - 2026-10-05
 
 A hardening release driven by two external reviews of v0.7.0/v0.7.1-rc and a further full pass over the installer, the emitted agents, the embedded skills and the tests. No new capabilities; every item below closes a gap between what an agent is told to do and what it can actually do, between what the installer reports and what really happened, or between the embedded guidance and Microsoft's documented behaviour.
 
 ### Fixed
+
+
 
 - **User-saved `.code-workspace` files are now detected and can be updated.** `chat.subagents.allowInvocationsFromSubagents` and `chat.agentSkillsLocations` are window-scoped: a window opened from a user's own saved workspace file ignores the folder's `.vscode/settings.json`, so Team Leads silently lost the ability to dispatch workers and new vendor skill folders never reached those sessions, even though the installer had written both settings. Field symptom: the Master reported *settings.json is missing the setting* (false) after a Lead returned empty twice. Step 8 now scans VS Code's workspace storage for saved files that open the target folder, lists exactly what each lacks and offers (`Y/n`) to add only the missing entries, so a re-run after patching reports nothing; `Get-SessionStatus.ps1` names any such file still lacking the dispatch setting with a one-line fix, and the Master's dispatch-health rule tells it to quote that path instead of blaming `settings.json`. `settings.json` is also written without a UTF-8 BOM. The README (*Start working*), the generated `copilot-instructions.md` and `AGENTS.md` explain the window-scoped caveat and the manual fix.
 - **Step 1 no longer crashes on natural answers.** Answering `y` at *Enter 1 or 2* silently selected option 2, and typing a full path at the *Enter a name* prompt crashed with *The given path's format is not supported* (`Join-Path` cannot take a rooted path). `y`/`yes` and `n`/`no` now map to 1/2, anything else re-asks; a full path typed at the name prompt is honoured as-is, a plain name is sanitised of invalid characters, and option 1 validates that the input is a real rooted path before continuing. A new `Step1Prompts.Tests.ps1` drives the real installer through these sequences.

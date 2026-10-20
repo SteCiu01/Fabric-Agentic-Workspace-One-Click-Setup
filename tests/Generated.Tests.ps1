@@ -380,6 +380,14 @@ Describe 'Generated configuration (settings, docs, status script)' {
         $text | Should -Not -Match 'Please switch to the corresponding agent'
     }
 
+    It 'the starting flow carries the staleness guard for the fallback status file' {
+        $p = Join-Path $script:EmitDir '.github\agent-docs\starting-flow.md'
+        $text = Get-Content -LiteralPath $p -Raw
+        $text | Should -Match 'Staleness guard'
+        $text | Should -Match 'GENERATED <timestamp>'
+        $text | Should -Match 'never present an old block as the current state'
+    }
+
     It 'emits the working-flow reference with the team protocol' {
         $p = Join-Path $script:EmitDir '.github\agent-docs\working-flow-reference.md'
         $text = Get-Content -LiteralPath $p -Raw

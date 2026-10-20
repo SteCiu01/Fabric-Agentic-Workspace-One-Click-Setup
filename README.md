@@ -61,7 +61,7 @@ Contributions and feedback welcome.
 - [3.8 How it works under the hood](#38-how-it-works-under-the-hood)
 - [3.9 A bit of history](#39-a-bit-of-history-how-fabricpower-bi-work-used-to-flow)
 - [3.10 Quality & validation](#310-quality--validation)
-- [3.11 Current status (v0.7.1)](#311-current-status-v071)
+- [3.11 Current status (v0.7.2)](#311-current-status-v072)
 - [3.12 Disclaimer](#312-disclaimer)
 - [Contributing](#contributing) · [Files in this repository](#files-in-this-repository) · [License](#license) · [Third-party notices](#third-party-notices)
 
@@ -104,7 +104,7 @@ The installer **stops** if a required item is missing. It **installs** the auto 
 
 **On your system** — exactly the 🤖 and ❓ rows of the checklist above, nothing else. The installer never installs Git, VS Code or the authoring extensions.
 
-**Outside the folder** — a session `.code-workspace` in `%TEMP%` (one per workspace folder) used to open VS Code, and — only if you say yes in Step 8 — one setting block added to your *own* saved `.code-workspace` files that open this folder.
+**Outside the folder** — a session `.code-workspace` in `%TEMP%` (one per workspace folder) used to open VS Code, and — only if you answer **Y** in Step 8 — **two keys in your VS Code user `settings.json`** (`%APPDATA%\Code\User\settings.json`): the nested-dispatch flag and the workspace-relative skill folders, edited in place. Everything else in that file is left as it is. See [Step 8](#step-8-of-9--writing-configuration-files) for exactly what that enables and where.
 
 **Never touched** — your Fabric item folders, personal files, unrelated Git work, business-repository contents, live Fabric workspaces.
 
@@ -189,26 +189,46 @@ No prompts. Generates the 47 `.agent.md` files (10 visible + 37 workers), resolv
 
 Writes/merges `copilot-instructions.md`, `AGENTS.md`, `.gitignore` rules, `.vscode/settings.json` (merge — your keys survive, JSONC comments become values), `tool-status.json`, `guardrail-status.json`, `installed-manifest.json`, and purges files the installer shipped before but no longer ships.
 
-**One possible prompt** — only if you keep your *own* saved `.code-workspace` files that open this folder:
+**The one prompt that matters (v0.7.2):**
 
 ```
-  Saved VS Code workspace file(s) that open this folder are out of date
-  (opened from one, VS Code ignores .vscode/settings.json):
-    C:\...\My Project.code-workspace
-      nested-dispatch setting missing (Team Leads cannot dispatch workers); 12 skill location(s) missing
-  Update their settings block (adds only what is missing)? (Y/n):
+  AGENT TEAM IN EVERY VS CODE WINDOW (recommended)
+  ...
+  Enable the agent team in your VS Code user settings now? (Y/n):
 ```
 
-Answer **Y** (default). It adds only `chat.subagents.allowInvocationsFromSubagents: true` and the missing `chat.agentSkillsLocations` entries; everything else in your file stays. A re-run afterwards lists nothing until the vendor skill folders change again. Answer **n** → open the folder with *File > Open Folder* instead, or add the setting by hand ([1.7](#17-troubleshooting)).
+**Why it exists.** The two settings the team depends on are *window-scoped*. VS Code takes them from the folder's `.vscode/settings.json` **only** in a window opened with *File > Open Folder*. Every window backed by a workspace file — a `.code-workspace` you saved, **or the untitled one VS Code creates the moment you use *Add Folder to Workspace*** — ignores the folder's `settings.json` for them. The only scope that reaches all of those windows is your **user** settings.
+
+**What Y does** — edits `%APPDATA%\Code\User\settings.json` *in place* (comments, order, formatting, line endings, BOM preserved; the file is validated before it is written; a second run changes nothing):
+
+| Key | Value written | Scope of effect |
+|---|---|---|
+| `chat.subagents.allowInvocationsFromSubagents` | `true` (added, or an explicit `false` flipped) | **Every VS Code window on this machine.** See the table below for what that means. |
+| `chat.agentSkillsLocations` | the current **workspace-relative** skill folders merged in (`.github/skills`, `skills-for-fabric/skills`, `power-bi-agentic-development/plugins/<plugin>/skills`); your own entries kept; absolute and `~/` paths never written | **Only windows that contain this workspace.** Relative entries are resolved against the open workspace folders, so an unrelated project or a blank window resolves them to nothing. |
+
+**What the dispatch flag does and does not enable (be precise about this):**
+
+| Situation | Effect |
+|---|---|
+| Blank VS Code window | None — no workspace agents exist; default Copilot chat is unchanged. |
+| Any project where you use **built-in Copilot chat / agent mode** only | None — the flag concerns *custom* agents (`.agent.md`) running as sub-agents. |
+| A project with custom agents that **never delegate** | None. |
+| **Another agentic workspace** (Power Platform, app building, …) whose custom agents are **designed to delegate to each other** | **Enabled**: their Lead-style agents may now dispatch further sub-agents, just like the Fabric team. If you do not want that there, add `"chat.subagents.allowInvocationsFromSubagents": false` to *that* workspace's `.code-workspace` — workspace scope overrides user scope. |
+| This Fabric workspace, opened **any** way | **Enabled** — Master → Team Lead → Worker from the first second. |
+
+It never installs agents or skills anywhere else, never changes what built-in Copilot can do, never grants an agent new tools, and never bypasses the approval tokens in the agent definitions.
+
+**VS Code Profiles:** each profile has its own `settings.json`; the installer lists them so you can add the same two keys there.
+
+**If you answer n** — the team still works in windows opened with *File > Open Folder* or from the installer's own workspace file, and the installer falls back to the v0.7.1 behaviour: it lists your saved `.code-workspace` files that open this folder and lack either setting and offers to add only what is missing to each (`Update their settings block (adds only what is missing)? (Y/n)`). Untitled *Add Folder* workspaces cannot be patched that way.
 
 ### Step 9 of 9 — Finishing Up
 
 1. `git init` if needed; initial commit, or an update commit limited to installer-owned paths (skipped with a warning if `git user.name/email` is not set).
-2. `Setup complete! v0.7.1` and the workspace path.
+2. `Setup complete! v0.7.2` and the workspace path.
 3. `Press Enter to open VS Code...` → opens the multi-root workspace.
 
 > Re-ran with VS Code already open? Run **Developer: Reload Window** so the agent dropdown rebuilds.
-> Prefer opening from your **own saved `.code-workspace`**? Read the caveat in [1.5](#15-your-first-session) first.
 
 ## 1.5 Your first session
 
@@ -218,20 +238,18 @@ Answer **Y** (default). It adds only `chat.subagents.allowInvocationsFromSubagen
 4. Say what you need (or just "hi").
 
 > [!IMPORTANT]
-> **How you open the folder matters.** Two settings the agents depend on are *window-scoped* in VS Code:
-> `chat.subagents.allowInvocationsFromSubagents` (lets Team Leads dispatch their workers) and
-> `chat.agentSkillsLocations` (registers the Microsoft and data-goblin skill folders).
-> When a window is opened **from a `.code-workspace` file**, VS Code ignores the folder's `.vscode/settings.json` for them.
+> **How you open the folder.** If you answered **Y** to the Step 8 user-settings prompt, open it **any way you like** — *File > Open Folder*, *Add Folder to Workspace* in a blank window, the installer's workspace file, or any `.code-workspace` you saved yourself — and the full team and all skills are there from the first message. A re-run of the installer reaches all of those windows too.
 >
-> | You open the folder via… | Settings in effect | Result |
-> |---|---|---|
-> | The workspace the installer just opened (or saved it with *Save Workspace As*) | ✅ both present | Full Master → Lead → Worker dispatch; all skills listed |
-> | **File > Open Folder** | ✅ `.vscode/settings.json` applies | Same |
-> | **Your own** `.code-workspace` saved earlier (e.g. a session file with several roots) | ❌ unless the file contains them | Leads silently return nothing; vendor skills not listed natively |
+> If you answered **n**, two settings the agents depend on (`chat.subagents.allowInvocationsFromSubagents`, `chat.agentSkillsLocations`) are only in the folder's `.vscode/settings.json`, which VS Code ignores in any window backed by a workspace file:
 >
-> The installer handles the third case for you: Step 8 lists any saved file that opens this folder and lacks either setting and offers (`Y/n`) to add only what is missing. The Master's status block also names such a file if it is still missing the dispatch setting. Manual fix in [1.7](#17-troubleshooting).
+> | You open the folder via… | Result |
+> |---|---|
+> | **File > Open Folder** or the installer's own workspace file | ✅ full dispatch, all skills |
+> | *Add Folder to Workspace* (untitled) or **your own** saved `.code-workspace` without the settings | ❌ Leads return nothing; vendor skills not listed natively |
+>
+> Fix: re-run the installer and answer **Y**, or add `"chat.subagents.allowInvocationsFromSubagents": true` to that workspace file's `settings` block, then *Developer: Reload Window*. The Master's status block says which scope is in effect and names any saved file that lacks it ([1.7](#17-troubleshooting)).
 
-On your first message the Master runs **one** status script and shows **one** block:
+On your first message the Master runs **one** status script and shows **one** block (it starts with a `GENERATED` timestamp; if the Master ever has to fall back to the saved copy, it checks that stamp and re-runs rather than show you a stale block):
 
 | Line | Meaning |
 |---|---|
@@ -267,10 +285,12 @@ For a live semantic model, the Master opens the Power BI modeling MCP connection
 ## 1.7 Troubleshooting
 
 **Team Leads return nothing / the Master says workers can't be dispatched.**
-You opened VS Code from your own saved `.code-workspace` that lacks the setting. `chat.subagents.allowInvocationsFromSubagents` is *window-scoped*: in a window opened from a workspace file, VS Code ignores the folder's `.vscode/settings.json`. Fix: add `"chat.subagents.allowInvocationsFromSubagents": true` inside that file's `"settings"` block (or re-run the installer and answer **Y** in Step 8), then **Developer: Reload Window**. The Master's status block names the exact file.
+The window you are in does not have `chat.subagents.allowInvocationsFromSubagents: true` in effect. It is *window-scoped*: in a window backed by a workspace file (saved, or untitled after *Add Folder to Workspace*) VS Code ignores the folder's `.vscode/settings.json`. The Master's status block tells you the scope in effect (`enabled at user level` / `enabled in .vscode/settings.json only` / `NOT set`). Fix, best first: re-run the installer and answer **Y** to the Step 8 user-settings prompt (covers every window); or add the line to that workspace file's `"settings"` block (the Master can do this for you after `APPROVED:EDIT:<file>`); or open the folder with *File > Open Folder*. Then **Developer: Reload Window**.
 
 **Vendor skills not in the native skill list in my saved workspace.**
-Same cause — `chat.agentSkillsLocations` is window-scoped too. Re-run the installer and accept the Step 8 prompt. Agents still find the skills by path in the meantime.
+Same cause — `chat.agentSkillsLocations` is window-scoped too. The user-level option writes workspace-relative entries that resolve in any window containing this folder. Agents still find the skills by path in the meantime.
+
+**I want nested delegation off in another workspace.** Add `"chat.subagents.allowInvocationsFromSubagents": false` to that workspace's `.code-workspace` `settings` block; workspace scope overrides user scope.
 
 **Agent dropdown is stale after an update.** **Developer: Reload Window**.
 
@@ -399,6 +419,8 @@ Fabric Workspaces/
 ```
 
 ## 2.6 FAQ
+
+**What exactly does the Step 8 user-settings option change on my machine?** Two keys in `%APPDATA%\Code\User\settings.json`, edited in place: `chat.subagents.allowInvocationsFromSubagents: true` (in effect in every VS Code window — relevant only to *custom* agents that delegate to sub-agents; built-in Copilot, blank windows and non-delegating agents are unaffected; opt out per workspace with `false` in its `.code-workspace`) and workspace-relative `chat.agentSkillsLocations` entries (resolve only in windows that contain this workspace). Nothing else. Details in [Step 8](#step-8-of-9--writing-configuration-files).
 
 **Can I move the workspace folder after creation?** Yes, it's portable. Open the new location in VS Code (re-run the installer there once so the session workspace file and saved-workspace check point at the new path).
 
@@ -558,10 +580,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "Import-Module Pester; In
 
 Not covered: a full end-to-end install against live Fabric/VS Code, and the *behavioural* quality of prompts — validated by real-world use (v0.7.0: single-team TMDL edit, multi-team Architect → Leads → QA with a live publish and regression DAX, and a destructive-action approval bubble).
 
-## 3.11 Current status (v0.7.1)
+## 3.11 Current status (v0.7.2)
 
 | Area | Status |
 |---|---|
+| Works however the folder is opened | **New in v0.7.2** — opt-in user-level enablement (nested-dispatch flag + workspace-relative skill locations, edited in place); status script reports the scope in effect; v0.7.1 saved-file patching kept as fallback |
 | One-click setup | **Validated manually** on Windows 10/11 incl. a locked-down corporate laptop |
 | Session startup | **Lean since v0.7.0** — one status call incl. the saved-`.code-workspace` check, then work |
 | Hierarchical routing | **Fine-tuned v0.7.0, hardened v0.7.1** — nested delegation configured by the installer; parallel dispatch only for independent artifacts with at most one terminal user; dropped write dispatches resumed inspect-first |

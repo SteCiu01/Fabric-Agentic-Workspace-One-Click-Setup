@@ -10,7 +10,7 @@ BeforeAll {
     . "$PSScriptRoot/Manifest.Helpers.ps1"
     $script:Installer = Get-InstallerPath
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:Installer, [ref]$null, [ref]$null)
-    foreach ($name in 'ConvertFrom-JsonLenient', 'Merge-JsonSettings', 'Merge-CodeWorkspace', 'Write-ManagedFile', 'ConvertTo-SkillLocationKey', 'Get-UserWorkspaceFilesForRoot', 'Update-UserWorkspaceFile') {
+    foreach ($name in 'ConvertFrom-JsonLenient', 'Merge-JsonSettings', 'Merge-CodeWorkspace', 'Write-ManagedFile', 'ConvertTo-SkillLocationKey', 'Get-UserWorkspaceFilesForRoot', 'Update-UserWorkspaceFile', 'Find-JsonObjectEnd', 'Find-LineCommentStart', 'Add-JsonMemberBeforeClose', 'Update-UserSettingsInPlace') {
         $fn = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true) | Select-Object -First 1
         $fn | Should -Not -BeNullOrEmpty -Because "$name must exist in the installer"
         Invoke-Expression $fn.Extent.Text
@@ -139,6 +139,81 @@ Describe 'User-saved .code-workspace files (window-scoped settings)' {
         $r = @(Get-UserWorkspaceFilesForRoot -RootPath $script:WsRoot -StorageRoot $script:Storage -RequiredSkillLocations $script:Required |
             Where-Object { -not $_.NestedDispatch -or $_.MissingSkillLocations.Count -gt 0 })
         $r.Count | Should -Be 0
+    }
+}
+
+Describe 'Update-UserSettingsInPlace (v0.7.2: USER-level enablement, edited in place)' {
+
+    BeforeAll {
+        $script:UsDir = Join-Path $script:Root 'user-settings'
+        New-Item -ItemType Directory -Path $script:UsDir -Force | Out-Null
+        $script:Locs = @('.github/skills', 'skills-for-fabric/skills', 'power-bi-agentic-development/plugins/pbip/skills')
+    }
+
+    It 'appends the flag and a relative skill-location block to a JSONC file, preserving comments, order and formatting' {
+        $p = Join-Path $script:UsDir 'jsonc.json'
+        $orig = "{`r`n    // my editor prefs`r`n    `"editor.fontSize`": 14,`r`n    `"url`": `"https://example.com//not-a-comment`",`r`n    /* block */`r`n    `"files.autoSave`": `"off`" // trailing note`r`n}`r`n"
+        [IO.File]::WriteAllText($p, $orig, $script:Utf8)
+        $r = Update-UserSettingsInPlace -Path $p -SkillLocations $script:Locs
+        $r.Changed | Should -BeTrue
+        $r.FlagAdded | Should -BeTrue
+        @($r.LocationsAdded).Count | Should -Be 3
+        $txt = Get-Content -LiteralPath $p -Raw
+        $txt | Should -Match '// my editor prefs'
+        $txt | Should -Match '/\* block \*/'
+        $txt | Should -Match '// trailing note'
+        $txt | Should -Match 'https://example.com//not-a-comment'
+        $txt.IndexOf('"editor.fontSize"') | Should -BeLessThan $txt.IndexOf('"files.autoSave"')
+        $txt.IndexOf('"files.autoSave"') | Should -BeLessThan $txt.IndexOf('"chat.subagents.allowInvocationsFromSubagents"')
+        $txt | Should -Match "`r`n" -Because 'line endings are preserved'
+        $o = ConvertFrom-JsonLenient $txt
+        $o.'editor.fontSize' | Should -Be 14
+        $o.'chat.subagents.allowInvocationsFromSubagents' | Should -BeTrue
+        $o.'chat.agentSkillsLocations'.'skills-for-fabric/skills' | Should -BeTrue
+        ([IO.File]::ReadAllBytes($p))[0] | Should -Be 123 -Because 'no BOM is introduced'
+    }
+
+    It 'flips an explicit false to true and merges only the missing locations into an existing block (user entries kept)' {
+        $p = Join-Path $script:UsDir 'existing.json'
+        $orig = "{`n  `"chat.subagents.allowInvocationsFromSubagents`": false,`n  `"chat.agentSkillsLocations`": {`n    `"C:/my/own/skills`": true,`n    `"skills-for-fabric/skills`": true // already here`n  },`n  `"zoom`": 1`n}`n"
+        [IO.File]::WriteAllText($p, $orig, $script:Utf8)
+        $r = Update-UserSettingsInPlace -Path $p -SkillLocations $script:Locs
+        $r.FlagAdded | Should -BeTrue
+        @($r.LocationsAdded) | Should -Not -Contain 'skills-for-fabric/skills'
+        @($r.LocationsAdded).Count | Should -Be 2
+        $txt = Get-Content -LiteralPath $p -Raw
+        $txt | Should -Match '// already here'
+        $txt | Should -Not -Match "`r`n" -Because 'LF files stay LF'
+        $o = ConvertFrom-JsonLenient $txt
+        $o.'chat.subagents.allowInvocationsFromSubagents' | Should -BeTrue
+        $o.'chat.agentSkillsLocations'.'C:/my/own/skills' | Should -BeTrue
+        $o.'chat.agentSkillsLocations'.'.github/skills' | Should -BeTrue
+        $o.zoom | Should -Be 1
+    }
+
+    It 'is idempotent and never writes absolute or ~ paths' {
+        $p = Join-Path $script:UsDir 'existing.json'
+        $before = Get-Content -LiteralPath $p -Raw
+        $r = Update-UserSettingsInPlace -Path $p -SkillLocations ($script:Locs + @('C:\abs\skills', '~/.vscode/extensions/x/skills'))
+        $r.Changed | Should -BeFalse
+        (Get-Content -LiteralPath $p -Raw) | Should -Be $before
+    }
+
+    It 'creates the file when absent, keeps a BOM when present, and refuses a broken file' {
+        $new = Join-Path $script:UsDir 'sub\new.json'
+        (Update-UserSettingsInPlace -Path $new -SkillLocations $script:Locs).Changed | Should -BeTrue
+        (ConvertFrom-JsonLenient (Get-Content -LiteralPath $new -Raw)).'chat.subagents.allowInvocationsFromSubagents' | Should -BeTrue
+
+        $bom = Join-Path $script:UsDir 'bom.json'
+        [IO.File]::WriteAllText($bom, "{`r`n  `"a`": 1`r`n}`r`n", (New-Object System.Text.UTF8Encoding($true)))
+        Update-UserSettingsInPlace -Path $bom -SkillLocations @() | Out-Null
+        $b = [IO.File]::ReadAllBytes($bom); ($b[0] -eq 0xEF -and $b[1] -eq 0xBB) | Should -BeTrue
+        (ConvertFrom-JsonLenient (Get-Content -LiteralPath $bom -Raw)).a | Should -Be 1
+
+        $bad = Join-Path $script:UsDir 'bad.json'
+        [IO.File]::WriteAllText($bad, '{ "a": ', $script:Utf8)
+        { Update-UserSettingsInPlace -Path $bad -SkillLocations @() } | Should -Throw
+        (Get-Content -LiteralPath $bad -Raw) | Should -Be '{ "a": ' -Because 'a broken file is never rewritten'
     }
 }
 
