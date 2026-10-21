@@ -29,7 +29,7 @@ param(
 
 # Keep the window open on any error so the user can read it
 $ErrorActionPreference = 'Stop'
-$productVersion = '0.7.2'
+$productVersion = '0.7.3'
 $workspaceFileName = 'Fabric-Agentic-Workspace.code-workspace'
 
 # SHA256 helper that does not hard-depend on the Get-FileHash cmdlet. A Windows
@@ -176,7 +176,7 @@ if ($VerifyRoot) {
 $agentManifestJson = @'
 {
   "schemaVersion": 1,
-  "productVersion": "0.7.2",
+  "productVersion": "0.7.3",
   "defaults": {
     "mode": "both",
     "tools": ["read","search"],
@@ -323,16 +323,128 @@ function Write-ManagedFile ([string]$Path, [string]$Content) {
 # "App execution alias" stubs that only print "Python was not found" and exit
 # non-zero. Get-Command still finds them, so we must actually RUN --version and
 # confirm a real "Python 3.x" before trusting the interpreter for pip installs.
-# Returns the usable launcher string (e.g. 'py' / 'python') or $null.
-function Find-RealPython {
-    foreach ($cand in @('py', 'python', 'python3')) {
-        if (-not (Get-Command $cand -ErrorAction SilentlyContinue)) { continue }
-        try {
-            $v = (& $cand --version 2>&1 | Out-String).Trim()
-            if ($LASTEXITCODE -eq 0 -and $v -match 'Python\s+3') { return $cand }
-        } catch { }
-    }
+# Many REAL installs are not on PATH at all: the python.org installer leaves
+# "Add python.exe to PATH" unticked by default, a per-user `py` launcher is not on
+# PATH either, and conda never is. So when PATH yields no supported interpreter
+# the PEP 514 registry keys (Software\Python\<Company>\<Tag>\InstallPath) and the
+# usual install folders are probed as well. Candidates are ranked: a version the
+# Fabric CLI supports beats one it does not, newer beats older, PATH beats disk.
+# A disk hit is put on the SESSION PATH (interpreter + Scripts) so `python` and a
+# freshly pip-installed `fab` resolve for the rest of the run; persisting the
+# Scripts dir stays with the normal install path, exactly as before.
+# The probe is cached for the run (Sync-ToolPaths calls this repeatedly);
+# -Refresh re-probes after an install. The pick's details land in
+# $script:LastPythonProbe (Invoke / Version / Supported / Source) for messages.
+# Returns the launcher string ('py' / 'python' / full python.exe path) or $null.
+$script:FabPythonMin          = [version]'3.10'
+$script:FabPythonMaxExclusive = [version]'3.15'   # ms-fabric-cli requires_python ">=3.10,<3.15"
+$script:PythonProbeCache      = $null
+$script:LastPythonProbe       = $null
+function Get-FabPythonRangeLabel {
+    return "$($script:FabPythonMin.Major).$($script:FabPythonMin.Minor)-$($script:FabPythonMaxExclusive.Major).$($script:FabPythonMaxExclusive.Minor - 1)"
+}
+function Get-PythonVersionOf {
+    param([string]$Command)
+    try {
+        $v = (& $Command --version 2>&1 | Out-String).Trim()
+        if ($LASTEXITCODE -eq 0 -and $v -match 'Python\s+(\d+\.\d+(?:\.\d+)?)') { return [version]$Matches[1] }
+    } catch { }
     return $null
+}
+function Find-RealPython {
+    param([switch]$Refresh)
+    if (-not $Refresh -and $null -ne $script:PythonProbeCache) {
+        # Sync-ToolPaths rebuilds $env:Path from the registry, dropping session-only dirs.
+        foreach ($d in @($script:PythonProbeCache.SessionDirs)) {
+            if ($d -and -not @($env:Path -split ';' | Where-Object { $_.TrimEnd('\') -ieq $d.TrimEnd('\') })) { $env:Path = "$d;$env:Path" }
+        }
+        $script:LastPythonProbe = $script:PythonProbeCache.Probe
+        return $script:PythonProbeCache.Invoke
+    }
+
+    $candidates = New-Object System.Collections.ArrayList
+    $consider = {
+        param([string]$Invoke, [string]$Source)
+        $ver = Get-PythonVersionOf $Invoke
+        if (-not $ver -or $ver.Major -ne 3) { return }
+        [void]$candidates.Add([pscustomobject]@{
+            Invoke    = $Invoke
+            Version   = $ver
+            Source    = $Source
+            Supported = ($ver -ge $script:FabPythonMin -and $ver -lt $script:FabPythonMaxExclusive)
+            Order     = $candidates.Count
+        })
+    }
+
+    # 1. PATH first -- unchanged behaviour whenever Python is already reachable.
+    foreach ($cand in @('py', 'python', 'python3')) {
+        if (Get-Command $cand -ErrorAction SilentlyContinue) { & $consider $cand 'PATH' }
+    }
+
+    if (-not @($candidates | Where-Object { $_.Supported })) {
+        $exes = @()
+        # 2. PEP 514 registry: every registered interpreter (python.org = PythonCore,
+        #    conda = ContinuumAnalytics, ...), per-user and machine-wide.
+        foreach ($hive in @('HKCU:\Software\Python', 'HKLM:\Software\Python', 'HKLM:\Software\WOW6432Node\Python')) {
+            if (-not (Test-Path $hive)) { continue }
+            foreach ($company in @(Get-ChildItem $hive -ErrorAction SilentlyContinue)) {
+                foreach ($tag in @(Get-ChildItem $company.PSPath -ErrorAction SilentlyContinue)) {
+                    $ip = Get-ItemProperty (Join-Path $tag.PSPath 'InstallPath') -ErrorAction SilentlyContinue
+                    if (-not $ip) { continue }
+                    $exe = $null
+                    if ($ip.PSObject.Properties['ExecutablePath'] -and $ip.ExecutablePath) { $exe = [string]$ip.ExecutablePath }
+                    elseif ($ip.PSObject.Properties['(default)'] -and $ip.'(default)') { $exe = Join-Path ([string]$ip.'(default)') 'python.exe' }
+                    if ($exe -and (Test-Path -LiteralPath $exe)) { $exes += $exe }
+                }
+            }
+        }
+        # 3. Well-known folders: python.org per-user / all-users, legacy C:\PythonXY, conda.
+        $roots = @(
+            @{ Root = "$env:LOCALAPPDATA\Programs\Python"; Glob = 'Python3*\python.exe' },
+            @{ Root = $env:ProgramFiles;                    Glob = 'Python3*\python.exe' },
+            @{ Root = ${env:ProgramFiles(x86)};             Glob = 'Python3*\python.exe' },
+            @{ Root = 'C:\';                                Glob = 'Python3*\python.exe' },
+            @{ Root = $env:USERPROFILE;                     Glob = 'miniconda3\python.exe' },
+            @{ Root = $env:USERPROFILE;                     Glob = 'anaconda3\python.exe' },
+            @{ Root = $env:LOCALAPPDATA;                    Glob = 'miniconda3\python.exe' },
+            @{ Root = $env:LOCALAPPDATA;                    Glob = 'anaconda3\python.exe' },
+            @{ Root = $env:ProgramData;                     Glob = 'miniconda3\python.exe' },
+            @{ Root = $env:ProgramData;                     Glob = 'anaconda3\python.exe' }
+        )
+        foreach ($r in $roots) {
+            if (-not $r.Root -or -not (Test-Path -LiteralPath $r.Root)) { continue }
+            $exes += @(Get-Item (Join-Path $r.Root $r.Glob) -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+        }
+        $seen = @{}
+        foreach ($exe in $exes) {
+            $k = $exe.ToLowerInvariant()
+            if ($seen.ContainsKey($k)) { continue }
+            $seen[$k] = $true
+            & $consider $exe 'disk'
+        }
+    }
+
+    if ($candidates.Count -eq 0) {
+        $script:LastPythonProbe  = $null
+        $script:PythonProbeCache = @{ Invoke = $null; Probe = $null; SessionDirs = @() }
+        return $null
+    }
+    $best = $candidates |
+        Sort-Object -Property @{ Expression = { -not $_.Supported } }, @{ Expression = 'Version'; Descending = $true }, 'Order' |
+        Select-Object -First 1
+    $sessionDirs = @()
+    if ($best.Source -eq 'disk') {
+        $dir = Split-Path $best.Invoke -Parent
+        foreach ($d in @($dir, (Join-Path $dir 'Scripts'))) {
+            if (Test-Path -LiteralPath $d) {
+                $sessionDirs += $d
+                if (-not @($env:Path -split ';' | Where-Object { $_.TrimEnd('\') -ieq $d.TrimEnd('\') })) { $env:Path = "$d;$env:Path" }
+            }
+        }
+    }
+    $script:LastPythonProbe  = @{ Invoke = $best.Invoke; Version = $best.Version; Supported = $best.Supported; Source = $best.Source }
+    $script:PythonProbeCache = @{ Invoke = $best.Invoke; Probe = $script:LastPythonProbe; SessionDirs = $sessionDirs }
+    return $best.Invoke
 }
 
 # -- Helper: refresh the current-session PATH from Machine + User scopes -
@@ -572,32 +684,55 @@ function Install-VsCodeExtension {
     return (Test-VsCodeExtension -Id $Id -List (Get-InstalledVsCodeExtensions -VsCode $VsCode))
 }
 
-# -- Helper: ensure a REAL Python is available, installing if missing ----
+# -- Helper: ensure a REAL, SUPPORTED Python is available, installing if missing --
 # The Fabric CLI (fab) is a Python package, so without Python it cannot install.
 # This force-installs Python (mirroring the Power Platform twin's pac/.NET
 # bootstrap) so the common "fab won't install because Python is missing" case
 # resolves itself. Tries, in order:
-#   1. An existing real Python (Find-RealPython)
-#   2. winget  (Python.Python.3.12, per-user, no admin)
+#   1. An existing real Python in the supported range (Find-RealPython)
+#   2. winget  (Python.Python.3.12, per-user, no admin) -- HARD TIMEOUT: on an
+#      inspected proxy the download can stall forever and a bare `& winget`
+#      would freeze the installer at this line
 #   3. The official python.org silent installer (pinned), per-user, no admin
 # Refreshes PATH after each attempt. Returns a usable launcher string
-# ('py'/'python') or $null on total failure -- never throws, never aborts setup.
+# ('py'/'python'/full path) or $null on total failure -- never throws, never aborts setup.
 function Ensure-Python {
+    $range = Get-FabPythonRangeLabel
     $py = Find-RealPython
-    if ($py) { return $py }
+    if ($py -and $script:LastPythonProbe.Supported) { return $py }
+    if ($py) {
+        Write-Host "         Python $($script:LastPythonProbe.Version) found ($($script:LastPythonProbe.Invoke)), but the Fabric CLI needs $range." -ForegroundColor Yellow
+        Write-Host "         Installing a supported Python 3.12 alongside it (per-user; your existing Python is not touched)..." -ForegroundColor Yellow
+    } else {
+        Write-Host "         No real Python found on PATH, in the registry or in the usual install folders." -ForegroundColor Yellow
+        Write-Host "         Attempting to install Python 3.12 (required by the Fabric CLI)..." -ForegroundColor Yellow
+    }
 
-    Write-Host "         No real Python found -- attempting to install Python 3.12 (required by the Fabric CLI)..." -ForegroundColor Yellow
-
-    # -- Attempt 1: winget (per-user, no admin) -------------------------
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Write-Host "         Trying winget: Python.Python.3.12 ..." -ForegroundColor DarkGray
+    # -- Attempt 1: winget (per-user, no admin), bounded -----------------
+    $wg = Get-Command winget -ErrorAction SilentlyContinue
+    if ($wg) {
+        $wingetTimeoutSec = 240
+        Write-Host "         Trying winget: Python.Python.3.12 (progress hidden; gives up after $([int]($wingetTimeoutSec / 60)) minutes) ..." -ForegroundColor DarkGray
+        $so = Join-Path $env:TEMP ("wgpy_" + [IO.Path]::GetRandomFileName() + ".txt")
+        $se = "$so.err"
         try {
-            & winget install -e --id Python.Python.3.12 --scope user --silent `
-                --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
+            $proc = Start-Process -FilePath $wg.Source -ArgumentList @(
+                'install', '-e', '--id', 'Python.Python.3.12', '--scope', 'user', '--silent',
+                '--disable-interactivity', '--accept-package-agreements', '--accept-source-agreements'
+            ) -NoNewWindow -PassThru -RedirectStandardOutput $so -RedirectStandardError $se
+            $exited = $true
+            try { $proc | Wait-Process -Timeout $wingetTimeoutSec -ErrorAction Stop } catch { $exited = $false }
+            if (-not $exited) {
+                try { $proc | Stop-Process -Force -ErrorAction SilentlyContinue } catch { }
+                Write-Host "         winget did not finish in time (stalled download or blocked source); trying python.org next." -ForegroundColor DarkGray
+            } elseif ($proc.ExitCode -ne 0) {
+                Write-Host "         winget exit code: $($proc.ExitCode)." -ForegroundColor DarkGray
+            }
         } catch { }
+        Remove-Item $so, $se -Force -ErrorAction SilentlyContinue
         Update-InstallerPath
-        $py = Find-RealPython
-        if ($py) { Write-Host "         Python installed (via winget)." -ForegroundColor Green; return $py }
+        $py = Find-RealPython -Refresh
+        if ($py -and $script:LastPythonProbe.Supported) { Write-Host "         Python $($script:LastPythonProbe.Version) installed (via winget)." -ForegroundColor Green; return $py }
     }
 
     # -- Attempt 2: official python.org silent installer ----------------
@@ -622,9 +757,12 @@ function Ensure-Python {
         Write-Host "         Python download/install failed: $($_.Exception.Message)" -ForegroundColor DarkGray
     }
     Update-InstallerPath
-    $py = Find-RealPython
-    if ($py) { Write-Host "         Python installed (via python.org)." -ForegroundColor Green; return $py }
+    $py = Find-RealPython -Refresh
+    if ($py -and $script:LastPythonProbe.Supported) { Write-Host "         Python $($script:LastPythonProbe.Version) installed (via python.org)." -ForegroundColor Green; return $py }
 
+    if ($py) {
+        Write-Host "         Only Python $($script:LastPythonProbe.Version) is available; the Fabric CLI needs $range, so it is skipped for now." -ForegroundColor Yellow
+    }
     return $null
 }
 
@@ -1993,6 +2131,104 @@ function Get-NormalizedRepositoryUrl {
     return $value.ToLowerInvariant()
 }
 
+# -- Helper: mirror every live remote branch of a bare business mirror -----
+# Each non-main/master branch becomes its own sibling worktree folder next to
+# the hidden .bare mirror. Field failure (2026-10-21): on a machine with Git's
+# default settings EVERY branch was "skipped". Fabric Git-integration repositories
+# carry long relative paths (item folders, GUID page/visual folders, *.tmdl); once
+# nested under <root>\source-control-repositories\<repo>\<branch>\ they pass
+# Windows' classic limit (260 chars for files, 248 for directories) and git's
+# checkout dies with "Filename too long", after which git deletes the half-made
+# worktree. Fix: core.longpaths=true written to the mirror's OWN config (repo-
+# local, no admin, no change to the user's global Git settings). Branches are
+# enumerated by FULL ref name because refs/remotes/origin/HEAD shortens to plain
+# "origin" on Git >= 2.48 and used to slip through as a phantom branch. git's own
+# last error line is printed under any skip so the cause is visible. With -Pull,
+# existing worktrees that are clean and strictly behind are fast-forwarded only.
+# Returns the branch names that have a worktree afterwards. Never throws.
+function Sync-BusinessRepositoryWorktrees {
+    param(
+        [string]$GitDir,      # the hidden .bare mirror
+        [string]$Container,   # folder holding .bare plus one sub-folder per branch
+        [switch]$Pull         # opt-in fast-forward of existing clean, behind worktrees
+    )
+    $ErrorActionPreference = 'Continue'   # function-scoped; git progress on stderr must not throw
+    $mirrored = @()
+    if (-not $GitDir -or -not (Test-Path -LiteralPath $GitDir)) { return $mirrored }
+
+    & git --git-dir $GitDir config core.longpaths true 2>$null | Out-Null
+
+    $remoteBranches = @(& git --git-dir $GitDir for-each-ref --format='%(refname)' refs/remotes/origin 2>$null |
+        ForEach-Object { ([string]$_ -replace '^refs/remotes/origin/', '').Trim() } |
+        Where-Object { $_ -and $_ -ne 'HEAD' -and $_ -notmatch '^(main|master)$' } |
+        Sort-Object -Unique)
+
+    $longestAbsolutePath = 0
+    foreach ($branch in $remoteBranches) {
+        $worktreePath = Join-Path $Container $branch
+        if (Test-Path -LiteralPath $worktreePath) {
+            $mirrored += $branch
+            if ($Pull) {
+                # Fast-forward this existing worktree to origin/<branch> ONLY
+                # when it is clean and strictly behind. Dirty or diverged
+                # branches are left untouched so no local work is ever lost.
+                $dirtyWt = @(& git -C $worktreePath status --porcelain 2>$null)
+                if ($dirtyWt.Count -gt 0) {
+                    Write-Host "    $branch has local changes  -- left as-is (no pull)." -ForegroundColor Yellow
+                } else {
+                    $ahead = 0; $behind = 0
+                    $counts = (& git -C $worktreePath rev-list --left-right --count "HEAD...origin/$branch" 2>$null)
+                    if ($counts -and ($counts -match '(\d+)\s+(\d+)')) { $ahead = [int]$Matches[1]; $behind = [int]$Matches[2] }
+                    if ($behind -eq 0) {
+                        Write-Host "    $branch already up to date." -ForegroundColor DarkGray
+                    } elseif ($ahead -gt 0) {
+                        Write-Host "    $branch has diverged (local commits)  -- left as-is; pull manually." -ForegroundColor Yellow
+                    } else {
+                        & git -C $worktreePath merge --ff-only "origin/$branch" 2>&1 | Out-Null
+                        if ($LASTEXITCODE -eq 0) {
+                            Write-Host "    $branch fast-forwarded to match online." -ForegroundColor Green
+                        } else {
+                            Write-Host "    $branch could not fast-forward  -- left as-is." -ForegroundColor Yellow
+                        }
+                    }
+                }
+            }
+        } else {
+            # Create/point a local branch at origin/<branch> with upstream tracking
+            # and check it out in its own worktree, so pull/push behave like a clone.
+            $out = @(& git --git-dir $GitDir worktree add --track -B $branch -- $worktreePath "origin/$branch" 2>&1 | ForEach-Object { "$_" })
+            $addExit = $LASTEXITCODE
+            if ($addExit -eq 0) {
+                $mirrored += $branch
+                Write-Host "    Branch worktree ready: $branch" -ForegroundColor Green
+            } else {
+                Write-Host "    Could not create a worktree for '$branch'; skipped." -ForegroundColor Yellow
+                $reason = $out | Where-Object { $_ -match '^\s*(fatal|error):' } | Select-Object -Last 1
+                if (-not $reason) { $reason = $out | Where-Object { $_ -match '\S' } | Select-Object -Last 1 }
+                if ($reason) { Write-Host "      git: $($reason.Trim())" -ForegroundColor DarkGray }
+                continue
+            }
+        }
+        # Measured through git (PowerShell 5.1 cannot even list paths beyond 260 chars).
+        $maxRel = (& git --git-dir $GitDir ls-tree -r --name-only "origin/$branch" 2>$null |
+                   ForEach-Object { ([string]$_).Length } | Sort-Object -Descending | Select-Object -First 1)
+        if ($maxRel) { $longestAbsolutePath = [Math]::Max($longestAbsolutePath, $worktreePath.Length + 1 + [int]$maxRel) }
+    }
+
+    if ($remoteBranches.Count -eq 0) {
+        Write-Host '    No non-main/master branches were found to mirror.' -ForegroundColor Yellow
+    } elseif ($mirrored.Count -eq 0) {
+        Write-Host "    None of the $($remoteBranches.Count) live branches could be mirrored -- see the git messages above." -ForegroundColor Yellow
+    } else {
+        Write-Host "    Live branches mirrored: $($mirrored -join ', ')" -ForegroundColor Green
+        if ($longestAbsolutePath -gt 259) {
+            Write-Host "    Note: some files here have paths longer than 260 characters (longest: $longestAbsolutePath). Git and VS Code handle them;" -ForegroundColor DarkGray
+            Write-Host '    Windows PowerShell 5.1 does not -- use PowerShell 7 (pwsh) or VS Code itself when working on those files from a terminal.' -ForegroundColor DarkGray
+        }
+    }
+    return $mirrored
+}
+
 function Merge-CodeWorkspace {
     param([string]$Path, [string]$WorkspaceName, [string]$PrimaryRootPath = '.')
     if ([string]::IsNullOrWhiteSpace($WorkspaceName)) { $WorkspaceName = 'Fabric Agentic Workspace' }
@@ -2469,7 +2705,7 @@ if ($tmdlExtFound) {
 if (-not (Test-CliResilient -Name 'fab' -VersionPattern '(?im)^\s*fab version')) {
     Write-Host "  Fabric CLI (fab): not found (recommended)" -ForegroundColor Yellow
     Write-Host "         Primary CLI for Fabric API, jobs, export/import, OneLake and table ops." -ForegroundColor DarkGray
-    Write-Host "         Needs Python 3.10-3.13. Reference: https://github.com/microsoft/fabric-cli" -ForegroundColor DarkGray
+    Write-Host "         Needs Python $(Get-FabPythonRangeLabel). Reference: https://github.com/microsoft/fabric-cli" -ForegroundColor DarkGray
     # Ensure a REAL Python exists (install it if missing), then install fab via pip.
     $realPy = Ensure-Python
     if ($realPy) {
@@ -2962,65 +3198,9 @@ if ($businessRepoPlans.Count -gt 0 -and $repositoryMapReadable) {
         $ErrorActionPreference = 'Stop'
 
         # Mirror every live branch except main/master (those are usually the
-        # protected promotion targets and rarely edited locally).
-        $remoteBranches = @(& git --git-dir $gitDir for-each-ref --format='%(refname:short)' refs/remotes/origin 2>$null |
-            ForEach-Object { ($_ -replace '^origin/', '').Trim() } |
-            Where-Object { $_ -and $_ -ne 'HEAD' -and $_ -notmatch '^(main|master)$' } |
-            Sort-Object -Unique)
-
-        $mirroredBranches = @()
-        foreach ($branch in $remoteBranches) {
-            $worktreePath = Join-Path $container $branch
-            if (Test-Path -LiteralPath $worktreePath) {
-                $mirroredBranches += $branch
-                if ($doPull) {
-                    # Fast-forward this existing worktree to origin/<branch> ONLY
-                    # when it is clean and strictly behind. Dirty or diverged
-                    # branches are left untouched so no local work is ever lost.
-                    $ErrorActionPreference = 'Continue'
-                    $dirtyWt = @(& git -C $worktreePath status --porcelain 2>$null)
-                    if ($dirtyWt.Count -gt 0) {
-                        Write-Host "    $branch has local changes  -- left as-is (no pull)." -ForegroundColor Yellow
-                    } else {
-                        $ahead = 0; $behind = 0
-                        $counts = (& git -C $worktreePath rev-list --left-right --count "HEAD...origin/$branch" 2>$null)
-                        if ($counts -and ($counts -match '(\d+)\s+(\d+)')) { $ahead = [int]$Matches[1]; $behind = [int]$Matches[2] }
-                        if ($behind -eq 0) {
-                            Write-Host "    $branch already up to date." -ForegroundColor DarkGray
-                        } elseif ($ahead -gt 0) {
-                            Write-Host "    $branch has diverged (local commits)  -- left as-is; pull manually." -ForegroundColor Yellow
-                        } else {
-                            & git -C $worktreePath merge --ff-only "origin/$branch" 2>&1 | Out-Null
-                            if ($LASTEXITCODE -eq 0) {
-                                Write-Host "    $branch fast-forwarded to match online." -ForegroundColor Green
-                            } else {
-                                Write-Host "    $branch could not fast-forward  -- left as-is." -ForegroundColor Yellow
-                            }
-                        }
-                    }
-                    $ErrorActionPreference = 'Stop'
-                }
-                continue
-            }
-            # Create/point a local branch at origin/<branch> with upstream tracking
-            # and check it out in its own worktree, so pull/push behave like a clone.
-            $ErrorActionPreference = 'Continue'
-            try { & git --git-dir $gitDir worktree add --track -B $branch -- $worktreePath "origin/$branch" 2>&1 | Out-Null } catch { }
-            $addExit = $LASTEXITCODE
-            $ErrorActionPreference = 'Stop'
-            if ($addExit -eq 0) {
-                $mirroredBranches += $branch
-                Write-Host "    Branch worktree ready: $branch" -ForegroundColor Green
-            } else {
-                Write-Host "    Could not create a worktree for '$branch'; skipped." -ForegroundColor Yellow
-            }
-        }
-
-        if ($mirroredBranches.Count -eq 0) {
-            Write-Host '    No non-main/master branches were found to mirror.' -ForegroundColor Yellow
-        } else {
-            Write-Host "    Live branches mirrored: $($mirroredBranches -join ', ')" -ForegroundColor Green
-        }
+        # protected promotion targets and rarely edited locally). Also enables
+        # long paths on the mirror so Fabric item trees check out on default Git.
+        $mirroredBranches = @(Sync-BusinessRepositoryWorktrees -GitDir $gitDir -Container $container -Pull:$doPull)
 
         $entry = [pscustomobject][ordered]@{
             id               = $plan.id

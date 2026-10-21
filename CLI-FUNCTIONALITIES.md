@@ -34,7 +34,7 @@ the Azure CLI help, or the official references linked below.
 
 Install / detection:
 
-- **`fab`** (recommended): `pip install ms-fabric-cli` (Python 3.10–3.13). Repo: https://github.com/microsoft/fabric-cli
+- **`fab`** (recommended): `pip install ms-fabric-cli` (Python 3.10–3.14). Repo: https://github.com/microsoft/fabric-cli
 - **`az`** (fallback): https://aka.ms/installazurecli
 - **Specialist CLIs**: the installer detects each, prints its provider + purpose, and
   asks Y/N before a best-effort install (see the README **Prerequisites** table and each

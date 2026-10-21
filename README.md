@@ -61,7 +61,7 @@ Contributions and feedback welcome.
 - [3.8 How it works under the hood](#38-how-it-works-under-the-hood)
 - [3.9 A bit of history](#39-a-bit-of-history-how-fabricpower-bi-work-used-to-flow)
 - [3.10 Quality & validation](#310-quality--validation)
-- [3.11 Current status (v0.7.2)](#311-current-status-v072)
+- [3.11 Current status (v0.7.3)](#311-current-status-v073)
 - [3.12 Disclaimer](#312-disclaimer)
 - [Contributing](#contributing) · [Files in this repository](#files-in-this-repository) · [License](#license) · [Third-party notices](#third-party-notices)
 
@@ -81,7 +81,7 @@ The installer **stops** if a required item is missing. It **installs** the auto 
 | ✅ Required | **[Microsoft Fabric extension](https://marketplace.visualstudio.com/items?itemName=fabric.vscode-fabric)** | You — `code --install-extension fabric.vscode-fabric` | Pull/push of Fabric items. Installer warns if missing, continues. |
 | 👍 Recommended | **[TMDL extension](https://marketplace.visualstudio.com/items?itemName=analysis-services.tmdl)** | You — `code --install-extension analysis-services.tmdl` | Syntax highlighting/validation for `.tmdl`. Installer reminds you. |
 | 💡 Nice to have | **[Fabric Data Engineer Remote](https://marketplace.visualstudio.com/items?itemName=synapsevscode.vscode-synapse-remote)** | You | Run notebook cells against remote Spark. Installer mentions it as a tip. |
-| 🤖 Auto | **Python 3.10–3.13** | Installer (only if no Python 3 found) | winget `Python.Python.3.12 --scope user`, then python.org 3.12.10 per-user. Skipped if you have Anaconda etc. |
+| 🤖 Auto | **Python 3.10–3.14** | Installer (only if no supported Python is found) | Looks on PATH, then in the PEP 514 registry and the python.org / conda folders — an install that is simply not on PATH is used as-is. Otherwise winget `Python.Python.3.12 --scope user` (bounded to 4 min), then python.org 3.12.10 per-user. An out-of-range Python is left untouched and 3.12 installed alongside. |
 | 🤖 Auto | **Fabric CLI `fab`** | Installer | `pip install ms-fabric-cli` (with `--user` retry). Primary CLI for live work. |
 | 🤖 Auto | **Azure CLI `az`** | Installer | winget `Microsoft.AzureCLI`, else isolated `%USERPROFILE%\.fabric-az`. Fallback CLI. ⚠️ Slowest install when missing. |
 | 🤖 Auto | **Fabric MCP server** `fabric.vscode-fabric-mcp-server` | Installer | VS Code extension; live/hybrid mode. |
@@ -146,7 +146,7 @@ Each step prints a banner `STEP n of 9 - <title>` and ends with `Press Enter to 
 Runs mostly on its own. Order of events:
 
 1. **Checks** Git, VS Code ≥ 1.117.0, Fabric extension, TMDL extension. Git/VS Code missing → stops. Extensions missing → warning, continues.
-2. **Auto-installs if missing** (best-effort): Python → `fab` → `az` → the two MCP extensions.
+2. **Auto-installs if missing** (best-effort): Python → `fab` → `az` → the two MCP extensions. Python is searched on PATH, in the registry and in the usual install folders first; the winget attempt gives up after 4 minutes instead of waiting forever on a blocked download.
 3. **Optional specialist CLIs** — for each missing tool it prints provider + purpose and asks:
    `Install <tool> now? (Y/N)` for `pbir`, Tabular Editor CLI, `pbi-tools`, `sqlcmd`, `gh`, and `Install the azure-devops az extension now? (Y/N)`.
    **No** is remembered: it stays quiet on later runs. A tool you install yourself later is still detected.
@@ -166,12 +166,14 @@ No prompts. Creates the workspace folder, the Fabric workspace sub-folders from 
 | Situation | What happens | Prompt |
 |---|---|---|
 | You declined in Step 1 | `Skipped. Existing business repositories and mappings were not changed.` | — |
-| New repository | Validated, cloned into `source-control-repositories/<Repo>/`, **live branches mirrored locally** (one working tree per branch, `main`/`master` excluded), recorded in the gitignored `local/repository-map.local.json`. | — |
+| New repository | Validated, cloned into `source-control-repositories/<Repo>/`, **live branches mirrored locally** (one working tree per branch, `main`/`master` excluded), recorded in the gitignored `local/repository-map.local.json`. The mirror gets `core.longpaths=true` in its **own** config (your global Git settings are not touched) because Fabric item paths nested this deep exceed Windows' 260-character limit on default Git. A branch that still cannot be mirrored prints git's own error under the `skipped` line. | — |
 | Repository already cloned | Fetches remote refs only. | `You already have this repository locally. Pull existing branches so they match online? (y/N)` — **Yes** fast-forwards only branches that are clean *and* strictly behind; dirty or diverged branches are never touched. |
 
 Ends with `Workspace ready (opens unsaved -- use File > Save Workspace As to keep it).` — the multi-root `.code-workspace` for the session was built (or merged, keeping any roots you added before).
 
 No PAT is ever asked or stored; Git uses your credential manager / SSH. Nothing is connected to or changed on a live Fabric workspace.
+
+> Some mirrored files end up with paths longer than 260 characters. Git and VS Code handle them; **Windows PowerShell 5.1 does not** (it cannot list or delete them) — use PowerShell 7 (`pwsh`) or VS Code itself for those folders. The installer prints this note when it applies.
 
 ### Step 5 of 9 — Cloning Skill Repositories
 
@@ -225,7 +227,7 @@ It never installs agents or skills anywhere else, never changes what built-in Co
 ### Step 9 of 9 — Finishing Up
 
 1. `git init` if needed; initial commit, or an update commit limited to installer-owned paths (skipped with a warning if `git user.name/email` is not set).
-2. `Setup complete! v0.7.2` and the workspace path.
+2. `Setup complete! v0.7.3` and the workspace path.
 3. `Press Enter to open VS Code...` → opens the multi-root workspace.
 
 > Re-ran with VS Code already open? Run **Developer: Reload Window** so the agent dropdown rebuilds.
@@ -293,6 +295,10 @@ Same cause — `chat.agentSkillsLocations` is window-scoped too. The user-level 
 **I want nested delegation off in another workspace.** Add `"chat.subagents.allowInvocationsFromSubagents": false` to that workspace's `.code-workspace` `settings` block; workspace scope overrides user scope.
 
 **Agent dropdown is stale after an update.** **Developer: Reload Window**.
+
+**Step 4 said `Could not create a worktree for '<branch>'; skipped` for every branch.** Fixed in v0.7.3: the cause was Windows' 260-character path limit on default Git (`Filename too long`, now printed under the skipped line). Re-run the installer — it sets `core.longpaths=true` on the existing mirror and creates the missing branch folders; nothing else changes. If a branch is still skipped, the printed git line tells you why.
+
+**Step 2 said `No real Python found` although Python is installed, or sat on `Trying winget: Python.Python.3.12` for ages.** Fixed in v0.7.3: Python is now found off PATH (registry / install folders) and the winget attempt is bounded. If it still reports no Python, yours is older than 3.10 or newer than 3.14 — the installer says so and installs 3.12 alongside, or you can add a supported Python yourself and re-run.
 
 **A tool failed to install on a corporate / locked-down PC.**
 TLS inspection, endpoint security, winget policy, PATH delays or missing elevation can interrupt an otherwise valid install. Not blocking for full-local work.
@@ -568,7 +574,7 @@ Before the Fabric VS Code extension and AI agents there were two places to build
 ## 3.10 Quality & validation
 
 - **JSON Schema** (`schema/agent-manifest.schema.json`, draft-07) — shape of every agent entry; validated in CI.
-- **Pester suite** (`tests/`) — manifest integrity (47 agents, 3/7/37 tiers, unique ids), hierarchy (single root, no cycles), least-privilege tools, version/doc consistency, generated-file **content** (Knowledge/Playbook/Return-contract, approval-token rule, resolved skill refs, granted tools), emitted settings, vendor refresh failure paths, update-mode safety (JSONC, workspace merge, purge containment, saved-workspace detection/patch idempotency), the status script run offline, and the real installer driven through the Step 1 prompts.
+- **Pester suite** (`tests/`) — manifest integrity (47 agents, 3/7/37 tiers, unique ids), hierarchy (single root, no cycles), least-privilege tools, version/doc consistency, generated-file **content** (Knowledge/Playbook/Return-contract, approval-token rule, resolved skill refs, granted tools), emitted settings, vendor refresh failure paths, business-repository branch mirroring under default Git with >260-char paths (plus the phantom `origin` branch and skip diagnostics), Python detection with fake interpreters (Store stub rejected, supported version preferred, cached probe, bounded winget), update-mode safety (JSONC, workspace merge, purge containment, saved-workspace detection/patch idempotency), the status script run offline, and the real installer driven through the Step 1 prompts.
 - **Real generator smoke test** (`tests/Generated.Tests.ps1`) — `-EmitAgentsTo` dry-run asserting on actual generated files.
 - **CI** (`.github/workflows/validate.yml`) — PowerShell 7 on every push/PR; badge above.
 - **Install-time self-test + integrity manifest** — `guardrail-status.json` and SHA-256 `installed-manifest.json`.
@@ -580,10 +586,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "Import-Module Pester; In
 
 Not covered: a full end-to-end install against live Fabric/VS Code, and the *behavioural* quality of prompts — validated by real-world use (v0.7.0: single-team TMDL edit, multi-team Architect → Leads → QA with a live publish and regression DAX, and a destructive-action approval bubble).
 
-## 3.11 Current status (v0.7.2)
+## 3.11 Current status (v0.7.3)
 
 | Area | Status |
 |---|---|
+| Business repositories on default Git | **Fixed in v0.7.3** — long Fabric item paths check out on any machine (`core.longpaths` set on the mirror the installer owns, not on your Git); phantom `origin` branch gone; a skipped branch now shows git's own error |
+| Python detection | **Widened in v0.7.3** — finds Python off PATH (PEP 514 registry, python.org/conda folders), prefers a version the Fabric CLI supports (3.10–3.14), winget attempt bounded (no more frozen installer) |
 | Works however the folder is opened | **New in v0.7.2** — opt-in user-level enablement (nested-dispatch flag + workspace-relative skill locations, edited in place); status script reports the scope in effect; v0.7.1 saved-file patching kept as fallback |
 | One-click setup | **Validated manually** on Windows 10/11 incl. a locked-down corporate laptop |
 | Session startup | **Lean since v0.7.0** — one status call incl. the saved-`.code-workspace` check, then work |
@@ -591,7 +599,7 @@ Not covered: a full end-to-end install against live Fabric/VS Code, and the *beh
 | Agent → tools → skills model | **Implemented** — Knowledge, Playbook, mandatory validation, tool ladder, Avoid list per agent |
 | Team protocol | **Implemented v0.7.0** — WORK ORDER / WORK RESULT, three loops, `APPROVED:` tokens, session ledger |
 | Tool inventory | **Implemented** — real paths/versions; refreshed every session; Capability Maintenance owns install/update |
-| Repository onboarding | **Implemented v0.6.0** — clone-URL only, live-branch mirroring, safe re-runs, preserved multi-root workspace |
+| Repository onboarding | **Implemented v0.6.0, fixed v0.7.3** — clone-URL only, live-branch mirroring that survives Windows' 260-char limit, safe re-runs, preserved multi-root workspace |
 | Opt-in specialist CLIs | **Implemented** — detect → explain → Y/N → best-effort; declines remembered |
 | Manifest schema + CI tests | **Implemented v0.6.1, widened v0.7.0/v0.7.1** |
 | Custom skills (TMDL, Pipelines, CLI policy) | **Used in real work** |
