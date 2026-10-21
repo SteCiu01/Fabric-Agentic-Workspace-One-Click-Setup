@@ -5,30 +5,86 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
 ## [v0.7.3] - 2026-10-21
 
-A field-fix release. A colleague's first install on a standard corporate laptop failed in two places where the maintainer's machine had always passed; both turned out to be installer defects that the maintainer's own Git and Python configuration had been masking. No agent, skill or protocol content changed.
+A reliability-focused maintenance release addressing installation failures exposed by standard Windows configurations. The update improves Git worktree handling, Python interpreter discovery, dependency installation resilience, and diagnostic reporting.
+
+These changes eliminate dependencies on machine-specific Git and Python configurations, making first-time installations and subsequent updates more predictable and portable.
+
+No agent definitions, specialist skills, or orchestration protocols have changed.
 
 ### Fixed
 
-- **Step 4 — every business-repository branch was `Could not create a worktree ... skipped`.** Root cause reproduced: Fabric Git-integration repositories carry relative paths of 150–190 characters (item folders, GUID page/visual folders, `*.tmdl`); nested under `<root>\source-control-repositories\<repo>\<branch>\` they exceed Windows' classic limit (260 for files, 248 for directories) and `git worktree add` dies with `Filename too long`, then deletes the half-made folder — so the run ended with "No non-main/master branches were found to mirror" while the clone itself had succeeded. On Git's **default** settings this made one of the two team repositories impossible to mirror at any install path, and the other only under a ~28-character root. It had passed for the maintainer solely because of a personal global `core.longpaths=true`.
-  The installer now writes `core.longpaths=true` into the **mirror's own** config (`.bare\config`) — repo-local, no admin, the user's global Git settings are never touched — on fresh clones and on re-runs against an existing mirror. Verified with the developer's global config hidden: the same worktree add succeeds.
-- **Step 4 — phantom branch `origin`.** Git ≥ 2.48 creates `refs/remotes/origin/HEAD` on fetch; its short name is plain `origin`, which slipped through the `HEAD` filter and produced a spurious `Could not create a worktree for 'origin'` line (`fatal: invalid reference: origin/origin`). Branches are now enumerated by full ref name.
-- **Step 4 — silent skips.** git's stderr was discarded, so a skipped branch gave no clue. The last `fatal:`/`error:` line is now printed under the skip, and the closing message distinguishes "no branches exist" from "N branches exist and none could be mirrored".
-- **Step 2 — `No real Python found` on a laptop that had Python.** Detection was PATH-only (`py`/`python`/`python3`). The python.org installer leaves "Add python.exe to PATH" unticked by default, a per-user `py` launcher is not on PATH either, and conda never is — so a perfectly good interpreter was invisible and the installer went straight to installing another one. Detection now falls back to the PEP 514 registry (`Software\Python\<Company>\<Tag>\InstallPath`, per-user and machine-wide, python.org and conda alike) and the usual install folders; a hit found this way is put on the session PATH so `python` and the freshly installed `fab` resolve for the rest of the run.
-- **Step 2 — installer frozen at `Trying winget: Python.Python.3.12 ...`.** The winget call was a bare `& winget install ... | Out-Null`: no timeout and no visible progress, so a stalled download on an inspected proxy froze the whole setup indefinitely (the same anti-pattern already removed from the tool downloads in v0.6.x). It now runs through `Start-Process` + `Wait-Process -Timeout` (4 minutes, `--disable-interactivity`), is killed on timeout with a message, and falls through to the python.org installer.
+- **Step 4 — Git worktree creation failures caused by Windows path-length limits.** Fabric Git-integrated repositories can contain deeply nested item folders, GUID-based report page and visual directories, and `*.tmdl` files, producing relative paths of 150–190 characters or more. When combined with the workspace's `source-control-repositories/<repo>/<branch>/` structure, these paths can exceed Windows' traditional limits of 260 characters for files and 248 characters for directories. Under default Git configurations, `git worktree add` could fail with `Filename too long`, preventing affected branches from being mirrored.
+
+  The installer now configures `core.longpaths=true` directly within each repository mirror's local Git configuration (`.bare/config`), both during initial installation and subsequent updates. This enables long-path handling without requiring administrator privileges or modifying global Git settings. Existing repository mirrors are updated automatically when the installer is re-run.
+
+- **Step 4 — incorrect detection of a phantom `origin` branch.** Git 2.48 and later can create the `refs/remotes/origin/HEAD` reference during fetch operations. Its shortened representation could previously be interpreted as an actual branch, generating unnecessary worktree creation attempts and errors such as `fatal: invalid reference: origin/origin`. Branch enumeration now uses fully qualified Git references, correctly excluding symbolic references from the branch list.
+
+- **Step 4 — insufficient diagnostics for failed repository mirroring.** Git error output was previously suppressed during worktree creation failures, making it difficult to identify why branches were skipped. The installer now surfaces the relevant `fatal:` or `error:` message and distinguishes between repositories with no additional branches and repositories whose branches could not be mirrored. This provides actionable diagnostic information instead of misleading success or empty-branch messages.
+
+- **Step 2 — existing Python installations not detected.** Python discovery previously depended on executable availability through PATH (`py`, `python`, or `python3`). Valid Python installations without PATH registration could therefore go undetected, triggering unnecessary installation attempts.
+
+  Detection now includes fallback discovery through the PEP 514 Windows registry (`Software\Python\<Company>\<Tag>\InstallPath`), covering user-level and machine-wide installations, including supported python.org and Conda distributions. Common installation directories are also checked. When a compatible interpreter is discovered outside PATH, its location is added to the current installer session so Python and the Fabric CLI can resolve correctly throughout setup.
+
+- **Step 2 — unbounded Python installation attempts through winget.** The previous winget installation process had no execution timeout and suppressed progress output, allowing stalled downloads or installation processes to block setup indefinitely.
+
+  Python installation now uses `Start-Process` with `Wait-Process -Timeout`, a four-minute execution limit, and `--disable-interactivity`. A timed-out process is terminated with an explicit diagnostic message, after which the installer attempts the existing python.org fallback installation path.
 
 ### Changed
 
-- **Python version awareness.** Detection ranks interpreters: one the Fabric CLI supports beats one it does not, newer beats older, PATH beats disk. The supported range is a single pair of constants (`3.10` ≤ v < `3.15`, matching `ms-fabric-cli` 1.8.0's `requires_python`) used by every message — the Step 2 text no longer says "3.10–3.13". An out-of-range Python is reported as such ("Python 3.9 found ..., but the Fabric CLI needs 3.10-3.14") and 3.12 is installed alongside it; if that fails the Fabric CLI is skipped with a clear line instead of a cryptic pip error.
-- The Python probe is cached for the run (`Sync-ToolPaths` calls it repeatedly) and re-probed with `-Refresh` after each install attempt.
-- Step 4 prints a one-time note when mirrored files exceed 260 characters: Git and VS Code handle them, Windows PowerShell 5.1 cannot list or delete them — use PowerShell 7 or VS Code for those folders.
-- The branch-mirroring loop moved from inline Step 4 code into `Sync-BusinessRepositoryWorktrees` so it can be tested the way `Update-VendorClone` is. Folder layout, repository map and workspace file are unchanged; a re-run on an existing install only adds the config key and the missing branch folders.
+- **Version-aware Python selection.** Interpreter discovery now evaluates compatibility with the Microsoft Fabric CLI before selecting an available Python installation. Compatible interpreters are prioritized over incompatible ones, followed by version preference and discovery source.
+
+  The supported range is centrally defined as Python `3.10 <= version < 3.15`, aligned with the `requires_python` specification of `ms-fabric-cli` 1.8.0.
+
+  Detection messages consistently reflect this range rather than using outdated version guidance. When an incompatible interpreter is found, the installer reports the compatibility issue and attempts to install Python 3.12 alongside the existing installation. If installation fails, the Fabric CLI setup is skipped with a clear explanation rather than producing an ambiguous pip error.
+
+- **Cached Python discovery.** Interpreter detection results are cached during the installer session to avoid repeated probes when `Sync-ToolPaths` is invoked. The `-Refresh` option forces a new discovery pass after installation attempts, ensuring newly installed interpreters can be detected without unnecessary repeated checks.
+
+- **Long-path compatibility guidance.** Step 4 now displays a one-time informational message when mirrored repository files exceed 260 characters. The message explains that Git and VS Code can work with these paths when appropriately configured, while Windows PowerShell 5.1 has limitations when listing or deleting them. PowerShell 7 or VS Code is recommended for managing affected folders.
+
+- **Refactored repository worktree synchronization.** The branch-mirroring logic has been extracted from the inline Step 4 implementation into the dedicated `Sync-BusinessRepositoryWorktrees` function. This makes the behavior independently testable and aligns its maintenance approach with existing vendor-repository synchronization helpers.
+
+  The workspace folder structure, repository mapping, and generated VS Code workspace configuration remain unchanged. Re-running the installer applies missing repository-local Git settings and creates missing branch worktrees without unnecessarily rebuilding existing repository structures.
 
 ### Tests
 
-- New `BusinessRepo.Tests.ps1`: builds a local upstream with a ~200-character relative path via git plumbing, mirrors it exactly as Step 4 does, hides the developer's global/system Git config, and asserts: the plain worktree add fails with `too long` (field precondition, skipped only where the environment allows long paths), the function creates one worktree per non-main branch with `core.longpaths=true` on the mirror and the global config untouched, the >260-char file is really checked out, `origin/HEAD` is never treated as a branch, a forced failure prints git's own error, re-runs are idempotent, `-Pull` fast-forwards a clean behind worktree and leaves a dirty one alone, the caller's `ErrorActionPreference` survives, a missing mirror returns nothing; plus static wiring checks.
-- New `PythonDetection.Tests.ps1`: fake interpreters on a private PATH — the Store alias stub (stderr, exit 9009) is rejected under `Stop`, a supported `py` beats an unsupported `python`, the probe is cached and only `-Refresh` re-runs the interpreter, the stub is never returned, session dirs of a disk hit survive a PATH rebuild; static checks that the winget attempt is bounded and non-interactive, `Ensure-Python` honours the supported range and re-probes, Step 2 prints the derived range, and the registry/folder fallbacks exist.
+Two dedicated regression test suites have been added to cover the identified installation issues and prevent future regressions.
+
+- **`BusinessRepo.Tests.ps1` — Git worktree reliability and long-path handling.**
+
+  Creates an isolated local Git repository containing deeply nested paths of approximately 200 characters and exercises the actual repository synchronization logic.
+
+  Coverage includes:
+  - Reproducing Windows long-path failures where the execution environment enforces traditional path limits.
+  - Confirming that repository-local `core.longpaths=true` enables successful worktree creation.
+  - Verifying that global Git configuration remains unchanged.
+  - Confirming successful checkout of files whose complete paths exceed 260 characters.
+  - Excluding `origin/HEAD` from branch enumeration.
+  - Reporting meaningful Git errors when worktree creation fails.
+  - Ensuring repeat installations are idempotent.
+  - Verifying that `-Pull` fast-forwards clean, behind worktrees without modifying dirty worktrees.
+  - Preserving the caller's `ErrorActionPreference`.
+  - Handling missing repository mirrors safely.
+  - Validating installer integration through static wiring checks.
+
+- **`PythonDetection.Tests.ps1` — interpreter discovery and installation resilience.**
+
+  Uses isolated test interpreters and controlled PATH configurations to validate Python discovery without depending on the host's installed Python environment.
+
+  Coverage includes:
+  - Rejecting invalid Windows Store Python aliases and failed interpreter probes.
+  - Prioritizing supported Python versions over incompatible installations.
+  - Verifying interpreter discovery caching and explicit `-Refresh` behavior.
+  - Ensuring invalid interpreter stubs are never selected.
+  - Preserving discovered interpreter locations across session PATH updates.
+  - Verifying registry and standard-folder discovery fallbacks.
+  - Confirming that winget installation attempts are time-bounded and non-interactive.
+  - Ensuring `Ensure-Python` respects the supported Python version range.
+  - Validating interpreter re-detection after installation attempts.
+  - Confirming that installation messages display the centrally defined compatibility range.
+
 
 ## [v0.7.2] - 2026-10-14
 
