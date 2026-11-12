@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 A feature release adding Power BI custom visual (`.pbiviz`) development as an eighth team, with three levels of Git versioning for custom visual projects. The organisation grows from 47 to 54 agents (3 executives, 8 Team Leads, 43 workers).
 
+**Status: development candidate** on `feature/v0.8.0-pbiviz` — implemented and covered by the automated suites; manual acceptance (real team remote, Power BI Desktop re-import, per-project `pbiviz` MCP, end-to-end agent flow) is pending and the release is not yet authorised. v0.7.3 remains the latest published release.
+
 ### Added
 
 - **080 - PBIVIZ Development Team Lead** with six workers: 081 Planner, 082 Developer, 083 Tester, 084 Reviewer (read-only), 085 Maintainer, 086 ALM & Release. The Master and the Architect can route to the new lead.
@@ -18,7 +20,15 @@ A feature release adding Power BI custom visual (`.pbiviz`) development as an ei
 - **`Pbiviz-Alm.ps1`**, a deterministic Git helper shipped to `.github/agent-docs/` and used by 086:
   - Level 2 remote adoption keeps both histories (unrelated histories merged with both roots, conflicts aborted with nothing changed, fast-forward only for related history, backup refs before any branch moves, no tags fetched, strict post-condition checks).
   - Level 3 single-visual promotion from `PBVIZ_Team_Dev` to `PBVIZ_Team_Prod` through a candidate branch in a temporary worktree, gated by G0-G6 (input, scope, other visuals, version, GUID and an archive gate on the full staged diff), with append-only release pairs (`.pbiviz` + `.release.json`, which records allowlisted shared files by blob id) and post-merge provenance derived for merge, squash and rebase merges.
-  - Never pushes, merges into protected branches, forces, resets or uses admin bypass.
+  - Never pushes, merges into protected branches, moves branches by force, resets or uses admin bypass.
+- **Release-safety hardening (independent review of the candidate)**:
+  - Candidate cleanup verifies the worktree is a registered worktree of this repository with the helper's own record and its `release/pbiviz/*` branch, removes a committed candidate without `--force`, discards an uncommitted candidate only with `APPROVED:DISCARD-CANDIDATE:<branch>`, and refuses unexpected staged, unstaged or untracked data and operations in progress.
+  - Release pairs read the package identity from the `.pbiviz` content (`package.json` and `resources/<guid>.pbiviz.json`), never from the file name; `validated` is derived from recorded evidence (lint and unit PASS, toolchain versions, an approving review bound to the source commit) and is otherwise `false` with the gaps listed; a FAIL, a caller-supplied package result or a review of another commit is BLOCKED; the five quality labels are recorded separately.
+  - G6 and `Test-PbivizReleaseIntegrity` re-check every pair: names, hash, size, package content identity, the validation claim, the source commit, fingerprint and shared-file blob ids; integrity reports commit evidence and source-revision evidence (`VERIFIED` / `NOT AVAILABLE` / `MISMATCH`) separately.
+  - The G4 dependency scan prunes dependency, cache and generated folders while walking, never follows junctions or symbolic links, and fails closed when the analysis is incomplete.
+  - The nested-repository scan is exhaustive (no depth limit), detects `.git` files, never follows links, and Level 1 initialisation stops when the scan is incomplete.
+  - `.vscode/mcp.json` is merged by inserting text, so JSONC comments, formatting, line endings and BOM survive; a layout that cannot be patched verifiably is left untouched with a manual instruction.
+  - Custom-visual tooling follows one rule: detect first, obtain approval before installation or download, prefer the project-local toolchain, never silently acquire or execute missing packages (`npx --no`, a project-local `pbiviz` MCP configuration, approval-gated `pbiviz new` / `npm ci`).
 - **Microsoft Learn MCP** (`microsoftDocs`) merged into `.vscode/mcp.json` when missing, without touching existing servers; granted to the executives, all Team Leads and the PBIVIZ specialists. `pbiviz/*` is granted to the PBIVIZ team only.
 - **Step 2 detection** (no installs): Node.js (warns below 20.19.0), npm, a global `pbiviz` (not required) and the Git identity.
 - **Status line**: Step 9 and the session status script print `PBIVIZ <folder> | n visual(s) | git: ... | Level n`.
@@ -34,6 +44,7 @@ A feature release adding Power BI custom visual (`.pbiviz`) development as an ei
 - Added `PBIVIZ.Alm.Tests.ps1`: the shipped helper against throwaway local repositories and bare remotes under TEMP (remote adoption cases, adoption post-conditions, archive protection, selective promotion, pathspec-independent archive gate, binary-safe file lists, candidate worktree state, provenance after merge, squash and rebase, release pairs and legacy archive).
 - Added `PBIVIZ.Install.Tests.ps1`: Step 1 prompt flows through the real installer, folder-name validation, the Level 1 decision tree, the outer ignore rule, the `mcp.json` merge and the status line.
 - Extended `Generated.Tests.ps1` (helper parses, contains no destructive Git command, invokes Git only through one function; skills, MCP grants and routing) and `SessionStatus.Tests.ps1` (PBIVIZ line, `pbiviz-info` skip). Manifest and hierarchy tests updated to 54 agents.
+- Regression tests for the review findings: candidate cleanup (completed, uncommitted, dirty, untracked, merge in progress, missing or foreign record, switched branch, prefix-only and foreign worktrees); package content and evidence (invalid bytes, missing `package.json`, wrong GUID or version, disagreeing resource, missing or incomplete evidence, FAIL, invented results, foreign review); manifest manipulation at the commit and in G6 (identity, file name, hash, fingerprint, shared blobs, source commit, validation claim, quality labels, swapped or altered package); pruned dependency scan with a nested-tree performance check, junctions and unreadable folders; nested repositories beyond depth 3, `.git` files, junctions and inaccessible folders; comment-preserving `mcp.json` merge; a static check that download-capable npm commands appear only as prohibitions or approval-gated steps; release-status consistency across CHANGELOG, README and SECURITY.md.
 
 This remains a **prerelease**.
 

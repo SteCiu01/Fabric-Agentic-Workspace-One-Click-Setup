@@ -509,3 +509,57 @@ Describe 'Generated PBIVIZ capability (helper, skills, MCP)' {
         $advBody | Should -Not -Match 'powerbi-custom-visuals/SKILL\.md'
     }
 }
+
+Describe 'Package downloads are prohibitions or approval-gated, never instructions (review finding 4)' {
+
+    BeforeAll {
+        $repo = Split-Path $PSScriptRoot -Parent
+        $script:DlSources = @()
+        foreach ($doc in 'README.md', 'CLI-FUNCTIONALITIES.md', 'CHANGELOG.md') { $script:DlSources += [pscustomobject]@{ Name = $doc; Text = [IO.File]::ReadAllText((Join-Path $repo $doc)) } }
+        foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $script:EmitDir '.github') -Recurse -File -Include '*.md' -ErrorAction SilentlyContinue)) {
+            $script:DlSources += [pscustomobject]@{ Name = $f.FullName.Substring($script:EmitDir.Length + 1); Text = [IO.File]::ReadAllText($f.FullName) }
+        }
+        # A command that can download or install a package: npx without --no, npm exec, npm install / ci / i.
+        $script:DlRisky = '\bnpx\b(?!\s+--no\b)|\bnpm\s+(exec|install|ci|i)\b'
+        # Allowed only inside a sentence that gates it on approval or states a prohibition ("--no" is not a negation).
+        $script:DlGate = 'APPROVED:INSTALL'
+        $script:DlNeg = '(?i)(?<![-\w])(never|no|not|without|avoid|refuses?|forbidden|instead of)(?![-\w])'
+        function Get-TSentences {
+            param([string]$Text)
+            # Continuation lines (indented, not a new list item or table row) belong to the previous line.
+            $joined = [regex]::Replace($Text, '\r?\n(?=[ \t]+(?![-*|]\s|\d+\.\s)\S)', ' ')
+            foreach ($line in ($joined -split '\r?\n')) { foreach ($s in [regex]::Split($line, '(?<=[.;!?])\s+|\s\|\s')) { if ($s.Trim()) { $s } } }
+        }
+    }
+
+    It 'has the documents and the generated skills and agents to check' {
+        @($script:DlSources | Where-Object { $_.Name -like '*SKILL.md' }).Count | Should -BeGreaterThan 5
+        @($script:DlSources | Where-Object { $_.Name -like '*.agent.md' }).Count | Should -Be 54
+    }
+
+    It 'every download-capable npm command sits in a prohibition or an APPROVED:INSTALL sentence' {
+        $offenders = New-Object System.Collections.Generic.List[string]
+        foreach ($src in $script:DlSources) {
+            foreach ($s in @(Get-TSentences $src.Text)) {
+                if ($s -match $script:DlRisky -and $s -notmatch $script:DlGate -and $s -notmatch $script:DlNeg) { $offenders.Add("$($src.Name): $($s.Trim())") }
+            }
+        }
+        $offenders | Should -BeNullOrEmpty -Because 'detect first, obtain approval before installation or download, prefer the project-local toolchain, never silently acquire or execute missing packages'
+    }
+
+    It 'the classifier itself separates warnings from instructions (meta)' {
+        @(Get-TSentences 'Run `npx pbiviz start` in the folder.') | Where-Object { $_ -match $script:DlRisky -and $_ -notmatch $script:DlGate -and $_ -notmatch $script:DlNeg } | Should -Not -BeNullOrEmpty
+        @(Get-TSentences 'Run `npx -y powerbi-visuals-tools new X` (run in the PBIVIZ folder).') | Where-Object { $_ -match $script:DlRisky -and $_ -notmatch $script:DlGate -and $_ -notmatch $script:DlNeg } | Should -Not -BeNullOrEmpty
+        @(Get-TSentences 'Use `npx --no pbiviz package`.') | Where-Object { $_ -match $script:DlRisky } | Should -BeNullOrEmpty
+        @(Get-TSentences 'No global installs, no `npx -y`.') | Where-Object { $_ -match $script:DlRisky -and $_ -notmatch $script:DlGate -and $_ -notmatch $script:DlNeg } | Should -BeNullOrEmpty
+    }
+
+    It 'documents the project-local pbiviz MCP configuration in the skill, the developer agent, the CLI guide and the README' {
+        $local = [regex]::Escape('${workspaceFolder}/node_modules/powerbi-visuals-tools/bin/pbiviz.js')
+        foreach ($n in '*pbiviz-release-safety*SKILL.md', '*pbiviz-developer*.agent.md', 'CLI-FUNCTIONALITIES.md', 'README.md') {
+            $doc = @($script:DlSources | Where-Object { $_.Name -like $n })
+            $doc.Count | Should -Be 1 -Because $n
+            $doc[0].Text | Should -Match $local -Because $n
+        }
+    }
+}

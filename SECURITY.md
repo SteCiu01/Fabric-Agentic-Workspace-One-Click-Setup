@@ -5,14 +5,17 @@
 
 Fabric Agentic Workspace — One-Click Setup is currently under active development and distributed as a **prerelease**.
 
-Security fixes and maintenance updates are targeted at the latest prerelease version.
+Security fixes and maintenance updates are targeted at the latest **published** prerelease.
 
-| Version | Supported |
-|---|---|
-| v0.8.0 (current prerelease) | :white_check_mark: |
-| v0.7.3 and earlier prereleases | :x: — Upgrade recommended |
+| Version | Status | Supported |
+|---|---|---|
+| v0.7.3 | Latest published prerelease (the current baseline) | :white_check_mark: |
+| v0.8.0 | Development candidate on the `feature/v0.8.0-pbiviz` branch: implemented, under validation, **not published** | Not yet — becomes supported only when it is released |
+| v0.7.2 and earlier prereleases | Superseded | :x: — upgrade to v0.7.3 |
 
-Users are encouraged to keep their workspace up to date by downloading the latest installer and re-running the setup process.
+When v0.8.0 is released, this table is updated in the same release: v0.8.0 becomes the supported version and v0.7.3 moves to "upgrade recommended".
+
+Users are encouraged to keep their workspace up to date by downloading the latest published installer and re-running the setup process.
 
 **Note:** Prerelease status indicates that the project is still evolving. Security and reliability improvements are ongoing, and production readiness is not guaranteed.
 

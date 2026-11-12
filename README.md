@@ -201,7 +201,7 @@ No prompts. Generates the 54 `.agent.md` files (11 visible + 43 workers), resolv
 
 ### Step 8 of 9 — Writing Configuration Files
 
-Writes/merges `copilot-instructions.md`, `AGENTS.md`, `.gitignore` rules, `.vscode/settings.json` (merge — your keys survive, JSONC comments become values), `.vscode/mcp.json` (adds the Microsoft Learn MCP server only if missing), `Pbiviz-Alm.ps1`, `tool-status.json`, `guardrail-status.json`, `installed-manifest.json`, and purges files the installer shipped before but no longer ships.
+Writes/merges `copilot-instructions.md`, `AGENTS.md`, `.gitignore` rules, `.vscode/settings.json` (merge — your keys survive, JSONC comments become values), `.vscode/mcp.json` (adds the Microsoft Learn MCP server only if missing, by inserting text so your comments and formatting are kept; a layout it cannot patch verifiably is left untouched with a manual instruction), `Pbiviz-Alm.ps1`, `tool-status.json`, `guardrail-status.json`, `installed-manifest.json`, and purges files the installer shipped before but no longer ships.
 
 **PBIVIZ folder (only if enabled in Step 1).** The outer `.gitignore` gets `/<folder>/` first, then the folder becomes its own repository (Level 1, see [2.8](#28-versioning-custom-visuals--three-levels)):
 
@@ -494,9 +494,11 @@ Power BI custom visual SDK projects (TypeScript, `capabilities.json`, `pbiviz.js
 
 **Layout.** One folder (default `0 - PBIVIZ Developing Environment`) holds every visual as a sub-folder (`<Visual>/pbiviz.json`, `src/`, `capabilities.json`, ...). Released packages live in `<Visual>/releases/` and are append-only; reports import packages **only** from there.
 
-**MCP.** The `pbiviz` MCP server is per project: run `pbiviz mcp --init` inside one visual folder and open that folder as a workspace root; the installer only records whether Node.js is present. The Microsoft Learn MCP (`microsoftDocs/*`) is granted to the executives, the eight Team Leads and the PBIVIZ specialists.
+**MCP.** The `pbiviz` MCP server is per project and never configured by the installer. Rule for every custom-visual tool: **detect first, obtain approval before installation or download, prefer the project-local toolchain, and never silently acquire or execute missing packages.** So the server is started from the visual's own `node_modules` — `<visual>/.vscode/mcp.json` with `"command": "node"` and `"args": ["${workspaceFolder}/node_modules/powerbi-visuals-tools/bin/pbiviz.js", "mcp"]` (full snippet in [CLI-FUNCTIONALITIES.md §28](CLI-FUNCTIONALITIES.md)) — and that folder is opened as a workspace root. `pbiviz mcp --init` generates an `npx -y` command instead, which would download a missing package: never keep it. Creating a visual (`pbiviz new` runs `npm install`) and restoring dependencies need `APPROVED:INSTALL:<visual>` first. The Microsoft Learn MCP (`microsoftDocs/*`) is granted to the executives, the eight Team Leads and the PBIVIZ specialists.
 
 ## 2.8 Versioning custom visuals — three levels
+
+You choose how far to go; each level adds to the one before and nothing is pushed, merged or published without your explicit approval.
 
 | Level | What you have | Who sets it up | What it protects |
 |---|---|---|---|
@@ -504,14 +506,17 @@ Power BI custom visual SDK projects (TypeScript, `capabilities.json`, `pbiviz.js
 | **2 — Remote** | The same repository connected to a GitHub or Azure DevOps remote | 086 on request, with approval | Off-device copy. Connecting **keeps both histories**: an independent remote is merged with both root commits preserved; conflicts abort the merge and leave everything as it was; a backup ref is written before any branch moves; tags are never fetched. |
 | **3 — Team** | `PBVIZ_Team_Dev` and `PBVIZ_Team_Prod` branches | Your team (protected branches, PRs) | Selective, reviewable promotion of **one visual at a time** to Prod. |
 
+**Working only on this PC (Level 1).** Nothing else is needed: ask the 080 team to checkpoint a visual (one commit per visual), restore an earlier checkpoint, or add an official release (step 4 below, on `main`). Your history lives only in this folder — copy it elsewhere or move to Level 2 for an off-device backup. Levels 2 and 3 are optional and start only when you ask for them.
+
 **Level 3 promotion** (086, deterministic helper):
 1. A candidate branch `release/pbiviz/<visual>/<version>` is created from Prod in a temporary worktree; your own checkout is never touched and an existing branch is never moved.
 2. Only that visual's source is copied from Dev (plus explicitly allowlisted shared files); other visuals and every existing release archive are left byte-identical.
-3. Gates G0–G6 must all pass: valid input, clean scope, no other visual touched, version above Prod and every archived release, same GUID, and **no existing release file modified, renamed or deleted** — the full staged diff is checked, independent of pathspec settings.
-4. The packaged visual is added as a release pair (`<guid>.<version>.pbiviz` + `.release.json` with SHA-256, source fingerprint, allowlisted shared files and test results).
-5. The release branch is pushed and the PR to `PBVIZ_Team_Prod` opened only with your explicit approval (`APPROVED:PUSH`, `APPROVED:PR`); a merge needs `APPROVED:MERGE` **and** every required review and check reported satisfied by GitHub/Azure DevOps. The helper itself never pushes, merges, uses admin bypass or rewrites history; after the merge it **derives** the Prod commit (merge, squash or rebase) and verifies the archive — it never writes to Prod.
+3. Gates G0–G6 must all pass: valid input, clean scope, no other visual touched, no import leaving the visual (dependency and generated folders are skipped, links are never followed, an incomplete analysis blocks), version above Prod and every archived release, same GUID, and **no existing release file modified, renamed or deleted** — the full staged diff is checked, independent of pathspec settings.
+4. The packaged visual is added as a release pair (`<guid>.<version>.pbiviz` + `.release.json` with SHA-256, source commit and fingerprint, allowlisted shared files, toolchain versions, test results and the review verdict). The package identity is read from the `.pbiviz` **content**, never its file name. The pair is marked `validated: true` only when lint and unit tests pass, the toolchain is recorded and an approving review names that exact source commit; otherwise `validated: false` with the missing evidence listed. *Host tested*, *certification ready* and *Microsoft certified* are separate labels and never implied.
+5. The release branch is pushed and the PR to `PBVIZ_Team_Prod` opened only with your explicit approval (`APPROVED:PUSH`, `APPROVED:PR`); a merge needs `APPROVED:MERGE` **and** every required review and check reported satisfied by GitHub/Azure DevOps. The helper itself never pushes, merges, uses admin bypass or rewrites history; after the merge it **derives** the Prod commit (merge, squash or rebase) and verifies the archive at that commit and, separately, against the Dev source commit — it never writes to Prod.
+6. The temporary worktree is removed only when its candidate is committed (no force); an uncommitted candidate is discarded only with `APPROVED:DISCARD-CANDIDATE:<branch>`, and unexpected changes are never removed.
 
-Legacy packages already in `dist/` can be archived once as `releases/legacy/...` (marked `validated: false`).
+Legacy packages already in `dist/` can be archived once as `releases/legacy/...` (marked `validated: false`; a package whose content does not match its file name is skipped).
 
 ---
 
@@ -671,7 +676,7 @@ Before the Fabric VS Code extension and AI agents there were two places to build
 - **JSON Schema** (`schema/agent-manifest.schema.json`, draft-07) — shape of every agent entry; validated in CI.
 - **Pester suite** (`tests/`) — manifest integrity (54 agents, 3/8/43 tiers, unique ids), hierarchy (single root, no cycles), least-privilege tools, version/doc consistency, generated-file **content** (Knowledge/Playbook/Return-contract, approval-token rule, resolved skill refs, granted tools), emitted settings, vendor refresh failure paths, business-repository branch mirroring under default Git with >260-char paths (plus the phantom `origin` branch and skip diagnostics), Python detection with fake interpreters (Store stub rejected, supported version preferred, cached probe, bounded winget), update-mode safety (JSONC, workspace merge, purge containment, saved-workspace detection/patch idempotency), the status script run offline, and the real installer driven through the Step 1 prompts.
 - **Real generator smoke test** (`tests/Generated.Tests.ps1`) — `-EmitAgentsTo` dry-run asserting on actual generated files.
-- **PBIVIZ suites** — `PBIVIZ.Alm.Tests.ps1` runs the shipped Git helper against throwaway repositories and bare remotes under TEMP (remote adoption, archive protection, selective promotion, binary-safe file lists, candidate state, post-merge provenance); `PBIVIZ.Install.Tests.ps1` drives the Step 1 prompt and exercises the Level 1 decision tree, the outer ignore rule and the `mcp.json` merge.
+- **PBIVIZ suites** — `PBIVIZ.Alm.Tests.ps1` runs the shipped Git helper against throwaway repositories and bare remotes under TEMP (remote adoption, archive protection, selective promotion, binary-safe file lists, candidate state, post-merge provenance, safe candidate cleanup, package-content identity and evidence-based `validated`, manifest/package/commit integrity, pruned and fail-closed dependency scan); `PBIVIZ.Install.Tests.ps1` drives the Step 1 prompt and exercises the Level 1 decision tree (including the exhaustive nested-repository scan), the outer ignore rule and the comment-preserving `mcp.json` merge.
 - **CI** (`.github/workflows/validate.yml`) — PowerShell 7 on every push/PR; badge above.
 - **Install-time self-test + integrity manifest** — `guardrail-status.json` and SHA-256 `installed-manifest.json`.
 
@@ -684,11 +689,13 @@ Not covered: a full end-to-end install against live Fabric/VS Code, and the *beh
 
 ## 3.11 Current status (v0.8.0)
 
+> **v0.8.0 is a development candidate** (branch `feature/v0.8.0-pbiviz`): implemented and covered by the automated suites, awaiting manual acceptance and release authorisation. **v0.7.3 is the latest published release.** "Implemented" below means built and covered by automated tests; "validated" is used only for behaviour exercised in real use.
+
 | Area | Status |
 |---|---|
-| Custom visual (`.pbiviz`) team | **New in v0.8.0** — 080 Team Lead + six workers, six embedded skills, 024 narrowed to in-report Deneb/SVG/Python/R |
-| PBIVIZ versioning | **New in v0.8.0** — optional folder initialised as a local repository (Level 1); remote adoption that keeps both histories (Level 2); single-visual promotion with append-only release archive and derived provenance (Level 3). Covered by automated tests on local repositories; not yet exercised against a real team remote |
-| Microsoft Learn MCP | **New in v0.8.0** — merged into `.vscode/mcp.json` without touching your servers |
+| Custom visual (`.pbiviz`) team | **New in v0.8.0 (candidate)** — 080 Team Lead + six workers, six embedded skills, 024 narrowed to in-report Deneb/SVG/Python/R. Implemented; agent behaviour not yet validated in real use |
+| PBIVIZ versioning | **New in v0.8.0 (candidate)** — optional folder initialised as a local repository (Level 1); remote adoption that keeps both histories (Level 2); single-visual promotion with append-only release archive and derived provenance (Level 3). Implemented and covered by automated tests on local repositories and bare remotes; not yet exercised against a real GitHub/Azure DevOps team remote, Power BI Desktop or the `pbiviz` MCP server (manual acceptance pending) |
+| Microsoft Learn MCP | **New in v0.8.0 (candidate)** — inserted into `.vscode/mcp.json` without touching your servers, comments or formatting |
 | Business repositories on default Git | **Fixed in v0.7.3** — long Fabric item paths check out on any machine (`core.longpaths` set on the mirror the installer owns, not on your Git); phantom `origin` branch gone; a skipped branch now shows git's own error |
 | Python detection | **Widened in v0.7.3** — finds Python off PATH (PEP 514 registry, python.org/conda folders), prefers a version the Fabric CLI supports (3.10–3.14), winget attempt bounded (no more frozen installer) |
 | Works however the folder is opened | **New in v0.7.2** — opt-in user-level enablement (nested-dispatch flag + workspace-relative skill locations, edited in place); status script reports the scope in effect; v0.7.1 saved-file patching kept as fallback |

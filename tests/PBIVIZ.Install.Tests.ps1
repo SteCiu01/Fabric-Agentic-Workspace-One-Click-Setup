@@ -28,7 +28,7 @@ BeforeAll {
     # The installer's own functions, extracted from its AST (single source of truth).
     $tokens = $null; $errors = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseInput($raw, [ref]$tokens, [ref]$errors)
-    $wanted = @('Write-ManagedFile', 'ConvertFrom-JsonLenient', 'Add-GitIgnoreRules', 'Get-PbivizFolderNameProblem', 'Merge-McpJson')
+    $wanted = @('Write-ManagedFile', 'ConvertFrom-JsonLenient', 'Add-GitIgnoreRules', 'Get-PbivizFolderNameProblem', 'Get-JsoncTokens', 'Add-McpServerText', 'Merge-McpJson')
     $defs = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $n.Name }, $false))
     @($defs | ForEach-Object { $_.Name } | Sort-Object -Unique).Count | Should -Be $wanted.Count
     foreach ($d in $defs) { . ([scriptblock]::Create($d.Extent.Text)) }
@@ -282,6 +282,54 @@ Describe 'Level 1: repository initialisation decision tree' {
         @(Get-ChildItem -LiteralPath (Join-Path $n3 '.git') -Force).Count | Should -Be 0
     }
 
+    It 'finds nested repositories at any depth and .git files, and skips node_modules' {
+        $d = New-TDir 'p'
+        $deep = Join-Path $d 'a\b\c\d\e\f\Visual'
+        New-Item -ItemType Directory -Path $deep -Force | Out-Null
+        TGit $deep init -q | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $d 'x\y\z') -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $d 'x\y\z\.git'), 'gitdir: C:/elsewhere/.git/worktrees/z')
+        New-Item -ItemType Directory -Path (Join-Path $d 'Bar\node_modules\dep\.git') -Force | Out-Null
+        $scan = Get-PbivizNestedRepos -Root $d
+        $scan.Complete | Should -BeTrue -Because ($scan.Issues -join '; ')
+        @($scan.Repos) | Should -Contain 'a\b\c\d\e\f\Visual\.git' -Because 'depth 7 is beyond the old limit of 3'
+        @($scan.Repos) | Should -Contain 'x\y\z\.git' -Because 'a .git FILE (worktree or submodule pointer) is a nested repository too'
+        @($scan.Repos | Where-Object { $_ -like '*node_modules*' }).Count | Should -Be 0
+        $r = Initialize-PbivizRepository -Root $d -FolderWasEmpty
+        $r.Status | Should -Be 'STOPPED'
+        $r.InitStatus | Should -Match 'nested repositories found'
+        Test-Path -LiteralPath (Join-Path $d '.git') | Should -BeFalse
+    }
+
+    It 'fails closed when the nested-repository scan is incomplete (<Case>)' -TestCases @(@{ Case = 'junction' }, @{ Case = 'unreadable folder' }) {
+        $d = New-TDir 'p'
+        $target = New-TDir 't'
+        TGit $target init -q | Out-Null
+        $link = Join-Path $d 'linked'
+        $locked = Join-Path $d 'locked'
+        $rule = $null
+        if ($Case -eq 'junction') { & cmd.exe /c "mklink /J `"$link`" `"$target`"" | Out-Null; Test-Path -LiteralPath $link | Should -BeTrue }
+        else {
+            New-Item -ItemType Directory -Path (Join-Path $locked 'inner\.git') -Force | Out-Null
+            $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($sid, [System.Security.AccessControl.FileSystemRights]::ListDirectory, [System.Security.AccessControl.AccessControlType]::Deny)
+            $acl = Get-Acl -LiteralPath $locked; $acl.AddAccessRule($rule); Set-Acl -LiteralPath $locked -AclObject $acl
+        }
+        try {
+            $scan = Get-PbivizNestedRepos -Root $d
+            $scan.Complete | Should -BeFalse
+            @($scan.Repos).Count | Should -Be 0 -Because 'nothing behind the link or the locked folder was read'
+            ($scan.Issues -join ' ') | Should -Match $(if ($Case -eq 'junction') { "not followed: 'linked'" } else { "cannot read 'locked'" })
+            $r = Initialize-PbivizRepository -Root $d -FolderWasEmpty
+            $r.Status | Should -Be 'STOPPED'
+            $r.InitStatus | Should -Match 'nested-repository scan incomplete'
+            Test-Path -LiteralPath (Join-Path $d '.git') | Should -BeFalse
+        } finally {
+            if ($Case -eq 'junction') { [IO.Directory]::Delete($link) }
+            else { $acl = Get-Acl -LiteralPath $locked; [void]$acl.RemoveAccessRule($rule); Set-Acl -LiteralPath $locked -AclObject $acl }
+        }
+    }
+
     It 'stops when the outer workspace repository already tracks files in the folder' {
         $outer = New-TDir 'o'
         TGit $outer init -q -b main | Out-Null
@@ -393,13 +441,45 @@ Describe 'Outer repository, mapping and MCP configuration' {
         Get-TBytes $g | Should -Be $before2
     }
 
-    It 'merges a JSONC file and reports that comments were not preserved' {
+    It 'merges a JSONC file by inserting text: comments, formatting and every other byte survive' {
         $f = Join-Path (New-TDir 'mcp') 'mcp.json'
-        [IO.File]::WriteAllText($f, "{`n  // my servers`n  ""servers"": { ""mine"": { ""type"": ""stdio"", ""command"": ""x"" }, },`n}")
+        $orig = "{`n  // my servers`n  ""servers"": { ""mine"": { ""type"": ""stdio"", ""command"": ""x"" }, },`n  /* inputs follow */`n  ""inputs"": []`n}"
+        [IO.File]::WriteAllText($f, $orig)
         $r = Merge-McpJson -Path $f
         $r.Changed | Should -BeTrue
-        $r.Status | Should -Match 'comments in the file were not preserved'
-        ([IO.File]::ReadAllText($f) | ConvertFrom-Json).servers.mine.command | Should -Be 'x'
+        $r.Status | Should -Match 'comments and formatting preserved'
+        $new = [IO.File]::ReadAllText($f)
+        $new.Replace($r.Inserted, '') | Should -BeExactly $orig -Because 'the only change is the inserted entry'
+        $j = ConvertFrom-JsonLenient $new
+        $j.servers.mine.command | Should -Be 'x'
+        $j.servers.microsoftDocs.url | Should -Be 'https://learn.microsoft.com/api/mcp'
+        (Merge-McpJson -Path $f).Changed | Should -BeFalse -Because 'a second run finds the server and changes nothing'
+    }
+
+    It 'adds a servers block to a JSONC file that has none, keeping CRLF and the BOM' {
+        $f = Join-Path (New-TDir 'mcp') 'mcp.json'
+        $orig = "{`r`n  // inputs only`r`n  ""inputs"": [ { ""id"": ""tok"" } ]`r`n}`r`n"
+        [IO.File]::WriteAllText($f, $orig, (New-Object System.Text.UTF8Encoding($true)))
+        $r = Merge-McpJson -Path $f
+        $r.Changed | Should -BeTrue -Because $r.Status
+        $b = [IO.File]::ReadAllBytes($f)
+        ($b[0] -eq 0xEF -and $b[1] -eq 0xBB -and $b[2] -eq 0xBF) | Should -BeTrue
+        $new = [IO.File]::ReadAllText($f)
+        $new.Replace($r.Inserted, '') | Should -BeExactly $orig
+        $new | Should -Not -Match "[^`r]`n" -Because 'CRLF line endings are kept'
+        $j = ConvertFrom-JsonLenient $new
+        $j.inputs[0].id | Should -Be 'tok'
+        $j.servers.microsoftDocs.type | Should -Be 'http'
+    }
+
+    It 'leaves a layout it cannot patch verifiably untouched and says how to add the server manually' {
+        $f = Join-Path (New-TDir 'mcp') 'mcp.json'
+        [IO.File]::WriteAllText($f, '{ "serv\u0065rs": { "a": { "type": "stdio", "command": "x" } } }')
+        $before = Get-TBytes $f
+        $r = Merge-McpJson -Path $f
+        $r.Changed | Should -BeFalse
+        $r.Status | Should -Match 'add it manually'
+        Get-TBytes $f | Should -Be $before
     }
 
     It 'never lists the user-owned .vscode/mcp.json as an installer-managed (purgeable) file' {

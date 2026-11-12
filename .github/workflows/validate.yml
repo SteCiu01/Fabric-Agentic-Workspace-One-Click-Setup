@@ -11,6 +11,8 @@ on:
       - 'tests/**'
       - 'README.md'
       - 'CHANGELOG.md'
+      - 'SECURITY.md'
+      - 'CLI-FUNCTIONALITIES.md'
       - '.github/workflows/validate.yml'
   pull_request:
     paths:
@@ -19,6 +21,8 @@ on:
       - 'tests/**'
       - 'README.md'
       - 'CHANGELOG.md'
+      - 'SECURITY.md'
+      - 'CLI-FUNCTIONALITIES.md'
       - '.github/workflows/validate.yml'
   workflow_dispatch:
 
@@ -42,11 +46,17 @@ jobs:
           Import-Module Pester -MinimumVersion 5.5.0
           $config = New-PesterConfiguration
           $config.Run.Path = './tests'
-          $config.Run.Exit = $true
+          $config.Run.Exit = $false
+          $config.Run.PassThru = $true
           $config.Output.Verbosity = 'Detailed'
           $config.TestResult.Enabled = $true
           $config.TestResult.OutputPath = 'testresults.xml'
-          Invoke-Pester -Configuration $config
+          $r = Invoke-Pester -Configuration $config
+          # Counts as a public check-run annotation and a job summary (readable without the raw logs).
+          $line = "PowerShell $($PSVersionTable.PSVersion) | Pester $((Get-Module Pester).Version) | passed=$($r.PassedCount) failed=$($r.FailedCount) skipped=$($r.SkippedCount) notRun=$($r.NotRunCount) total=$($r.TotalCount) | failedContainers=$($r.FailedContainersCount)"
+          Write-Host "::notice title=Pester results::$line"
+          "### Pester results`n`n$line" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          if ($r.Result -ne 'Passed') { exit 1 }
 
       - name: Upload test results
         if: always()

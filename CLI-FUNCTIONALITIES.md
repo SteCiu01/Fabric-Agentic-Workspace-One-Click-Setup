@@ -711,20 +711,40 @@ pipelines (build/release), boards work items, and artifacts.
 | **Provider** | https://learn.microsoft.com/power-bi/developer/visuals/ |
 | **When to use** | For `.pbiviz` SDK projects. In-report Deneb, SVG, Python and R visuals are 024's and need no CLI. |
 
-| What | Example |
+**Rule — detect first, obtain approval before installation or download, prefer the
+project-local toolchain, and never silently acquire or execute missing packages.** In a
+non-interactive terminal plain `npx <name>` downloads a missing package without asking, so
+agents use only the forms below.
+
+| What | Example (run inside the visual folder unless noted) |
 |------|---------|
-| Prefer the project-local CLI | `npx pbiviz --help` (inside the visual folder, after `npm install`) |
-| New visual (the agent asks first; also runs `npm install`) | `npx -y powerbi-visuals-tools new <VisualName>` (run in the PBIVIZ folder) |
-| Run against the developer visual | `npx pbiviz start` |
-| Package `dist/<guid>.<version>.pbiviz` | `npx pbiviz package` |
-| Version and certificate info | `npx pbiviz info` |
-| Per-project MCP server | `npx pbiviz mcp --init` → writes `<visual>/.vscode/mcp.json` (key `pbiviz`); refuses to overwrite an existing file |
+| Detect the project-local CLI (no download) | `Test-Path .\node_modules\.bin\pbiviz.cmd` · `npx --no pbiviz --version` (`--no` refuses to download) |
+| Run the project-local CLI | `npx --no pbiviz start` · `npx --no pbiviz package` · `npx --no pbiviz info` |
+| Restore the dependencies of an existing visual (downloads) | only after `APPROVED:INSTALL:<visual>`: `npm ci` (lockfile present) |
+| New visual (`pbiviz new` downloads the CLI and the template's dependencies) | only after `APPROVED:INSTALL:<visual>`, in the PBIVIZ folder: `npm exec --yes --package=powerbi-visuals-tools@<pinned version> -- pbiviz new <VisualName>` |
+| Per-project MCP server | write `<visual>/.vscode/mcp.json` with the project-local command below. `npx --no pbiviz mcp --init` generates `npx -y powerbi-visuals-tools mcp` instead: never keep that generated command, it would download a missing package |
+
+Project-local `pbiviz` MCP configuration (`<visual>/.vscode/mcp.json`, the visual folder
+opened as a workspace root); it starts only the installed package and fails instead of
+downloading when it is missing:
+
+```json
+{
+  "servers": {
+    "pbiviz": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}/node_modules/powerbi-visuals-tools/bin/pbiviz.js", "mcp"]
+    }
+  }
+}
+```
 
 - **Fallback when absent** — Node.js is required to build; without it agents can still plan,
   review and edit source, and report every build/test step as `NOT RUN`.
 - **Caveats** — Node.js 20.19.0+ for current `powerbi-visuals-tools` (each project's
-  installed version decides). A global `pbiviz` is not required and agents prefer the
-  project-local copy. The `pbiviz` MCP server is callable only when that visual folder is
+  installed version decides). A global `pbiviz` is not required and is never installed by
+  agents. The `pbiviz` MCP server is callable only when that visual folder is
   opened as a workspace root; it is never configured by the installer. Packages are
   imported into reports only from `<Visual>/releases/`.
 
@@ -749,14 +769,30 @@ Git call goes through one function with literal pathspecs, UTF-8 output and no p
 | Level 2: adopt a remote, keeping both histories | `Connect-PbivizRemoteHistory -Root <folder> -Remote origin -Branch main -Fetch` |
 | Level 3: candidate for one visual | `New-PbivizPromotionCandidate -Root <folder> -Visual <Name> -SourceRef PBVIZ_Team_Dev -TargetRef PBVIZ_Team_Prod [-Allowlist <paths>]` |
 | Level 3: gates G0-G6 | `Test-PbivizPromotionGates -Worktree <candidate> -Visual <Name>` |
-| Release pair (`.pbiviz` + `.release.json`) | `Add-PbivizRelease -Worktree <candidate> -Visual <Name> -SourceSha <dev commit> -PackagePath <dist pkg>` |
+| Release pair (`.pbiviz` + `.release.json`) | `Add-PbivizRelease -Worktree <candidate> -Visual <Name> -SourceSha <dev commit> [-PackagePath <dist pkg>] [-Tests @{ lint='PASS'; unit='PASS'; host='NOT RUN' }] [-ToolsVersion <x.y.z>] [-NodeVersion <vX.Y.Z>] [-Review @{ reviewer=...; verdict='APPROVE'; sourceSha=<dev commit> }]` (Level 1/2: `-Root <folder>` instead of `-Worktree`) |
 | One-time legacy archive of `dist/` packages | `Add-PbivizLegacyArchive -Root <folder> -Visual <Name>` |
 | After your PR is merged | `Get-PbivizReleaseProvenance -Root <folder> -Visual <Name> -Version <v> -ProdRef PBVIZ_Team_Prod` · `Test-PbivizReleaseIntegrity -Root <folder> -Visual <Name> -Version <v> -Commit <prod commit>` |
-| Clean up a helper worktree | `Remove-PbivizPromotionWorktree -Root <folder> -WorktreeDir <candidate>` |
+| Clean up a helper worktree | `Remove-PbivizPromotionWorktree -Root <folder> -WorktreeDir <candidate>` (a committed candidate, without force) · an uncommitted candidate only with `-DiscardApproval 'APPROVED:DISCARD-CANDIDATE:<branch>'` |
+
+- **Package and validation evidence** — the package identity is read from the `.pbiviz`
+  content (`package.json` and `resources/<guid>.pbiviz.json`), never from its file name.
+  `validated` is `true` only when lint and unit tests PASS, the toolchain versions are
+  recorded and an approving review names the exact source commit; otherwise it is `false`
+  with the gaps listed. A FAIL, an invented `package` result or a review of another commit is
+  BLOCKED. Host, certification and Microsoft certification stay separate labels.
+- **Integrity** — `Test-PbivizReleaseIntegrity` reports commit evidence (fingerprint, shared
+  file blobs, package hash, size and content identity at the Prod commit) and source-revision
+  evidence (`VERIFIED`, `NOT AVAILABLE` when the Dev commit is not in the clone, or `MISMATCH`)
+  separately.
+- **Cleanup** — only helper-created candidates (record, folder and `release/pbiviz/*` branch
+  must match) are removed; unexpected staged, unstaged or untracked data and operations in
+  progress are refused, with or without approval. The release branch is always kept.
 
 - **Never (helper or agent)** — force (`switch -C`, `checkout -B`, `branch -f`,
   `push --force`), `reset --hard`, `clean -f`, admin/policy bypass, writing to Prod after a
-  merge, or editing a file under any `releases/` folder.
+  merge, or editing a file under any `releases/` folder. The one forced operation in the
+  helper is discarding an uncommitted, helper-created candidate worktree, and only with
+  `APPROVED:DISCARD-CANDIDATE:<branch>`.
 - **Approval-gated (agent only)** — push, pull request and merge are separate agent actions,
   each gated by an explicit approval token (`APPROVED:PUSH`, `APPROVED:PR`, `APPROVED:MERGE`
   with every required review and check satisfied); the helper performs none of them.

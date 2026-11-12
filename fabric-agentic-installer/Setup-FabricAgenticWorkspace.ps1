@@ -2363,13 +2363,95 @@ function Get-PbivizFolderNameProblem {
     return $null
 }
 
+# JSONC tokens (strings, punctuation, literals) with their positions; comments and whitespace are
+# skipped. $null when a string or block comment is unterminated.
+function Get-JsoncTokens ([string]$Text) {
+    $tokens = New-Object System.Collections.Generic.List[object]
+    $i = 0; $n = $Text.Length
+    while ($i -lt $n) {
+        $c = $Text[$i]
+        if ([char]::IsWhiteSpace($c) -or $c -eq [char]0xFEFF) { $i++; continue }
+        if ($c -eq '/' -and $i + 1 -lt $n -and $Text[$i + 1] -eq '/') { $j = $Text.IndexOf("`n", $i); $i = if ($j -lt 0) { $n } else { $j + 1 }; continue }
+        if ($c -eq '/' -and $i + 1 -lt $n -and $Text[$i + 1] -eq '*') { $j = $Text.IndexOf('*/', $i + 2); if ($j -lt 0) { return $null }; $i = $j + 2; continue }
+        if ($c -eq '"') {
+            $j = $i + 1
+            while ($j -lt $n -and $Text[$j] -ne '"') { if ($Text[$j] -eq '\') { $j++ }; $j++ }
+            if ($j -ge $n) { return $null }
+            $tokens.Add([pscustomobject]@{ T = 's'; S = $i; E = $j + 1; V = $Text.Substring($i + 1, $j - $i - 1) })
+            $i = $j + 1; continue
+        }
+        if ('{}[]:,'.IndexOf($c) -ge 0) { $tokens.Add([pscustomobject]@{ T = [string]$c; S = $i; E = $i + 1; V = $null }); $i++; continue }
+        $j = $i
+        while ($j -lt $n -and -not [char]::IsWhiteSpace($Text[$j]) -and '{}[]:,/"'.IndexOf($Text[$j]) -lt 0) { $j++ }
+        $tokens.Add([pscustomobject]@{ T = 'l'; S = $i; E = $j; V = $Text.Substring($i, $j - $i) })
+        $i = $j
+    }
+    return , $tokens.ToArray()
+}
+
+# Adds one member to the top-level "servers" object (creating "servers" when absent) by inserting
+# text: comments, order, formatting and line endings of the existing file survive byte for byte.
+# Returns @{ Text; Inserted } or $null when the layout is not a plain top-level object.
+function Add-McpServerText ([string]$Text, [string]$Key, [string]$ValueJson) {
+    $tk = Get-JsoncTokens $Text
+    if ($null -eq $tk -or $tk.Count -lt 2 -or $tk[0].T -ne '{') { return $null }
+    $k = 1; $serversAt = $null; $topClosed = $false; $topHasMembers = $false
+    while ($k -lt $tk.Count) {
+        if ($tk[$k].T -eq '}') { $topClosed = $true; break }
+        if ($tk[$k].T -eq ',') { $k++; continue }
+        if ($tk[$k].T -ne 's' -or $k + 2 -ge $tk.Count -or $tk[$k + 1].T -ne ':') { return $null }
+        $topHasMembers = $true
+        $vk = $k + 2
+        if ($tk[$k].V -ceq 'servers') {
+            if ($tk[$vk].T -ne '{' -or $null -ne $serversAt) { return $null }
+            $serversAt = $vk
+        }
+        if ($tk[$vk].T -eq '{' -or $tk[$vk].T -eq '[') {
+            $depth = 0; $m = $vk
+            for (; $m -lt $tk.Count; $m++) {
+                if ($tk[$m].T -eq '{' -or $tk[$m].T -eq '[') { $depth++ }
+                elseif ($tk[$m].T -eq '}' -or $tk[$m].T -eq ']') { $depth--; if ($depth -eq 0) { break } }
+            }
+            if ($m -ge $tk.Count) { return $null }
+            $k = $m + 1
+        } else { $k = $vk + 1 }
+    }
+    if (-not $topClosed) { return $null }
+    $nl = if ($Text.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $lineIndent = {
+        param([int]$Pos)
+        $start = $Text.LastIndexOf("`n", [Math]::Max(0, $Pos - 1)) + 1
+        if ($Pos -eq 0) { $start = 0 }
+        return [regex]::Match($Text.Substring($start), '^[ \t]*').Value
+    }
+    if ($null -ne $serversAt) {
+        $open = $tk[$serversAt]
+        $empty = ($tk[$serversAt + 1].T -eq '}')
+        $outer = & $lineIndent $open.S
+        $inner = if (-not $empty) {
+            $first = $tk[$serversAt + 1]
+            $before = $Text.Substring($open.E, $first.S - $open.E)
+            if ($before.Contains("`n")) { & $lineIndent $first.S } else { $outer + '  ' }
+        } else { $outer + '  ' }
+        $ins = $nl + $inner + '"' + $Key + '": ' + $ValueJson + $(if ($empty) { $nl + $outer } else { ',' })
+        $at = $open.E
+    } else {
+        $ins = $nl + '  "servers": { "' + $Key + '": ' + $ValueJson + ' }' + $(if ($topHasMembers) { ',' } else { $nl })
+        $at = $tk[0].E
+    }
+    return @{ Text = $Text.Substring(0, $at) + $ins + $Text.Substring($at); Inserted = $ins }
+}
+
 # Safe merge of the workspace .vscode/mcp.json: adds the Microsoft Learn MCP server only when no
 # server with that URL exists (any key, including a legacy 'microsoft.docs.mcp'); never removes or
-# changes existing servers or inputs; a malformed file is left untouched.
+# changes existing servers or inputs. An existing file is never re-serialised: the entry is
+# inserted as text so JSONC comments and formatting survive, and the result is verified before it
+# is written. Anything unexpected leaves the file untouched with a manual instruction.
 function Merge-McpJson {
     param([string]$Path)
     $docsUrl = 'https://learn.microsoft.com/api/mcp'
-    $result = [pscustomobject]@{ Changed = $false; Status = '' }
+    $entry = '{ "type": "http", "url": "' + $docsUrl + '" }'
+    $result = [pscustomobject]@{ Changed = $false; Status = ''; Inserted = $null }
     $obj = $null; $raw = ''
     if (Test-Path -LiteralPath $Path) {
         $raw = [IO.File]::ReadAllText($Path)
@@ -2378,20 +2460,40 @@ function Merge-McpJson {
             if ($null -eq $obj -or $obj -isnot [PSCustomObject]) { $result.Status = 'malformed - left untouched'; return $result }
         }
     }
-    if ($null -eq $obj) { $obj = [pscustomobject]@{} }
-    if (-not $obj.PSObject.Properties['servers'] -or $obj.servers -isnot [PSCustomObject]) {
-        if ($obj.PSObject.Properties['servers'] -and $null -ne $obj.servers) { $result.Status = 'unexpected servers block - left untouched'; return $result }
-        $obj | Add-Member -NotePropertyName 'servers' -NotePropertyValue ([pscustomobject]@{}) -Force
-    }
+    if ($null -ne $obj -and $obj.PSObject.Properties['servers'] -and $obj.servers -isnot [PSCustomObject]) { $result.Status = 'unexpected servers block - left untouched'; return $result }
     $norm = { param($u) ([string]$u).Trim().TrimEnd('/').ToLowerInvariant() }
-    foreach ($p in $obj.servers.PSObject.Properties) {
-        if ($p.Value -is [PSCustomObject] -and $p.Value.PSObject.Properties['url'] -and ((& $norm $p.Value.url) -eq (& $norm $docsUrl))) { $result.Status = "Microsoft Learn MCP already configured ('$($p.Name)')"; return $result }
+    if ($null -ne $obj -and $obj.PSObject.Properties['servers']) {
+        foreach ($p in $obj.servers.PSObject.Properties) {
+            if ($p.Value -is [PSCustomObject] -and $p.Value.PSObject.Properties['url'] -and ((& $norm $p.Value.url) -eq (& $norm $docsUrl))) { $result.Status = "Microsoft Learn MCP already configured ('$($p.Name)')"; return $result }
+        }
+        if ($obj.servers.PSObject.Properties['microsoftDocs']) { $result.Status = "a server named 'microsoftDocs' already exists - left unchanged"; return $result }
     }
-    if ($obj.servers.PSObject.Properties['microsoftDocs']) { $result.Status = "a server named 'microsoftDocs' already exists - left unchanged"; return $result }
-    $obj.servers | Add-Member -NotePropertyName 'microsoftDocs' -NotePropertyValue ([pscustomobject][ordered]@{ type = 'http'; url = $docsUrl })
-    Write-ManagedFile -Path $Path -Content ($obj | ConvertTo-Json -Depth 20)
-    $result.Changed = $true
-    $result.Status = 'added microsoftDocs (Microsoft Learn MCP)' + $(if ($raw -match '(?m)^\s*//|/\*') { '; comments in the file were not preserved' } else { '' })
+    if ($null -eq $obj) {
+        Write-ManagedFile -Path $Path -Content ("{`n  ""servers"": {`n    ""microsoftDocs"": $entry`n  }`n}`n")
+        $result.Changed = $true; $result.Status = 'added microsoftDocs (Microsoft Learn MCP)'
+        return $result
+    }
+    $manual = 'left untouched - add it manually under "servers": "microsoftDocs": ' + $entry
+    $patch = Add-McpServerText -Text $raw -Key 'microsoftDocs' -ValueJson $entry
+    if ($null -eq $patch) { $result.Status = "layout not recognised; $manual"; return $result }
+    # Verify before writing: the new entry is present and every other value is unchanged.
+    $chk = ConvertFrom-JsonLenient $patch.Text
+    $same = { param($a, $b) (ConvertTo-Json -InputObject $a -Depth 20 -Compress) -ceq (ConvertTo-Json -InputObject $b -Depth 20 -Compress) }
+    $ok = $null -ne $chk -and $chk -is [PSCustomObject] -and $chk.servers -is [PSCustomObject] -and $chk.servers.microsoftDocs -and ([string]$chk.servers.microsoftDocs.url -eq $docsUrl)
+    if ($ok) {
+        foreach ($p in $obj.PSObject.Properties) {
+            if ($p.Name -ceq 'servers') { foreach ($s in $p.Value.PSObject.Properties) { if (-not (& $same $s.Value $chk.servers.($s.Name))) { $ok = $false } } }
+            elseif (-not (& $same $p.Value $chk.($p.Name))) { $ok = $false }
+        }
+        if (@($chk.PSObject.Properties).Count -ne (@($obj.PSObject.Properties).Count + $(if ($obj.PSObject.Properties['servers']) { 0 } else { 1 }))) { $ok = $false }
+        if (@($chk.servers.PSObject.Properties).Count -ne (@($(if ($obj.PSObject.Properties['servers']) { $obj.servers.PSObject.Properties } else { @() })).Count + 1)) { $ok = $false }
+    }
+    if (-not $ok) { $result.Status = "verification failed; $manual"; return $result }
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    $bom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
+    [IO.File]::WriteAllText($Path, $patch.Text, (New-Object System.Text.UTF8Encoding($bom)))
+    $result.Changed = $true; $result.Inserted = $patch.Inserted
+    $result.Status = 'added microsoftDocs (Microsoft Learn MCP); existing content, comments and formatting preserved'
     return $result
 }
 
@@ -2413,6 +2515,11 @@ $script:PbivizUtf8            = New-Object System.Text.UTF8Encoding($false)
 $script:PbivizGitExe          = $null
 $script:PbivizDeviceNames     = @('CON', 'PRN', 'AUX', 'NUL') + @(1..9 | ForEach-Object { "COM$_"; "LPT$_" })
 $script:PbivizBuildExcludes   = @('node_modules/', 'dist/', '.tmp/', 'typings/', '*.log', 'webpack.statistics.*.html')
+$script:PbivizTestKeys        = @('lint', 'unit', 'host', 'certification')
+$script:PbivizTestResults     = @('PASS', 'FAIL', 'NOT RUN')
+$script:PbivizReviewVerdicts  = @('APPROVE', 'APPROVE WITH NONBLOCKING NOTES', 'BLOCK')
+$script:PbivizJsonStringStops = [char[]]@([char]34, [char]92)
+$script:PbivizJsonStructStops = [char[]]@([char]34, [char]123, [char]125, [char]91, [char]93)
 $script:PbivizGitignoreLines  = @(
     '# PBIVIZ repository - written by Fabric Agentic Workspace; edit freely',
     'node_modules/', '.tmp/', 'typings/', 'dist/', '*.log', 'webpack.statistics.*.html',
@@ -3004,31 +3111,55 @@ function Compare-PbivizWorkingState {
     return $d.ToArray()
 }
 
+function Get-PbivizErrorText {
+    param($ErrorRecord)
+    $e = $ErrorRecord.Exception
+    while ($e.InnerException) { $e = $e.InnerException }
+    return $e.Message
+}
+
+# Exhaustive scan for nested repositories (a .git folder OR file) below the PBIVIZ root: no depth
+# limit, one directory listing per folder. node_modules (an ignored dependency tree, never part of
+# the repository) is pruned. Junctions and symbolic links are never followed; like a folder that
+# cannot be read they make the scan INCOMPLETE, and callers fail closed on an incomplete scan.
 function Get-PbivizNestedRepos {
-    param([string]$Root, [int]$MaxDepth = 3)
-    $found = New-Object System.Collections.Generic.List[string]
-    $queue = New-Object System.Collections.Generic.Queue[object]
-    $queue.Enqueue(@($Root, 0))
-    while ($queue.Count -gt 0) {
-        $item = $queue.Dequeue(); $dir = $item[0]; $depth = $item[1]
-        foreach ($child in @(Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue)) {
-            if ($child.Name -eq '.git') {
-                if ($depth -gt 0) { $found.Add($child.FullName.Substring($Root.TrimEnd('\').Length + 1)) }
+    param([string]$Root)
+    $res = [pscustomobject][ordered]@{ Complete = $true; Repos = @(); Issues = @(); Visited = 0 }
+    $repos = New-Object System.Collections.Generic.List[string]
+    $issues = New-Object System.Collections.Generic.List[string]
+    $rootFull = ([IO.Path]::GetFullPath($Root)).TrimEnd('\')
+    $stack = New-Object System.Collections.Generic.Stack[string]
+    $stack.Push($rootFull)
+    while ($stack.Count -gt 0) {
+        $dir = $stack.Pop()
+        $res.Visited++
+        $rel = if ($dir.Length -gt $rootFull.Length) { $dir.Substring($rootFull.Length + 1) } else { '.' }
+        try { $entries = (New-Object IO.DirectoryInfo (ConvertTo-PbivizIoPath $dir)).GetFileSystemInfos() }
+        catch { $issues.Add("cannot read '$rel': $(Get-PbivizErrorText $_)"); continue }
+        foreach ($e in $entries) {
+            $childFull = $dir + '\' + $e.Name
+            $childRel = $childFull.Substring($rootFull.Length + 1)
+            if ($e.Name -eq '.git') {
+                if ($dir -ne $rootFull) { $repos.Add($childRel) }
                 continue
             }
-            if (-not $child.PSIsContainer -or $child.Name -eq 'node_modules') { continue }
-            if ($child.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
-            if ($depth + 1 -le $MaxDepth) { $queue.Enqueue(@($child.FullName, ($depth + 1))) }
+            if (-not ($e.Attributes -band [IO.FileAttributes]::Directory)) { continue }
+            if ($e.Attributes -band [IO.FileAttributes]::ReparsePoint) { $issues.Add("not followed: '$childRel' is a junction or symbolic link"); continue }
+            if ($e.Name -eq 'node_modules') { continue }
+            $stack.Push($childFull)
         }
     }
-    return $found.ToArray()
+    $res.Repos = $repos.ToArray()
+    $res.Issues = $issues.ToArray()
+    $res.Complete = ($issues.Count -eq 0)
+    return $res
 }
 
 function Get-PbivizRepoState {
     param([string]$Root, [string]$OuterRoot = $null)
     $s = [ordered]@{
         root = $Root; exists = $false; isRepoRoot = $false; gitIsFile = $false; gitIsDir = $false
-        outerTracked = $false; nestedRepos = @(); syncedPath = $false
+        outerTracked = $false; nestedRepos = @(); nestedScanComplete = $false; nestedScanIssues = @(); syncedPath = $false
         gitVersion = $null; gitVersionOk = $false; branch = $null; detached = $false; unborn = $false
         headSha = $null; commitCount = 0; dirty = @(); untracked = 0; upstream = $null; ahead = 0; behind = 0
         remotes = @(); localBranches = @(); remoteBranches = @(); shallow = $false
@@ -3044,7 +3175,8 @@ function Get-PbivizRepoState {
         $dotGit = Join-Path $Root '.git'
         $s.gitIsDir = Test-Path -LiteralPath $dotGit -PathType Container
         $s.gitIsFile = Test-Path -LiteralPath $dotGit -PathType Leaf
-        $s.nestedRepos = @(Get-PbivizNestedRepos -Root $Root)
+        $scan = Get-PbivizNestedRepos -Root $Root
+        $s.nestedRepos = @($scan.Repos); $s.nestedScanComplete = $scan.Complete; $s.nestedScanIssues = @($scan.Issues)
         if ($OuterRoot -and (Test-PbivizIsRepoRoot $OuterRoot)) {
             $rootFull = (ConvertTo-PbivizLongPath $Root).TrimEnd('\')
             $outerFull = (ConvertTo-PbivizLongPath $OuterRoot).TrimEnd('\')
@@ -3155,6 +3287,7 @@ function Initialize-PbivizRepository {
         if ($state.gitIsFile) { $res.Status = 'STOPPED'; $res.InitStatus = 'stopped: unexpected .git file (worktree or submodule pointer)'; return $res }
         if ($state.outerTracked) { $res.Status = 'STOPPED'; $res.InitStatus = 'stopped: the outer workspace repository tracks files in this folder'; return $res }
         if (@($state.nestedRepos).Count -gt 0) { $res.Status = 'STOPPED'; $res.InitStatus = "stopped: nested repositories found ($(@($state.nestedRepos) -join ', '))"; return $res }
+        if (-not $state.nestedScanComplete) { $res.Status = 'STOPPED'; $res.InitStatus = "stopped: nested-repository scan incomplete ($(@($state.nestedScanIssues) -join '; ')) - fix access or remove the link, then re-run"; return $res }
         if ($state.syncedPath -and -not $AllowSyncedPath) { $res.Status = 'SKIPPED'; $res.InitStatus = 'skipped: synced path'; return $res }
         $init = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('init', '-b', 'main')
         if ($init.ExitCode -ne 0) { $res.InitStatus = "failed: $(Get-PbivizGitError $init)"; return $res }
@@ -3677,13 +3810,236 @@ function Get-PbivizStagedChanges {
     return $o
 }
 
+# ---------------------------------------------------------------- package content and evidence
+function Test-PbivizSameVersion {
+    param([string]$A, [string]$B)
+    $x = ConvertTo-PbivizVersion $A; $y = ConvertTo-PbivizVersion $B
+    return ($null -ne $x -and $null -ne $y -and $x -eq $y)
+}
+
+function Get-PbivizJsonStringEnd {
+    param([string]$Text, [int]$Start)
+    $i = $Start + 1
+    while ($i -lt $Text.Length) {
+        $j = $Text.IndexOfAny($script:PbivizJsonStringStops, $i)
+        if ($j -lt 0) { return -1 }
+        if ($Text[$j] -eq [char]92) { $i = $j + 2; continue }
+        return ($j + 1)
+    }
+    return -1
+}
+
+function Get-PbivizJsonValueEnd {
+    param([string]$Text, [int]$Start)
+    if ($Start -ge $Text.Length) { return -1 }
+    $c = $Text[$Start]
+    if ($c -eq [char]34) { return (Get-PbivizJsonStringEnd $Text $Start) }
+    if ($c -eq [char]123 -or $c -eq [char]91) {
+        $depth = 0; $i = $Start
+        while ($i -lt $Text.Length) {
+            $j = $Text.IndexOfAny($script:PbivizJsonStructStops, $i)
+            if ($j -lt 0) { return -1 }
+            $c = $Text[$j]
+            if ($c -eq [char]34) { $i = Get-PbivizJsonStringEnd $Text $j; if ($i -lt 0) { return -1 }; continue }
+            if ($c -eq [char]123 -or $c -eq [char]91) { $depth++ } else { $depth--; if ($depth -eq 0) { return ($j + 1) } }
+            $i = $j + 1
+        }
+        return -1
+    }
+    $i = $Start
+    while ($i -lt $Text.Length -and -not [char]::IsWhiteSpace($Text[$i]) -and $Text[$i] -ne [char]44 -and $Text[$i] -ne [char]125 -and $Text[$i] -ne [char]93) { $i++ }
+    return $i
+}
+
+function Skip-PbivizJsonSpace {
+    param([string]$Text, [int]$Index)
+    while ($Index -lt $Text.Length -and [char]::IsWhiteSpace($Text[$Index])) { $Index++ }
+    return $Index
+}
+
+# Raw text of ONE top-level member of a JSON object, found by a string-aware scan, so a
+# multi-megabyte resource file is never handed to ConvertFrom-Json whole (Windows PowerShell caps
+# its input). A missing, duplicated or malformed member returns $null.
+function Get-PbivizJsonMemberText {
+    param([string]$Text, [string]$Name)
+    $t = $Text.TrimStart([char]0xFEFF)
+    $i = Skip-PbivizJsonSpace $t 0
+    if ($i -ge $t.Length -or $t[$i] -ne [char]123) { return $null }
+    $i = Skip-PbivizJsonSpace $t ($i + 1)
+    if ($i -lt $t.Length -and $t[$i] -eq [char]125) { return $null }
+    $found = New-Object System.Collections.Generic.List[string]
+    while ($true) {
+        if ($i -ge $t.Length -or $t[$i] -ne [char]34) { return $null }
+        $ke = Get-PbivizJsonStringEnd $t $i
+        if ($ke -lt 0) { return $null }
+        $key = $t.Substring($i + 1, $ke - $i - 2)
+        $i = Skip-PbivizJsonSpace $t $ke
+        if ($i -ge $t.Length -or $t[$i] -ne [char]58) { return $null }
+        $i = Skip-PbivizJsonSpace $t ($i + 1)
+        $ve = Get-PbivizJsonValueEnd $t $i
+        if ($ve -lt 0) { return $null }
+        if ($key -ceq $Name) { $found.Add($t.Substring($i, $ve - $i)) }
+        $i = Skip-PbivizJsonSpace $t $ve
+        if ($i -ge $t.Length) { return $null }
+        if ($t[$i] -eq [char]44) { $i = Skip-PbivizJsonSpace $t ($i + 1); continue }
+        if ($t[$i] -eq [char]125) { break }
+        return $null
+    }
+    if ($found.Count -ne 1) { return $null }
+    return $found[0]
+}
+
+function Read-PbivizZipEntryText {
+    param($Entry, [long]$MaxBytes)
+    if ($Entry.Length -gt $MaxBytes) { throw "entry '$($Entry.FullName)' is larger than $MaxBytes bytes" }
+    $s = $Entry.Open()
+    try {
+        $sr = New-Object IO.StreamReader($s, $script:PbivizUtf8, $true)
+        try { return $sr.ReadToEnd() } finally { $sr.Dispose() }
+    } finally { $s.Dispose() }
+}
+
+# A .pbiviz (written by powerbi-visuals-webpack-plugin) is a zip holding package.json (visual.guid,
+# visual.version, resources[].file) and resources/<guid>.pbiviz.json. The identity is read from
+# that content - never from the file name - and both files must agree. Nothing is extracted.
+function Get-PbivizPackageIdentity {
+    param([byte[]]$Bytes)
+    $r = [pscustomobject][ordered]@{ Ok = $false; Reason = ''; Guid = $null; Version = $null; Resource = $null; Entries = 0 }
+    if ($null -eq $Bytes -or $Bytes.Length -lt 22) { $r.Reason = 'not a .pbiviz package (too small to be a zip archive)'; return $r }
+    if (-not ('System.IO.Compression.ZipArchive' -as [type])) { Add-Type -AssemblyName System.IO.Compression }
+    $ms = New-Object System.IO.MemoryStream(, $Bytes)
+    $zip = $null
+    try {
+        try { $zip = New-Object System.IO.Compression.ZipArchive($ms, [System.IO.Compression.ZipArchiveMode]::Read) }
+        catch { $r.Reason = 'not a .pbiviz package (not a readable zip archive)'; return $r }
+        $byName = @{}
+        foreach ($e in $zip.Entries) {
+            $fn = [string]$e.FullName
+            if ($fn -match '(^|[\\/])\.\.([\\/]|$)' -or $fn -match '^[\\/]' -or $fn -match '^[A-Za-z]:') { $r.Reason = "unsafe entry name '$fn'"; return $r }
+            $k = $fn.Replace('\', '/').ToLowerInvariant()
+            if ($byName.ContainsKey($k)) { $r.Reason = "duplicate entry '$fn'"; return $r }
+            $byName[$k] = $e
+        }
+        $r.Entries = $byName.Count
+        if (-not $byName.ContainsKey('package.json')) { $r.Reason = 'package.json is missing from the package'; return $r }
+        try { $pj = (Read-PbivizZipEntryText $byName['package.json'] 1048576).TrimStart([char]0xFEFF) | ConvertFrom-Json }
+        catch { $r.Reason = "package.json is unreadable: $(Get-PbivizErrorText $_)"; return $r }
+        $guid = [string]$pj.visual.guid; $ver = [string]$pj.visual.version
+        if ($guid -notmatch '^[A-Za-z0-9_]{1,128}$' -or -not (ConvertTo-PbivizVersion $ver)) { $r.Reason = 'package.json has no valid visual.guid / visual.version'; return $r }
+        if ($pj.PSObject.Properties['version'] -and -not (Test-PbivizSameVersion ([string]$pj.version) $ver)) { $r.Reason = "package.json version $($pj.version) differs from its visual.version $ver"; return $r }
+        $files = @(@($pj.resources) | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_.file })
+        foreach ($f in $files) { if (-not $f -or -not $byName.ContainsKey($f.Replace('\', '/').ToLowerInvariant())) { $r.Reason = "resource '$f' listed in package.json is missing"; return $r } }
+        $pbj = @($files | Where-Object { $_.EndsWith('.pbiviz.json', [StringComparison]::OrdinalIgnoreCase) })
+        if ($pbj.Count -ne 1) { $r.Reason = "expected exactly one .pbiviz.json resource, found $($pbj.Count)"; return $r }
+        $r.Resource = $pbj[0]
+        try { $vt = Get-PbivizJsonMemberText -Text (Read-PbivizZipEntryText $byName[$pbj[0].Replace('\', '/').ToLowerInvariant()] 268435456) -Name 'visual' }
+        catch { $r.Reason = "$($pbj[0]) is unreadable: $(Get-PbivizErrorText $_)"; return $r }
+        if (-not $vt) { $r.Reason = "$($pbj[0]) has no single top-level visual object"; return $r }
+        try { $rv = $vt | ConvertFrom-Json } catch { $r.Reason = "$($pbj[0]) has a malformed visual object"; return $r }
+        if ([string]$rv.guid -cne $guid -or -not (Test-PbivizSameVersion ([string]$rv.version) $ver)) { $r.Reason = "package.json ($guid $ver) and $($pbj[0]) ($($rv.guid) $($rv.version)) disagree on the visual identity"; return $r }
+        $r.Guid = $guid; $r.Version = $ver; $r.Ok = $true
+    } finally {
+        if ($zip) { $zip.Dispose() }
+        $ms.Dispose()
+    }
+    return $r
+}
+
+# The single definition of "validated": Add-PbivizRelease writes it, G6 and the integrity check
+# re-derive it from the recorded evidence. Validated = package identity verified from its content,
+# lint PASS, unit PASS, toolchain versions recorded and an approving review bound to the source
+# revision. It never implies HOST TESTED, CERTIFICATION READY or MICROSOFT CERTIFIED: the five
+# quality labels are derived separately, and missing evidence stays visible as a gap.
+function Get-PbivizValidationVerdict {
+    param($Tests, $Review, [string]$SourceSha, [string]$ToolsVersion, [string]$NodeVersion, [bool]$PackageVerified)
+    $gaps = New-Object System.Collections.Generic.List[string]
+    $val = { param($k) $v = if ($null -ne $Tests) { [string]$Tests.$k } else { '' }; if ($v) { $v } else { 'NOT RUN' } }
+    if (-not $PackageVerified) { $gaps.Add('package identity not verified') }
+    foreach ($k in @('lint', 'unit')) { $v = & $val $k; if ($v -ne 'PASS') { $gaps.Add("$k $v") } }
+    if (-not $ToolsVersion) { $gaps.Add('powerbi-visuals-tools version not recorded') }
+    if (-not $NodeVersion) { $gaps.Add('Node.js version not recorded') }
+    $reviewed = [bool]($Review -and @('APPROVE', 'APPROVE WITH NONBLOCKING NOTES') -ccontains [string]$Review.verdict -and $SourceSha -and [string]$Review.sourceSha -eq $SourceSha)
+    if (-not $reviewed) { $gaps.Add('no approving review recorded for this source revision') }
+    return [pscustomobject][ordered]@{
+        Validated = ($gaps.Count -eq 0)
+        Gaps      = $gaps.ToArray()
+        Quality   = [ordered]@{
+            codeReviewed       = $(if ($reviewed) { 'YES' } else { 'NO EVIDENCE' })
+            built              = $(if ($PackageVerified) { 'YES' } else { 'NO EVIDENCE' })
+            hostTested         = $(if ((& $val 'host') -eq 'PASS') { 'YES' } else { 'NOT RUN' })
+            certificationReady = $(if ((& $val 'certification') -eq 'PASS') { 'YES' } else { 'NOT ASSESSED' })
+            microsoftCertified = 'NOT CLAIMED'
+        }
+    }
+}
+
+# Intrinsic consistency of one archived pair: names, hash, size, package identity read from the
+# content, and the validation claim re-derived from the recorded evidence. Context checks (the
+# candidate record, the source commit, the Prod commit) belong to the caller.
+function Get-PbivizReleasePairProblems {
+    param($Manifest, [string]$ManifestPath, [byte[]]$PackageBytes)
+    $p = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $Manifest) { $p.Add("unreadable manifest $ManifestPath"); return $p.ToArray() }
+    $leaf = $ManifestPath.Split('/')[-1]
+    $stem = $leaf.Substring(0, $leaf.Length - '.release.json'.Length)
+    $origin = [string]$Manifest.origin
+    if (@('release', 'legacy-archive') -cnotcontains $origin) { $p.Add("unknown origin '$origin'") }
+    if ("$($Manifest.guid).$($Manifest.version)" -cne $stem) { $p.Add("manifest guid/version ($($Manifest.guid) $($Manifest.version)) do not match its file name") }
+    if ([string]$Manifest.packageFile -cne "$stem.pbiviz") { $p.Add("packageFile '$($Manifest.packageFile)' is not the paired package") }
+    if ($null -eq $PackageBytes) { $p.Add('package missing'); return $p.ToArray() }
+    if ((Get-PbivizSha256Hex $PackageBytes) -ne [string]$Manifest.sha256) { $p.Add('package SHA-256 differs from the manifest') }
+    if ([string]$Manifest.bytes -ne [string]$PackageBytes.Length) { $p.Add('package size differs from the manifest') }
+    $pk = Get-PbivizPackageIdentity -Bytes $PackageBytes
+    $verified = $false
+    if (-not $pk.Ok) { $p.Add("package content: $($pk.Reason)") }
+    elseif ($pk.Guid -cne [string]$Manifest.guid -or -not (Test-PbivizSameVersion $pk.Version ([string]$Manifest.version))) { $p.Add("package content identifies $($pk.Guid) $($pk.Version), the manifest $($Manifest.guid) $($Manifest.version)") }
+    else { $verified = $true }
+    if ($origin -eq 'legacy-archive' -and $Manifest.validated -ne $false) { $p.Add('a legacy archive is never validated') }
+    if ($origin -eq 'release') {
+        if ([string]$Manifest.sourceSha -notmatch '^[0-9a-f]{40}([0-9a-f]{24})?$') { $p.Add('sourceSha is not a full commit id') }
+        if ([string]$Manifest.sourceFingerprint -notmatch '^[0-9a-f]{64}$') { $p.Add('sourceFingerprint is not a SHA-256') }
+        if ($Manifest.review -and [string]$Manifest.review.sourceSha -ne [string]$Manifest.sourceSha) { $p.Add('the recorded review covers another source revision') }
+        $v = Get-PbivizValidationVerdict -Tests $Manifest.tests -Review $Manifest.review -SourceSha ([string]$Manifest.sourceSha) -ToolsVersion ([string]$Manifest.toolsVersion) -NodeVersion ([string]$Manifest.nodeVersion) -PackageVerified $verified
+        if (($Manifest.validated -eq $true) -ne $v.Validated) { $p.Add("validated=$($Manifest.validated) is not supported by the recorded evidence ($(if ($v.Gaps.Count) { $v.Gaps -join '; ' } else { 'no gaps' }))") }
+        if (-not $Manifest.quality) { $p.Add('quality labels missing') }
+        else { foreach ($k in $v.Quality.Keys) { if ([string]$Manifest.quality.$k -cne [string]$v.Quality[$k]) { $p.Add("quality.$k=$($Manifest.quality.$k) is not supported by the recorded evidence (expected $($v.Quality[$k]))") } } }
+    }
+    return $p.ToArray()
+}
+
 function Add-PbivizRelease {
     param([string]$Root = $null, [string]$Worktree = $null, [string]$Visual, [string]$SourceSha, [string]$PackagePath = $null,
-          [string]$BuildCommand = 'pbiviz package', [System.Collections.IDictionary]$Tests = $null, [string]$ToolsVersion = $null, [string]$NodeVersion = $null)
-    $res = [pscustomobject][ordered]@{ Status = 'BLOCKED'; Reason = ''; PackagePath = $null; ManifestPath = $null; Sha256 = $null; Bytes = 0; Guid = $null; Version = $null; Staged = @(); Evidence = (New-Object System.Collections.Generic.List[string]) }
+          [string]$BuildCommand = 'pbiviz package', [System.Collections.IDictionary]$Tests = $null, [string]$ToolsVersion = $null, [string]$NodeVersion = $null,
+          [System.Collections.IDictionary]$Review = $null)
+    $res = [pscustomobject][ordered]@{ Status = 'BLOCKED'; Reason = ''; PackagePath = $null; ManifestPath = $null; Sha256 = $null; Bytes = 0; Guid = $null; Version = $null; Validated = $false; ValidationGaps = @(); Quality = $null; Staged = @(); Evidence = (New-Object System.Collections.Generic.List[string]) }
     $files = @()
     try {
         if (($Root -and $Worktree) -or (-not $Root -and -not $Worktree)) { $res.Reason = 'use exactly one of -Root or -Worktree'; return $res }
+        if ([string]$SourceSha -notmatch '^[0-9a-f]{40}([0-9a-f]{24})?$') { $res.Reason = 'invalid input: -SourceSha must be a full commit id'; return $res }
+        # Evidence vocabulary first: malformed or failing evidence is BLOCKED, missing evidence is a gap.
+        $testsObj = [ordered]@{ lint = 'NOT RUN'; unit = 'NOT RUN'; host = 'NOT RUN'; certification = 'NOT RUN' }
+        if ($Tests) {
+            foreach ($k in @($Tests.Keys)) {
+                $name = ([string]$k).ToLowerInvariant(); $v = [string]$Tests[$k]
+                if ($name -eq 'package') { $res.Reason = 'invalid input: the package result is established from the package content by the helper, never supplied'; return $res }
+                if ($script:PbivizTestKeys -notcontains $name) { $res.Reason = "invalid input: unknown test '$k' (expected lint, unit, host, certification)"; return $res }
+                if ($script:PbivizTestResults -cnotcontains $v) { $res.Reason = "invalid input: test '$k' result '$v' is not PASS, FAIL or NOT RUN"; return $res }
+                if ($v -eq 'FAIL') { $res.Reason = "test '$name' FAILED - a failing build is never archived as a release"; return $res }
+                $testsObj[$name] = $v
+            }
+        }
+        if ($ToolsVersion -and $ToolsVersion -notmatch '^\d+\.\d+\.\d+([-+.][0-9A-Za-z.-]+)?$') { $res.Reason = "invalid input: toolsVersion '$ToolsVersion'"; return $res }
+        if ($NodeVersion -and $NodeVersion -notmatch '^v?\d+\.\d+\.\d+$') { $res.Reason = "invalid input: nodeVersion '$NodeVersion'"; return $res }
+        $reviewObj = $null
+        if ($Review) {
+            $verdict = [string]$Review['verdict']; $reviewer = [string]$Review['reviewer']; $rsha = [string]$Review['sourceSha']
+            if ($script:PbivizReviewVerdicts -cnotcontains $verdict) { $res.Reason = "invalid input: review verdict '$verdict' is not APPROVE, APPROVE WITH NONBLOCKING NOTES or BLOCK"; return $res }
+            if (-not $reviewer.Trim()) { $res.Reason = 'invalid input: the review evidence names no reviewer'; return $res }
+            if ($rsha -ne $SourceSha) { $res.Reason = "the review covers '$rsha', not the release source $SourceSha - review the exact source revision"; return $res }
+            if ($Review['visual'] -and [string]$Review['visual'] -cne $Visual) { $res.Reason = "the review covers visual '$($Review['visual'])', not '$Visual'"; return $res }
+            if ($verdict -eq 'BLOCK') { $res.Reason = 'the review verdict is BLOCK - nothing is released'; return $res }
+            $reviewObj = [ordered]@{ reviewer = $reviewer; verdict = $verdict; sourceSha = $rsha; reviewedAt = [string]$Review['reviewedAt']; reference = [string]$Review['reference'] }
+        }
         $dir = if ($Root) { $Root } else { $Worktree }
         $level = 'local'
         $sharedPaths = @()
@@ -3708,8 +4064,23 @@ function Add-PbivizRelease {
         $id = Get-PbivizVisualIdentity -Root $dir -Entries $entries -Visual $Visual
         if (-not $id -or $id.Guid -notmatch '^[A-Za-z0-9_]{1,128}$' -or -not (ConvertTo-PbivizVersion $id.Version)) { $res.Reason = 'pbiviz.json has no valid guid/version at the source commit'; return $res }
         $res.Guid = $id.Guid; $res.Version = $id.Version
+        # The toolchain that built the package: the project-local powerbi-visuals-tools wins over a claim.
+        $localTools = Join-Path $dir "$Visual\node_modules\powerbi-visuals-tools\package.json"
+        if (Test-Path -LiteralPath $localTools -PathType Leaf) {
+            $lv = $null
+            try { $lv = [string](([IO.File]::ReadAllText($localTools)).TrimStart([char]0xFEFF) | ConvertFrom-Json).version } catch { }
+            if ($lv) {
+                if ($ToolsVersion -and $ToolsVersion -ne $lv) { $res.Reason = "toolsVersion $ToolsVersion contradicts the project-local powerbi-visuals-tools $lv"; return $res }
+                $ToolsVersion = $lv
+            }
+        }
         if (-not $PackagePath) { $PackagePath = Join-Path $dir (Join-Path $Visual "dist\$($id.Guid).$($id.Version).pbiviz") }
         if (-not (Test-Path -LiteralPath $PackagePath -PathType Leaf) -or (Get-Item -LiteralPath $PackagePath).Length -eq 0) { $res.Reason = "package not found or empty: $PackagePath"; return $res }
+        # Identity from the package CONTENT, never from its file name; these exact bytes are archived.
+        $pkgBytes = [IO.File]::ReadAllBytes((ConvertTo-PbivizIoPath $PackagePath))
+        $pk = Get-PbivizPackageIdentity -Bytes $pkgBytes
+        if (-not $pk.Ok) { $res.Reason = "package rejected: $($pk.Reason)"; return $res }
+        if ($pk.Guid -cne $id.Guid -or -not (Test-PbivizSameVersion $pk.Version $id.Version)) { $res.Reason = "package content is $($pk.Guid) $($pk.Version) but pbiviz.json at the source commit is $($id.Guid) $($id.Version)"; return $res }
         $ledger = @(Get-PbivizReleaseLedger -Root $dir -Visual $Visual)
         $maxArch = Get-PbivizMaxArchivedVersion $ledger
         $ver = ConvertTo-PbivizVersion $id.Version
@@ -3723,15 +4094,14 @@ function Add-PbivizRelease {
         $tracked = Invoke-PbivizGit -WorkingDirectory $dir -Arguments @('ls-files', '-z')
         $trackedSet = @(Split-PbivizNul $tracked.Out)
         foreach ($n in $names) { if ($trackedSet | Where-Object { $_.Equals($n, [StringComparison]::OrdinalIgnoreCase) }) { $res.Reason = "release path already tracked: $n"; return $res } }
+        $verdictObj = Get-PbivizValidationVerdict -Tests $testsObj -Review $reviewObj -SourceSha $SourceSha -ToolsVersion $ToolsVersion -NodeVersion $NodeVersion -PackageVerified $true
         $arch = Split-Path $pkgFull -Parent
         if (-not (Test-Path -LiteralPath $arch)) { New-Item -ItemType Directory -Path $arch -Force | Out-Null }
-        [IO.File]::Copy((ConvertTo-PbivizIoPath $PackagePath), (ConvertTo-PbivizIoPath $pkgFull), $false)
-        $bytes = [IO.File]::ReadAllBytes((ConvertTo-PbivizIoPath $pkgFull))
-        $res.Sha256 = Get-PbivizSha256Hex $bytes
-        $res.Bytes = $bytes.Length
+        $fs = New-Object IO.FileStream((ConvertTo-PbivizIoPath $pkgFull), [IO.FileMode]::CreateNew, [IO.FileAccess]::Write)
+        try { $fs.Write($pkgBytes, 0, $pkgBytes.Length) } finally { $fs.Dispose() }
+        $res.Sha256 = Get-PbivizSha256Hex $pkgBytes
+        $res.Bytes = $pkgBytes.Length
         $fp = Get-PbivizSourceFingerprint -Root $dir -TreeIsh $SourceSha -Visual $Visual
-        $testsObj = [ordered]@{ lint = 'NOT RUN'; unit = 'NOT RUN'; package = 'PASS'; host = 'NOT RUN' }
-        if ($Tests) { foreach ($k in $Tests.Keys) { $testsObj[$k] = [string]$Tests[$k] } }
         # Allowlisted shared files are outside the fingerprint scope: record them by path and blob id
         # at the source commit (null = removed by this release).
         $sharedFiles = @(foreach ($sp in $sharedPaths) {
@@ -3739,21 +4109,26 @@ function Add-PbivizRelease {
             [ordered]@{ path = $sp; blob = $(if ($se) { $se.Object } else { $null }) }
         })
         $manifest = [ordered]@{
-            schemaVersion = 1; visual = $Visual; guid = $id.Guid; version = $id.Version; origin = 'release'; validated = $true
-            sourceSha = $SourceSha; sourceFingerprint = $fp; sharedFiles = $sharedFiles; packageFile = (Split-Path $pkgFull -Leaf); sha256 = $res.Sha256; bytes = $res.Bytes
-            builtAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); toolsVersion = $ToolsVersion; nodeVersion = $NodeVersion
-            buildCommand = $BuildCommand; tests = $testsObj; level = $level
+            schemaVersion = 1; visual = $Visual; guid = $id.Guid; version = $id.Version; origin = 'release'
+            validated = $verdictObj.Validated; validationGaps = @($verdictObj.Gaps); quality = $verdictObj.Quality
+            sourceSha = $SourceSha; sourceFingerprint = $fp; sharedFiles = $sharedFiles
+            packageFile = (Split-Path $pkgFull -Leaf); sha256 = $res.Sha256; bytes = $res.Bytes
+            package = [ordered]@{ identity = 'VERIFIED'; guid = $pk.Guid; version = $pk.Version; resource = $pk.Resource; entries = $pk.Entries }
+            builtAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); toolsVersion = $(if ($ToolsVersion) { $ToolsVersion } else { $null }); nodeVersion = $(if ($NodeVersion) { $NodeVersion } else { $null })
+            buildCommand = $BuildCommand; tests = $testsObj; review = $reviewObj; level = $level
         }
         Write-PbivizTextFile -Path $manFull -Text (ConvertTo-PbivizJson $manifest)
         $f = Write-PbivizPathspecFile -Paths $names; $files += $f
         $add = Invoke-PbivizGit -WorkingDirectory $dir -Arguments @('add', "--pathspec-from-file=$f", '--pathspec-file-nul')
         if ($add.ExitCode -ne 0) { $res.Reason = "staging the release pair failed: $(Get-PbivizGitError $add)"; return $res }
         $res.PackagePath = $pkgFull; $res.ManifestPath = $manFull; $res.Staged = $names
+        $res.Validated = $verdictObj.Validated; $res.ValidationGaps = @($verdictObj.Gaps); $res.Quality = $verdictObj.Quality
         if ($Worktree) {
             $after = Test-PbivizCandidateState -Worktree $Worktree -AfterRelease
             if ($after.Status -ne 'PASS') { $res.Reason = $after.Reason; return $res }
         }
-        $res.Evidence.Add("release pair staged: $($names -join ', ') sha256=$($res.Sha256)")
+        $res.Evidence.Add("release pair staged: $($names -join ', ') sha256=$($res.Sha256); package content $($pk.Guid) $($pk.Version) verified")
+        $res.Evidence.Add($(if ($verdictObj.Validated) { 'validated: every required gate has recorded evidence' } else { "validated: false - $($verdictObj.Gaps -join '; ')" }))
         $res.Status = 'PASS'
     } catch { $res.Status = 'BLOCKED'; $res.Reason = $_.Exception.Message }
     finally { foreach ($x in $files) { Remove-Item -LiteralPath $x -Force -ErrorAction SilentlyContinue } }
@@ -3779,12 +4154,18 @@ function Add-PbivizLegacyArchive {
             $target = Join-Path $legacyDir $pkg.Name
             $manifestPath = Join-Path $legacyDir ($pkg.Name.Substring(0, $pkg.Name.Length - 7) + '.release.json')
             if ((Test-Path -LiteralPath $target) -or (Test-Path -LiteralPath $manifestPath)) { $res.Skipped += "$($pkg.Name) (already archived)"; continue }
+            # The file name is only a claim: the content must carry the same identity.
+            $bytes = [IO.File]::ReadAllBytes((ConvertTo-PbivizIoPath $pkg.FullName))
+            $pk = Get-PbivizPackageIdentity -Bytes $bytes
+            if (-not $pk.Ok) { $res.Skipped += "$($pkg.Name) ($($pk.Reason))"; continue }
+            if ($pk.Guid -cne $m.Groups['guid'].Value -or -not (Test-PbivizSameVersion $pk.Version $m.Groups['ver'].Value)) { $res.Skipped += "$($pkg.Name) (content is $($pk.Guid) $($pk.Version); the file name does not match)"; continue }
             if (-not (Test-Path -LiteralPath $legacyDir)) { New-Item -ItemType Directory -Path $legacyDir -Force | Out-Null }
-            [IO.File]::Copy((ConvertTo-PbivizIoPath $pkg.FullName), (ConvertTo-PbivizIoPath $target), $false)
-            $bytes = [IO.File]::ReadAllBytes((ConvertTo-PbivizIoPath $target))
+            $fs = New-Object IO.FileStream((ConvertTo-PbivizIoPath $target), [IO.FileMode]::CreateNew, [IO.FileAccess]::Write)
+            try { $fs.Write($bytes, 0, $bytes.Length) } finally { $fs.Dispose() }
             $manifest = [ordered]@{
                 schemaVersion = 1; visual = $Visual; guid = $m.Groups['guid'].Value; version = $m.Groups['ver'].Value; origin = 'legacy-archive'; validated = $false
                 sourceSha = $null; sourceFingerprint = $null; packageFile = $pkg.Name; sha256 = (Get-PbivizSha256Hex $bytes); bytes = $bytes.Length
+                package = [ordered]@{ identity = 'VERIFIED'; guid = $pk.Guid; version = $pk.Version; resource = $pk.Resource; entries = $pk.Entries }
                 importedFrom = "dist/$($pkg.Name)"; importedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
             }
             Write-PbivizTextFile -Path $manifestPath -Text (ConvertTo-PbivizJson $manifest)
@@ -3804,38 +4185,69 @@ function Add-PbivizLegacyArchive {
     return $res
 }
 
+# G4 scan of the visual's own source for relative imports that leave its folder. Dependency, cache
+# and generated trees are pruned WHILE walking (never enumerated); junctions and symbolic links are
+# never followed. Anything that could not be analysed is reported and makes the result incomplete:
+# G4 fails closed on it.
 function Get-PbivizDependencyEscapes {
-    param([string]$Worktree, [string]$Visual, [string[]]$Allowlist)
-    $visualDir = (Join-Path $Worktree $Visual).TrimEnd('\')
+    param([string]$Worktree, [string]$Visual, [string[]]$Allowlist = @())
+    $res = [pscustomobject][ordered]@{ Complete = $true; Escapes = @(); Uncertain = @(); FilesScanned = 0; DirectoriesVisited = 0; Pruned = @() }
     $escapes = New-Object System.Collections.Generic.List[string]
+    $uncertain = New-Object System.Collections.Generic.List[string]
+    $pruned = New-Object System.Collections.Generic.List[string]
+    $root = ([IO.Path]::GetFullPath($Worktree)).TrimEnd('\')
+    $visualDir = $root + '\' + $Visual
+    $exts = @('.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.less', '.css', '.scss', '.json')
+    $pruneAnywhere = @('node_modules', '.git', '.tmp', '.cache', 'coverage', '.nyc_output')
+    $pruneAtVisualRoot = @('dist', 'releases', 'typings')
     $codeRx = '(?:import|export)\s[^;]*?from\s*[''"]([^''"]+)[''"]|require\(\s*[''"]([^''"]+)[''"]\s*\)|import\(\s*[''"]([^''"]+)[''"]\s*\)|@import\s+(?:\([^)]*\)\s*)?[''"]([^''"]+)[''"]'
-    $files = @(Get-ChildItem -LiteralPath $visualDir -Recurse -File -ErrorAction SilentlyContinue | Where-Object {
-        $rel = $_.FullName.Substring($visualDir.Length + 1)
-        $_.Extension -in @('.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.less', '.css', '.scss', '.json') -and
-        $rel -notmatch '^(node_modules|dist|\.tmp|releases)\\'
-    })
-    foreach ($file in $files) {
-        $text = [IO.File]::ReadAllText((ConvertTo-PbivizIoPath $file.FullName))
-        $specs = New-Object System.Collections.Generic.List[string]
-        if ($file.Extension -eq '.json') {
-            foreach ($m in [regex]::Matches($text, '"((?:file:)?\.\.?/[^"]+)"')) { $specs.Add(($m.Groups[1].Value -replace '^file:', '')) }
-        } else {
-            foreach ($m in [regex]::Matches($text, $codeRx)) { foreach ($g in 1..4) { if ($m.Groups[$g].Success) { $specs.Add($m.Groups[$g].Value) } } }
-        }
-        foreach ($s in $specs) {
-            if (-not $s.StartsWith('.')) { continue }
-            $target = [IO.Path]::GetFullPath((Join-Path $file.DirectoryName ($s -replace '/', '\')))
-            if ($target.StartsWith($visualDir + '\', [StringComparison]::OrdinalIgnoreCase) -or $target -eq $visualDir) { continue }
-            $rel = if ($target.StartsWith($Worktree.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { $target.Substring($Worktree.TrimEnd('\').Length + 1).Replace('\', '/') } else { $target }
-            $ok = $false
-            foreach ($a in $Allowlist) {
-                $ap = $a.Replace('\', '/')
-                if ($rel -eq $ap -or $ap.StartsWith("$rel.", [StringComparison]::Ordinal) -or $ap.StartsWith("$rel/", [StringComparison]::Ordinal) -or $rel.StartsWith("$ap/", [StringComparison]::Ordinal)) { $ok = $true }
+    $stack = New-Object System.Collections.Generic.Stack[string]
+    $stack.Push($visualDir)
+    while ($stack.Count -gt 0) {
+        $dir = $stack.Pop()
+        $res.DirectoriesVisited++
+        $relDir = if ($dir.Length -gt $visualDir.Length) { $dir.Substring($visualDir.Length + 1).Replace('\', '/') } else { '' }
+        try { $entries = (New-Object IO.DirectoryInfo (ConvertTo-PbivizIoPath $dir)).GetFileSystemInfos() }
+        catch { $uncertain.Add("cannot read folder '$(if ($relDir) { $relDir } else { '.' })': $(Get-PbivizErrorText $_)"); continue }
+        foreach ($e in $entries) {
+            $rel = if ($relDir) { "$relDir/$($e.Name)" } else { $e.Name }
+            $isDir = [bool]($e.Attributes -band [IO.FileAttributes]::Directory)
+            if ($e.Attributes -band [IO.FileAttributes]::ReparsePoint) { $uncertain.Add("not followed: '$rel' is a junction or symbolic link"); continue }
+            if ($isDir) {
+                if ($pruneAnywhere -contains $e.Name -or (-not $relDir -and $pruneAtVisualRoot -contains $e.Name)) { $pruned.Add($rel); continue }
+                $stack.Push($dir + '\' + $e.Name)
+                continue
             }
-            if (-not $ok) { $escapes.Add("$($file.FullName.Substring($visualDir.Length + 1).Replace('\', '/')) -> $s") }
+            if ($exts -notcontains $e.Extension.ToLowerInvariant()) { continue }
+            $full = $dir + '\' + $e.Name
+            try { $text = [IO.File]::ReadAllText((ConvertTo-PbivizIoPath $full)) }
+            catch { $uncertain.Add("cannot read '$rel': $(Get-PbivizErrorText $_)"); continue }
+            $res.FilesScanned++
+            $specs = New-Object System.Collections.Generic.List[string]
+            if ($e.Extension -ieq '.json') {
+                foreach ($m in [regex]::Matches($text, '"((?:file:)?\.\.?/[^"]+)"')) { $specs.Add(($m.Groups[1].Value -replace '^file:', '')) }
+            } else {
+                foreach ($m in [regex]::Matches($text, $codeRx)) { foreach ($g in 1..4) { if ($m.Groups[$g].Success) { $specs.Add($m.Groups[$g].Value) } } }
+            }
+            foreach ($s in $specs) {
+                if (-not $s.StartsWith('.')) { continue }
+                $target = [IO.Path]::GetFullPath((Join-Path $dir ($s -replace '/', '\')))
+                if ($target.StartsWith($visualDir + '\', [StringComparison]::OrdinalIgnoreCase) -or $target -eq $visualDir) { continue }
+                $tRel = if ($target.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) { $target.Substring($root.Length + 1).Replace('\', '/') } else { $target }
+                $ok = $false
+                foreach ($a in $Allowlist) {
+                    $ap = $a.Replace('\', '/')
+                    if ($tRel -eq $ap -or $ap.StartsWith("$tRel.", [StringComparison]::Ordinal) -or $ap.StartsWith("$tRel/", [StringComparison]::Ordinal) -or $tRel.StartsWith("$ap/", [StringComparison]::Ordinal)) { $ok = $true }
+                }
+                if (-not $ok) { $escapes.Add("$rel -> $s") }
+            }
         }
     }
-    return $escapes.ToArray()
+    $res.Escapes = $escapes.ToArray()
+    $res.Uncertain = $uncertain.ToArray()
+    $res.Pruned = $pruned.ToArray()
+    $res.Complete = ($uncertain.Count -eq 0)
+    return $res
 }
 
 # G0-G6. The verdict never depends on pathspec matching: the complete staged diff is parsed once.
@@ -3854,6 +4266,8 @@ function Test-PbivizPromotionGates {
             if ($t -ne $rec.tgt) { $g0 = $false; $g0Detail = 'target ref does not match the candidate record' }
         }
         if ($g0 -and ($ArchiveOnly -ne ($rec.mode -eq 'archive-only'))) { $g0 = $false; $g0Detail = "candidate mode is $($rec.mode)" }
+        $recAllow = @(@($rec.allowlist) | Where-Object { $_ } | ForEach-Object { ([string]$_).Replace('\', '/') } | Sort-Object)
+        if ($g0 -and ((@($Allowlist | Where-Object { $_ } | ForEach-Object { $_.Replace('\', '/') } | Sort-Object) -join '|') -cne ($recAllow -join '|'))) { $g0 = $false; $g0Detail = 'allowlist differs from the one recorded for the candidate' }
         & $add 'G0' $g0 $g0Detail
         # Without a record there is nothing to compare against; otherwise every gate is still
         # evaluated so the evidence shows all failures, not only the first one.
@@ -3896,8 +4310,11 @@ function Test-PbivizPromotionGates {
         & $add 'G3' ($g3bad.Count -eq 0) $(if ($g3bad.Count) { "other visuals changed: $($g3bad -join ', ')" } else { "$(@($visuals).Count - 1) other visual tree(s) identical to the target" })
         if ($ArchiveOnly) { & $add 'G4' $true 'not applicable (archive-only)' }
         else {
-            $esc = @(Get-PbivizDependencyEscapes -Worktree $Worktree -Visual $Visual -Allowlist $allowSet)
-            & $add 'G4' ($esc.Count -eq 0) $(if ($esc.Count) { "imports leave the visual folder: $($esc -join ', ')" } else { 'no imports leave the visual folder' })
+            $scan = Get-PbivizDependencyEscapes -Worktree $Worktree -Visual $Visual -Allowlist $allowSet
+            $g4d = @()
+            if (@($scan.Escapes).Count) { $g4d += "imports leave the visual folder: $(@($scan.Escapes) -join ', ')" }
+            if (-not $scan.Complete) { $g4d += "analysis incomplete (fail closed): $(@($scan.Uncertain) -join '; ')" }
+            & $add 'G4' ($scan.Complete -and @($scan.Escapes).Count -eq 0) $(if ($g4d.Count) { $g4d -join ' | ' } else { "no imports leave the visual folder ($($scan.FilesScanned) file(s) scanned; pruned: $(if (@($scan.Pruned).Count) { @($scan.Pruned) -join ', ' } else { 'none' }))" })
         }
         if ($ArchiveOnly) { & $add 'G5' $true 'not applicable (archive-only)' }
         else {
@@ -3936,20 +4353,37 @@ function Test-PbivizPromotionGates {
             if (-not $staged.ContainsKey($pkgPath)) { $g6 = $false; $g6d.Add("manifest without package: $($c.Path)"); continue }
             try { $man = Read-PbivizJsonBlob -Root $Worktree -Object $staged[$c.Path] } catch { $g6 = $false; $g6d.Add("unreadable manifest: $($c.Path)"); continue }
             $blob = Invoke-PbivizGit -WorkingDirectory $Worktree -Arguments @('cat-file', 'blob', $staged[$pkgPath]) -BinaryOutput
-            $hash = Get-PbivizSha256Hex $blob.Bytes
-            if ($hash -ne [string]$man.sha256) { $g6 = $false; $g6d.Add("SHA-256 mismatch for $pkgPath") }
+            # Manifest <-> package: names, hash, size, identity read from the package content and the
+            # validation claim re-derived from the recorded evidence.
+            foreach ($p in @(Get-PbivizReleasePairProblems -Manifest $man -ManifestPath $c.Path -PackageBytes $blob.Bytes)) { $g6 = $false; $g6d.Add("$($c.Path): $p") }
             if ($ArchiveOnly) {
                 foreach ($p in @($c.Path, $pkgPath)) {
                     $se = Find-PbivizEntry -Entries $srcEntries -Path $p
                     if ([string]$man.origin -ne 'legacy-archive' -and (-not $se -or $se.Object -ne $staged[$p])) { $g6 = $false; $g6d.Add("$p is neither a legacy archive nor identical to the source archive") }
                 }
+            } elseif ($releaseNames -ccontains $c.Path) {
+                # The new pair must describe exactly this candidate: source revision, fingerprint and
+                # the allowlisted shared files by blob id at the source commit.
+                $ctx = New-Object System.Collections.Generic.List[string]
+                if ([string]$man.origin -cne 'release') { $ctx.Add('origin is not release') }
+                if ([string]$man.visual -cne $Visual) { $ctx.Add("manifest names visual '$($man.visual)'") }
+                if ([string]$man.sourceSha -ne $src) { $ctx.Add("sourceSha $($man.sourceSha) is not the candidate source $src") }
+                if ([string]$man.sourceFingerprint -ne $fpSrc) { $ctx.Add('sourceFingerprint differs from the candidate source') }
+                $manShared = @(@($man.sharedFiles) | Where-Object { $_ })
+                if ((@($manShared | ForEach-Object { [string]$_.path } | Sort-Object) -join '|') -cne ($recAllow -join '|')) { $ctx.Add('sharedFiles paths differ from the candidate allowlist') }
+                foreach ($sf in $manShared) {
+                    $se = Find-PbivizEntry -Entries $srcEntries -Path ([string]$sf.path)
+                    $want = if ($se) { $se.Object } else { '' }
+                    if ([string]$sf.blob -ne $want) { $ctx.Add("sharedFiles '$($sf.path)' blob '$($sf.blob)' is not the source blob '$want'") }
+                }
+                foreach ($x in $ctx) { $g6 = $false; $g6d.Add("$($c.Path): $x") }
             }
         }
         foreach ($c in @($archive | Where-Object { $_.Status -eq 'A' -and $_.Path.EndsWith('.pbiviz', [StringComparison]::Ordinal) })) {
             $manPath = $c.Path.Substring(0, $c.Path.Length - '.pbiviz'.Length) + '.release.json'
             if (-not $staged.ContainsKey($manPath)) { $g6 = $false; $g6d.Add("package without manifest: $($c.Path)") }
         }
-        & $add 'G6' $g6 $(if ($g6) { "archive changes are additions only ($($archive.Count)); hashes match" } else { $g6d -join '; ' })
+        & $add 'G6' $g6 $(if ($g6) { "archive changes are additions only ($($archive.Count)); every added pair consistent (hash, size, package content identity, validation claim, source binding)" } else { $g6d -join '; ' })
         $failed = @($res.Gates | Where-Object { -not $_.Pass })
         if ($failed.Count -eq 0) { $res.Status = 'PASS'; $res.Reason = 'all gates passed' }
         else { $res.Reason = (@($failed | ForEach-Object { "$($_.Gate): $($_.Detail)" }) -join ' | ') }
@@ -3982,37 +4416,136 @@ function Get-PbivizReleaseProvenance {
     return $res
 }
 
+# Re-checks an archived release at a commit (normally the Prod commit from
+# Get-PbivizReleaseProvenance). Two kinds of evidence are kept apart: COMMIT evidence (source scope,
+# shared files and the archived pair at that commit match the manifest) and SOURCE-REVISION
+# evidence (the Dev commit named in the manifest still yields the same fingerprint and shared
+# blobs). A source revision missing from this clone is reported as NOT AVAILABLE, never as verified.
 function Test-PbivizReleaseIntegrity {
     param([string]$Root, [string]$Visual, [string]$Version, [string]$Commit)
     $res = New-PbivizResult
+    $res | Add-Member -NotePropertyName CommitEvidence -NotePropertyValue 'NOT CHECKED'
+    $res | Add-Member -NotePropertyName SourceRevision -NotePropertyValue 'NOT CHECKED'
     try {
+        $why = Test-PbivizNameSyntax $Visual
+        if ($why) { $res.Status = 'BLOCKED'; $res.Reason = "invalid input: $why"; return $res }
+        if (-not (ConvertTo-PbivizVersion $Version)) { $res.Status = 'BLOCKED'; $res.Reason = 'invalid input: version'; return $res }
         $sha = Resolve-PbivizCommit -Root $Root -Ref $Commit
         if (-not $sha) { $res.Status = 'BLOCKED'; $res.Reason = 'invalid input: commit'; return $res }
-        $hit = @(Get-PbivizReleaseLedger -Root $Root -Ref $sha -Visual $Visual | Where-Object { $_.Version -eq $Version -and $_.Origin -eq 'release' })
-        if ($hit.Count -ne 1) { $res.Status = 'FAILED'; $res.Reason = 'release manifest not found at the commit'; return $res }
+        $hit = @(Get-PbivizReleaseLedger -Root $Root -Ref $sha -Visual $Visual | Where-Object { $_.Origin -eq 'release' -and (Test-PbivizSameVersion $_.Version $Version) })
+        if ($hit.Count -ne 1) { $res.Status = 'FAILED'; $res.Reason = "expected one release manifest for $Visual $Version at the commit, found $($hit.Count)"; return $res }
         $man = $hit[0].Manifest
-        $fp = Get-PbivizSourceFingerprint -Root $Root -TreeIsh $sha -Visual $Visual
-        if ($fp -ne [string]$man.sourceFingerprint) { $res.Status = 'FAILED'; $res.Reason = "source fingerprint at $($sha.Substring(0,12)) differs from the manifest"; return $res }
         $entries = @(Get-PbivizTreeEntries -Root $Root -TreeIsh $sha)
         $pkgPath = $hit[0].Path.Substring(0, $hit[0].Path.Length - '.release.json'.Length) + '.pbiviz'
         $pe = Find-PbivizEntry -Entries $entries -Path $pkgPath
-        if (-not $pe) { $res.Status = 'FAILED'; $res.Reason = 'package missing at the commit'; return $res }
-        $blob = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('cat-file', 'blob', $pe.Object) -BinaryOutput
-        if ((Get-PbivizSha256Hex $blob.Bytes) -ne [string]$man.sha256) { $res.Status = 'FAILED'; $res.Reason = 'package SHA-256 differs from the manifest'; return $res }
-        $res.Evidence.Add("fingerprint and package hash match at $sha")
+        $bytes = if ($pe) { (Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('cat-file', 'blob', $pe.Object) -BinaryOutput).Bytes } else { $null }
+        $problems = New-Object System.Collections.Generic.List[string]
+        foreach ($p in @(Get-PbivizReleasePairProblems -Manifest $man -ManifestPath $hit[0].Path -PackageBytes $bytes)) { $problems.Add($p) }
+        $shared = @(@($man.sharedFiles) | Where-Object { $_ })
+        if ($man) {
+            if ([string]$man.visual -cne $Visual) { $problems.Add("manifest names visual '$($man.visual)'") }
+            if ((Get-PbivizSourceFingerprint -Root $Root -TreeIsh $sha -Visual $Visual) -ne [string]$man.sourceFingerprint) { $problems.Add("source scope at $($sha.Substring(0, 12)) differs from the manifest fingerprint") }
+            foreach ($sf in $shared) {
+                $e = Find-PbivizEntry -Entries $entries -Path ([string]$sf.path)
+                $have = if ($e) { $e.Object } else { '' }
+                if ([string]$sf.blob -ne $have) { $problems.Add("shared file '$($sf.path)' at $($sha.Substring(0, 12)) is '$have', the manifest recorded '$($sf.blob)'") }
+            }
+        }
+        if ($problems.Count -gt 0) {
+            $res.Status = 'FAILED'; $res.CommitEvidence = 'MISMATCH'; $res.Reason = $problems -join '; '
+            foreach ($p in $problems) { $res.Evidence.Add($p) }
+            return $res
+        }
+        $res.CommitEvidence = 'VERIFIED'
+        $res.Evidence.Add("commit ${sha}: source fingerprint, shared files and the archived pair (hash, size, package content identity, validation claim) match the manifest")
+        $src = Resolve-PbivizCommit -Root $Root -Ref ([string]$man.sourceSha)
+        if (-not $src) {
+            $res.SourceRevision = 'NOT AVAILABLE'
+            $res.Evidence.Add("source revision $($man.sourceSha) is not in this clone - fetch the Dev history to verify it")
+            return $res
+        }
+        $srcEntries = @(Get-PbivizTreeEntries -Root $Root -TreeIsh $src)
+        $sp = New-Object System.Collections.Generic.List[string]
+        if ((Get-PbivizSourceFingerprint -Root $Root -TreeIsh $src -Visual $Visual) -ne [string]$man.sourceFingerprint) { $sp.Add("source revision $($src.Substring(0, 12)) does not yield the manifest fingerprint") }
+        foreach ($sf in $shared) {
+            $e = Find-PbivizEntry -Entries $srcEntries -Path ([string]$sf.path)
+            $have = if ($e) { $e.Object } else { '' }
+            if ([string]$sf.blob -ne $have) { $sp.Add("shared file '$($sf.path)' at source revision $($src.Substring(0, 12)) is '$have', the manifest recorded '$($sf.blob)'") }
+        }
+        if ($sp.Count -gt 0) {
+            $res.Status = 'FAILED'; $res.SourceRevision = 'MISMATCH'; $res.Reason = $sp -join '; '
+            foreach ($p in $sp) { $res.Evidence.Add($p) }
+            return $res
+        }
+        $res.SourceRevision = 'VERIFIED'
+        $res.Evidence.Add("source revision ${src}: fingerprint and shared files match the manifest")
     } catch { $res.Status = 'FAILED'; $res.Reason = $_.Exception.Message }
     return $res
 }
 
+# Removes a helper-created candidate worktree; the release branch is always kept. Identity first:
+# a registered worktree of THIS repository, carrying the helper's candidate record written for
+# exactly this folder, on the recorded release/pbiviz/* branch that still contains the target.
+# Then the state decides:
+#  - completed (nothing staged, unstaged or untracked; no operation in progress): plain
+#    `git worktree remove`, so Git's own clean check guards the removal;
+#  - incomplete (only the helper's own staged snapshot, with or without the release pair):
+#    refused unless -DiscardApproval 'APPROVED:DISCARD-CANDIDATE:<branch>' carries the user's
+#    explicit approval; only then is that staged snapshot discarded;
+#  - anything else (unexpected staged, unstaged or untracked data, an operation in progress, a
+#    missing record): refused, approval or not - inspect it by hand.
 function Remove-PbivizPromotionWorktree {
-    param([string]$Root, [string]$WorktreeDir)
-    $res = New-PbivizResult
-    $why = Test-PbivizWorktreeDir -Dir $WorktreeDir
-    if ($why) { $res.Status = 'BLOCKED'; $res.Reason = "refused: $why"; return $res }
-    if (-not (@(Get-PbivizWorktreeList -Directory $Root) | Where-Object { Test-PbivizSamePath $_ $WorktreeDir })) { $res.Status = 'BLOCKED'; $res.Reason = 'refused: not a worktree of this repository'; return $res }
-    $r = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('worktree', 'remove', '--force', (ConvertTo-PbivizLongPath $WorktreeDir))
-    if ($r.ExitCode -ne 0) { $res.Status = 'FAILED'; $res.Reason = "worktree remove failed: $(Get-PbivizGitError $r)"; return $res }
-    $res.Evidence.Add('candidate worktree removed; the release branch is kept')
+    param([string]$Root, [string]$WorktreeDir, [string]$DiscardApproval = $null)
+    $res = New-PbivizResult -Status 'BLOCKED'
+    try {
+        $why = Test-PbivizWorktreeDir -Dir $WorktreeDir
+        if ($why) { $res.Reason = "refused: $why"; return $res }
+        if (-not (Test-PbivizIsRepoRoot $Root)) { $res.Reason = 'refused: -Root is not the root of the PBIVIZ repository'; return $res }
+        $wt = ConvertTo-PbivizLongPath $WorktreeDir
+        if (-not (@(Get-PbivizWorktreeList -Directory $Root) | Where-Object { Test-PbivizSamePath $_ $wt })) { $res.Reason = 'refused: not a registered worktree of this repository'; return $res }
+        if (-not (Test-Path -LiteralPath $wt -PathType Container)) { $res.Reason = 'refused: the registered worktree folder is missing - inspect `git worktree list`'; return $res }
+        $commons = New-Object System.Collections.Generic.List[string]
+        foreach ($d in @($Root, $wt)) {
+            $c = Invoke-PbivizGit -WorkingDirectory $d -Arguments @('rev-parse', '--git-common-dir')
+            $p = $c.Out.Trim()
+            if ($c.ExitCode -ne 0 -or -not $p) { $res.Reason = 'refused: cannot read the repository of the worktree'; return $res }
+            if (-not [IO.Path]::IsPathRooted($p)) { $p = Join-Path $d $p }
+            $commons.Add($p)
+        }
+        if (-not (Test-PbivizSamePath $commons[0] $commons[1])) { $res.Reason = 'refused: the worktree does not belong to this repository'; return $res }
+        $rec = Read-PbivizCandidateRecord -Worktree $wt
+        if (-not $rec) { $res.Reason = 'refused: no candidate record - the helper did not create this worktree (or its record is gone); inspect it and remove it yourself if it is yours'; return $res }
+        if (-not ($rec.worktree -and (Test-PbivizSamePath $rec.worktree $wt))) { $res.Reason = 'refused: the candidate record belongs to another folder'; return $res }
+        if ([string]$rec.branch -notmatch '^release/pbiviz/' -or -not (Test-PbivizBranchName -Root $Root -Name ([string]$rec.branch))) { $res.Reason = 'refused: the record names no release/pbiviz/* branch'; return $res }
+        $sym = Invoke-PbivizGit -WorkingDirectory $wt -Arguments @('symbolic-ref', '-q', 'HEAD')
+        if ($sym.ExitCode -ne 0 -or $sym.Out.Trim() -ne "refs/heads/$($rec.branch)") { $res.Reason = "refused: the worktree is not on its release branch $($rec.branch)"; return $res }
+        $head = Resolve-PbivizCommit -Root $wt -Ref 'HEAD'
+        if (-not $head -or -not (Test-PbivizIsAncestor -Root $wt -Ancestor ([string]$rec.tgt) -Descendant $head)) { $res.Reason = 'refused: the release branch no longer contains the recorded target commit'; return $res }
+        $busy = Test-PbivizOperationInProgress -Root $wt
+        if ($busy) { $res.Reason = "refused: a Git operation is in progress in the worktree ($busy) - finish or abort it first"; return $res }
+        $excludes = Join-Path (Split-Path (Get-PbivizCandidateRecordPath -Worktree $wt) -Parent) 'pbiviz-build-excludes'
+        $cfg = @("core.excludesFile=$excludes")
+        $st = Get-PbivizStatus -Directory $wt -Config $cfg
+        $lost = @(@($st.Unstaged) + @($st.Unmerged) | Sort-Object -Unique)
+        if ($lost.Count -gt 0) { $res.Reason = "refused: unstaged changes to tracked files would be lost: $($lost -join ', ')"; return $res }
+        if ($st.Untracked.Count -gt 0) { $res.Reason = "refused: untracked files would be lost: $($st.Untracked -join ', ')"; return $res }
+        if ($st.Staged.Count -eq 0) {
+            $r = Invoke-PbivizGit -WorkingDirectory $Root -Config $cfg -Arguments @('worktree', 'remove', $wt)
+            if ($r.ExitCode -ne 0) { $res.Status = 'FAILED'; $res.Reason = "worktree remove failed: $(Get-PbivizGitError $r)"; return $res }
+            $res.Status = 'PASS'
+            $res.Evidence.Add("completed candidate removed without force; branch $($rec.branch) kept at $head")
+            return $res
+        }
+        $snap = Test-PbivizCandidateState -Worktree $wt
+        if ($snap.Status -ne 'PASS') { $snap = Test-PbivizCandidateState -Worktree $wt -AfterRelease }
+        if ($snap.Status -ne 'PASS') { $res.Reason = "refused: the staged changes are not the helper's candidate snapshot ($($snap.Reason)) - inspect them; nothing was removed"; return $res }
+        $token = "APPROVED:DISCARD-CANDIDATE:$($rec.branch)"
+        if ($DiscardApproval -cne $token) { $res.Reason = "incomplete candidate: its staged snapshot is not committed on $($rec.branch). Commit it on the release branch, or discard it with -DiscardApproval '$token' after the user's explicit approval"; return $res }
+        $r = Invoke-PbivizGit -WorkingDirectory $Root -Config $cfg -Arguments @('worktree', 'remove', '--force', $wt)
+        if ($r.ExitCode -ne 0) { $res.Status = 'FAILED'; $res.Reason = "worktree remove failed: $(Get-PbivizGitError $r)"; return $res }
+        $res.Status = 'PASS'
+        $res.Evidence.Add("incomplete candidate discarded with $token; branch $($rec.branch) kept at $head")
+    } catch { $res.Status = 'FAILED'; $res.Reason = $_.Exception.Message }
     return $res
 }
 '@
@@ -7002,9 +7535,12 @@ read in place, never copied.
 - Before packaging list `dist/` and `releases/`; if `<guid>.<version>.pbiviz` already exists,
   STOP - never overwrite or delete a package.
 - Official releases are immutable pairs in `<Visual>/releases/`: `<guid>.<version>.pbiviz` +
-  `<guid>.<version>.release.json` (SHA-256, size, source commit, source fingerprint, tool and
-  Node versions, build command, test results). Added only by 086 through `Add-PbivizRelease`;
-  append-only for ever.
+  `<guid>.<version>.release.json` (SHA-256, size, package content identity, source commit and
+  fingerprint, tool and Node versions, build command, test results, review verdict, validation
+  verdict and quality labels). Added only by 086 through `Add-PbivizRelease`; append-only for ever.
+- The identity of a package is read from its CONTENT - `package.json` (visual.guid,
+  visual.version, resources) and `resources/<guid>.pbiviz.json` must agree with each other and
+  with `pbiviz.json` at the source commit. A file name is only a claim; a mismatch is BLOCKED.
 
 | Storage | Level 1 | Level 2 | Level 3 | Use |
 |---|---|---|---|---|
@@ -7021,21 +7557,37 @@ CODE REVIEWED / BUILT / HOST TESTED / CERTIFICATION READY / MICROSOFT CERTIFIED.
 A passing `pbiviz package` is not a test pass, not a security audit, not host validation and
 never Microsoft certification.
 
+`validated: true` in a release manifest means exactly: the package identity was verified from
+its content, lint PASS, unit PASS, the `powerbi-visuals-tools` and Node versions are recorded,
+and an APPROVE (or APPROVE WITH NONBLOCKING NOTES) review names the exact source commit.
+Anything missing keeps `validated: false` and is listed in `validationGaps`; a FAIL or a BLOCK
+verdict stops the release. Results are PASS / FAIL / NOT RUN only - never fill a missing result
+with PASS. `validated` never implies HOST TESTED, CERTIFICATION READY or MICROSOFT CERTIFIED.
+
 ## Toolchain facts (verified against microsoft/PowerBI-visuals-tools)
+Rule: detect first, obtain approval before installation or download, prefer the project-local
+toolchain, and never silently acquire or execute missing packages.
 - The CLI works on the current directory (`rootPath = process.cwd()`): run every command FROM the
   visual folder.
+- Detect: `node_modules/.bin/pbiviz(.cmd)` in the visual folder, or `npx --no pbiviz --version`.
+  Run it as `npx --no pbiviz <command>` (`--no` refuses to download). Plain `npx <name>` is not
+  used: in a non-interactive terminal it downloads a missing package without asking.
 - `pbiviz new` copies the template, generates a GUID and runs `npm install` automatically - it
-  downloads packages and needs `APPROVED:INSTALL:<visual>`.
-- Prefer the project-local CLI (`node_modules/.bin/pbiviz`, or `npx --no pbiviz`, which refuses
-  to download) and `npm ci` when a lockfile exists. No global installs, no `npx -y`.
+  downloads packages, so it runs only after `APPROVED:INSTALL:<visual>`, as
+  `npm exec --yes --package=powerbi-visuals-tools@<pinned version> -- pbiviz new <Name>`.
+- `npm ci` (lockfile present) also downloads: only after `APPROVED:INSTALL:<visual>`. No global
+  installs, no `npx -y`.
 - Node minimum: read `engines.node` from the project's installed
   `node_modules/powerbi-visuals-tools/package.json`; do not freeze an old Node version.
-- `pbiviz mcp --init` writes `.vscode/mcp.json` in the current folder (server key `pbiviz`,
-  `npx -y powerbi-visuals-tools mcp`) and refuses to overwrite an existing file. The server is in
-  preview and exposes exactly five tools: `get_best_practices`, `check_vulnerabilities`,
-  `prepare_certification`, `list_visual_info`, `get_available_apis`. It never builds or packages.
-  Its results describe the folder it was started in: trust them only after `list_visual_info`
-  returns the expected GUID; otherwise NOT VERIFIED.
+- `pbiviz mcp --init` writes `.vscode/mcp.json` in the current folder (server key `pbiviz`) and
+  refuses to overwrite an existing file, but its command is `npx -y powerbi-visuals-tools mcp`,
+  which would download a missing package: never keep that generated command. Use the
+  project-local configuration instead (fails rather than downloads when the package is absent):
+  `"pbiviz": { "type": "stdio", "command": "node", "args": ["${workspaceFolder}/node_modules/powerbi-visuals-tools/bin/pbiviz.js", "mcp"] }`.
+  The server is in preview and exposes exactly five tools: `get_best_practices`,
+  `check_vulnerabilities`, `prepare_certification`, `list_visual_info`, `get_available_apis`. It
+  never builds or packages. Its results describe the folder it was started in: trust them only
+  after `list_visual_info` returns the expected GUID; otherwise NOT VERIFIED.
 
 ## Audit before migration (085)
 1. Capture Git state, deployed version, dependencies, persisted capability names, target hosts.
@@ -7086,7 +7638,8 @@ dot-source it in a script and call its functions - never re-implement its checks
 ## Approval tokens
 `APPROVED:CHECKPOINT` (only if the user wants per-commit confirmation), `CONNECT:<url>`,
 `PUSH:<branch>`, `BRANCHES:<repo>`, `POLICY:<branch>`, `PR:<branch>`, `MERGE:<repo>#<pr>`,
-`TAG:<name>`, `DISTRIBUTE:<destination>`, `MERGE-LOCAL:<paths>`, `INSTALL:<visual>`.
+`TAG:<name>`, `DISTRIBUTE:<destination>`, `MERGE-LOCAL:<paths>`, `INSTALL:<visual>`,
+`DISCARD-CANDIDATE:<release branch>` (discard an uncommitted promotion candidate).
 A request in plain words is not a token.
 
 ## Input validation (before ANY Git command)
@@ -7107,6 +7660,11 @@ A request in plain words is not a token.
 - Restore: `git restore --source=<sha> -- <paths>` into the working tree, or `git revert <sha>`.
 - Official release (Level 1 and 2): `Add-PbivizRelease -Root <root> -Visual <v> -SourceSha <HEAD>`
   on a clean tree adds the new release pair; the release commit adds exactly those two files.
+  Pass the evidence exactly as received: `-Tests @{ lint; unit; host; certification }`
+  (PASS / FAIL / NOT RUN), `-Review @{ reviewer; verdict; sourceSha }` (084's verdict for this
+  exact commit), `-ToolsVersion`, `-NodeVersion`. Never fill a gap: a missing item leaves
+  `validated: false` with the gap listed; a FAIL, a BLOCK verdict, an invented `package` result
+  or a review of another commit is BLOCKED.
 
 ## Level 2 -- connect without losing history
 Principle: no operation moves an existing local branch to a commit that does not contain its
@@ -7155,16 +7713,22 @@ ARCHIVE = `<Visual>/releases/**` (Prod is authoritative; the Dev archive is neve
    exist only in Prod removed; every path checked for Windows representability; candidate
    record written.
 3. Build and test inside the worktree (state checked before and after the build), then
-   `Add-PbivizRelease -Worktree` stages exactly the new pair.
+   `Add-PbivizRelease -Worktree` (same evidence parameters as Level 1) stages exactly the new
+   pair. The package identity comes from its content, never from its file name.
 4. `Test-PbivizPromotionGates` - every gate must PASS:
-   - G0 inputs validated; the worktree was created by the helper.
+   - G0 inputs validated; the worktree was created by the helper; the allowlist is the one
+     recorded for the candidate.
    - G1 the complete staged diff (`diff-index --cached -z --name-status --no-renames <TGT>`, no
      pathspec) stays inside the visual's source scope + allowlist + the two new release files;
      the source fingerprint equals SRC.
    - G2 nothing else differs from TGT. G3 every other visual tree is identical to TGT.
-   - G4 no import leaves the visual folder unless allowlisted. G5 GUID stable, version increases.
+   - G4 no import leaves the visual folder unless allowlisted; dependency, cache and generated
+     folders are pruned while walking, links are never followed, and an incomplete analysis
+     fails the gate. G5 GUID stable, version increases.
    - G6 the archive is append-only across all visuals: archive entries are only `A`; exactly the
-     two new files for a release promotion; each manifest SHA-256 matches its package.
+     two new files for a release promotion; every added pair is consistent (hash, size, package
+     content identity, validation claim re-derived from its evidence) and the new pair names
+     exactly the candidate's source commit, fingerprint and allowlisted shared blob ids.
 5. Commit on the release branch (trailer `Pbiviz-Release: <visual>@<version>`); push and open the
    pull request to Prod only with `APPROVED:PUSH` and `APPROVED:PR`. The pull request carries
    everything Prod will ever hold for this release: source, package, manifest, gate evidence
@@ -7174,9 +7738,17 @@ ARCHIVE = `<Visual>/releases/**` (Prod is authoritative; the Dev archive is neve
    Azure DevOps `az repos pr policy list`). The agent never votes on its own pull request.
 7. After the merge nothing is written to Prod. `Get-PbivizReleaseProvenance` derives the Prod
    commit (`git log --first-parent -m --diff-filter=A <prod> -- <package path>`, valid for
-   merge, squash and rebase); `Test-PbivizReleaseIntegrity` re-checks the source fingerprint
-   there. Optional annotated tag `pbiviz/<visual>/<version>` with `APPROVED:TAG` and provider
-   permission. `Remove-PbivizPromotionWorktree` cleans up.
+   merge, squash and rebase); `Test-PbivizReleaseIntegrity` re-checks the archive there and
+   reports two kinds of evidence separately: COMMIT evidence (fingerprint, shared blob ids,
+   package hash, size and content identity, validation claim at the Prod commit) and
+   SOURCE-REVISION evidence (the Dev commit named in the manifest: VERIFIED, NOT AVAILABLE when
+   it is not in the clone - never reported as verified - or MISMATCH). Optional annotated tag
+   `pbiviz/<visual>/<version>` with `APPROVED:TAG` and provider permission.
+8. Cleanup with `Remove-PbivizPromotionWorktree`: only a registered worktree of this repository
+   that carries the helper's record for exactly that folder and sits on its `release/pbiviz/*`
+   branch. A committed candidate is removed without force; an uncommitted candidate only with
+   `APPROVED:DISCARD-CANDIDATE:<branch>`; unexpected staged, unstaged or untracked data or an
+   operation in progress is refused, approval or not. The release branch is always kept.
 
 - Mixed Dev commits are safe: only the selected visual's files are restored.
 - A shared dependency outside the visual is BLOCKED unless allowlisted and approved.
@@ -7190,14 +7762,19 @@ candidate tree exactly, with no unstaged edits and no untracked non-ignored file
 
 ## Release archive and provenance
 - `<Visual>/releases/<guid>.<version>.pbiviz` + `<guid>.<version>.release.json` (schemaVersion,
-  visual, guid, version, origin release | legacy-archive, validated, sourceSha,
-  sourceFingerprint, sharedFiles (allowlisted path + blob id), packageFile, sha256, bytes, builtAt,
-  toolsVersion, nodeVersion, buildCommand, tests, level). No Prod commit, PR or tag inside the
-  file: those are derived or external.
+  visual, guid, version, origin release | legacy-archive, validated, validationGaps, quality
+  (codeReviewed / built / hostTested / certificationReady / microsoftCertified), sourceSha,
+  sourceFingerprint, sharedFiles (allowlisted path + blob id), packageFile, sha256, bytes,
+  package (identity read from the content), builtAt, toolsVersion, nodeVersion, buildCommand,
+  tests, review, level). No Prod commit, PR or tag inside the file: those are derived or external.
+- `validated: true` only with: package identity verified, lint PASS, unit PASS, toolchain
+  recorded, an approving review of the exact source commit. It never implies host testing or
+  any certification.
 - Append-only: never modified, renamed or deleted. Rollback = release again with a higher
   version built from the earlier validated source.
 - Legacy `dist/` packages may be archived once per visual on request (`releases/legacy/`,
-  `validated: false`); they count for version monotonicity, never as validated releases.
+  `validated: false`); a package whose content identity does not match its file name is
+  skipped. They count for version monotonicity, never as validated releases.
 - Four states, reported separately: code versioned, package released, code promoted,
   distributed. Distribution only on explicit request; file-imported visuals must be re-imported
   per report.
@@ -7208,6 +7785,8 @@ candidate tree exactly, with no unstaged edits and no untracked non-ignored file
 - `gh pr merge --admin`, `az repos pr update --bypass-policy`, approving or voting on your own
   pull request.
 - Writing to Prod after a merge; modifying or deleting existing release pairs.
+- Removing a worktree by hand (`git worktree remove --force`, `git worktree prune`): cleanup goes
+  through `Remove-PbivizPromotionWorktree`, and a refusal is reported, not overridden.
 - Plain Dev -> Prod pull requests for a single-visual release.
 - Glob pathspecs for user paths; editing visual source or `visual.version` (082/085 own them).
 
@@ -8617,7 +9196,7 @@ $agentKnowledge = @{
             'Planner (081) first, except bounded maintenance audits (085) and pure ALM requests (086). Require the PBIVIZ_PLAN in its payload (archetype, grain, roles, measure aggregation classes, interactions, acceptance cases) before implementation.',
             'One writer per visual: 082 for new/feature work OR 085 for maintenance, never both on the same visual. Name the version-bump owner (082 or 085) in every implementation WORK ORDER; 086 verifies versions and never edits them.',
             'After a build dispatch 083 (Tester) and 084 (Reviewer) in parallel - both are read-only on the project. Route failures back to the writer as a prioritised defect list; keep fix cycles bounded.',
-            'ALM work goes to 086 only, never concurrently with 082/085 on the same visual. 086 starts every task with `Get-PbivizRepoState` from `.github/agent-docs/Pbiviz-Alm.ps1`; Level 1 (local), Level 2 (remote) and Level 3 (DEV/TEST/PROD) are derived from the repository, not assumed.',
+            'ALM work goes to 086 only, never concurrently with 082/085 on the same visual. 086 starts every task with `Get-PbivizRepoState` from `.github/agent-docs/Pbiviz-Alm.ps1`; Level 1 (local), Level 2 (remote) and Level 3 (DEV/TEST/PROD) are derived from the repository, not assumed. For a release, pass 083''s lint/unit/host/certification results, 084''s REVIEW VERDICT (with the reviewed source commit) and the toolchain versions to 086 verbatim - missing evidence stays missing and the release is recorded as validated: false.',
             'Keep the quality labels separate - CODE REVIEWED / BUILT / HOST TESTED / CERTIFICATION READY / MICROSOFT CERTIFIED - each with its own evidence; host checks stay NOT RUN unless executed in Power BI Desktop or Service.',
             'Report integration (importing a released `.pbiviz` into a PBIR report, report QA) is handed back to the Master for 020 (022 import, 026 QA); never call another team''s workers.',
             'Return one WORK RESULT: project path, changed paths, toolchain provenance (node / npm / pbiviz versions), commands with exit codes, package SHA-256 if built, quality labels, the Git level and commit/remote state from 086, open approvals.'
@@ -8679,13 +9258,14 @@ $agentKnowledge = @{
         )
         playbook = @(
             'Work only in the project path from the WORK ORDER (inside the configured PBIVIZ folder). Read pbiviz.json, package.json, capabilities.json, src/visual.ts, the formatting model, styles and the lockfile before changing anything.',
-            'Toolchain: read tool-status keys node, npm and pbivizCli; run commands FROM the visual folder with the project-local CLI (`node_modules/.bin/pbiviz`, or `npx --no pbiviz` which refuses to download); check `node --version` and `pbiviz --help` before version-sensitive flags.',
-            'First-time `pbiviz new` (it runs `npm install` automatically) and any `npm install` / `npm ci` that downloads packages need `APPROVED:INSTALL:<visual>` in your WORK ORDER; without it return NEEDS APPROVAL.',
+            'Toolchain rule: detect first, obtain approval before installation or download, prefer the project-local toolchain, and never silently acquire or execute missing packages. Read tool-status keys node, npm and pbivizCli; run commands FROM the visual folder with the project-local CLI (`npx --no pbiviz <command>`, which refuses to download, or `node_modules/.bin/pbiviz`); check `node --version` and `pbiviz --help` before version-sensitive flags.',
+            'First-time `pbiviz new` (it runs `npm install` automatically) and any `npm install` / `npm ci` that downloads packages need `APPROVED:INSTALL:<visual>` in your WORK ORDER; without it return NEEDS APPROVAL. With it, scaffold as `npm exec --yes --package=powerbi-visuals-tools@<pinned version> -- pbiviz new <Name>` (APPROVED:INSTALL given).',
             'Implement data roles, mappings, the IVisual update, the formatting model and styles consistently; treat an optional DataView as absent until checked and render an explicit empty state; no eval, innerHTML or unapproved network calls.',
             'When the Lead names you the version-bump owner and a new distributable is intended, bump `visual.version` in pbiviz.json in this same WORK ORDER; never touch `visual.guid`.',
             'Before `pbiviz package` list `dist/*.pbiviz` and `releases/`; if `<guid>.<version>.pbiviz` already exists anywhere, stop (never overwrite). Package writes `dist/<guid>.<version>.pbiviz`; record its SHA-256 and size.',
             'Run lint, tests and package from the visual folder and capture commands with exit codes. Fix only defects the Lead prioritised. Never commit, push or write `releases/` - that is 086.',
-            'Per-project pbiviz MCP only on request: `pbiviz mcp --init` inside the visual writes `<visual>/.vscode/mcp.json` (server `pbiviz`, `npx -y powerbi-visuals-tools mcp`). It resolves the project-local package when installed; otherwise it would download, which needs APPROVED:INSTALL. Never edit the workspace `.vscode/mcp.json`.'
+            'Per-project pbiviz MCP only on request: write `<visual>/.vscode/mcp.json` with the project-local server `"pbiviz": { "type": "stdio", "command": "node", "args": ["${workspaceFolder}/node_modules/powerbi-visuals-tools/bin/pbiviz.js", "mcp"] }`, which fails instead of downloading when the package is not installed. `pbiviz mcp --init` generates `npx -y powerbi-visuals-tools mcp`: never keep that generated command. Never edit the workspace `.vscode/mcp.json`.',
+            'Report toolchain evidence for 086 exactly as observed: `powerbi-visuals-tools` version (project-local), `node --version`, build command and exit code; never fill a missing value.'
         )
         validate = @(
             'Build/package exit codes recorded; package path, version and SHA-256 reported, or NOT BUILT.',
@@ -8696,7 +9276,7 @@ $agentKnowledge = @{
             'Project-local pbiviz CLI (`node_modules/.bin/pbiviz` or `npx --no pbiviz`) and node/npm from tool-status; edit only inside the assigned visual folder.',
             'microsoftDocs/* for current SDK/API contracts; pbiviz/* advisory tools only after `list_visual_info` returns this project''s GUID, otherwise label the result NOT VERIFIED.'
         )
-        avoid = @('Committing, pushing, branching or writing `releases/` (086).', '`npx -y`, global installs or any download without APPROVED:INSTALL.', 'Editing another visual''s folder or a visual 085 currently owns.', 'Rotating the GUID or deleting/overwriting existing .pbiviz files.')
+        avoid = @('Committing, pushing, branching or writing `releases/` (086).', 'No `npx -y`, plain `npx <name>`, global installs or any download without APPROVED:INSTALL.', 'Editing another visual''s folder or a visual 085 currently owns.', 'Rotating the GUID or deleting/overwriting existing .pbiviz files.')
     }
     'pbiviz-tester-agent' = @{
         skills = @(
@@ -8711,7 +9291,7 @@ $agentKnowledge = @{
             'T2 semantic: fixtures for blank/null, negative/zero, percentages, currency, sort, Top-N/Last-N, date hierarchy, additive vs non-additive measures and filters; a re-aggregation must never turn monthly YTD into a sum.',
             'T3 host: Power BI Desktop/Service smoke tests (selection, bookmarks, tooltip, context menu, resize, format persistence, high contrast) - PASS only when actually executed in a host, otherwise NOT RUN.',
             'T4 performance: compare like for like (same report, query and data volume) or mark NOT MEASURED.',
-            'Report in validation: Executed (commands + exit codes), PASS, FAIL (case id, observed vs expected, repro, severity), NOT RUN (why), package safety; verdict PASS | FAIL | INCOMPLETE.'
+            'Report in validation: Executed (commands + exit codes), PASS, FAIL (case id, observed vs expected, repro, severity), NOT RUN (why), package safety; verdict PASS | FAIL | INCOMPLETE. Also give the release keys exactly as observed - lint, unit, host, certification, each PASS | FAIL | NOT RUN - for 086; never PASS without an executed command or host observation.'
         )
         validate = @('Every PASS has an executed command or a host observation; host-only cases without host evidence are NOT RUN.', 'Existing dist/ and releases/ files are unchanged by your run.')
         tools = @('execute: project scripts and the project-local pbiviz CLI from the visual folder; read-only on source.', 'microsoftDocs/* for expected host behaviour; pbiviz/* advisory only with a matching GUID.')
@@ -8731,7 +9311,7 @@ $agentKnowledge = @{
             'Host API: selection identities, bookmarks, clear, cross-highlight, tooltips, keyboard and high contrast, responsiveness.',
             'Security and licences: no unsanitised HTML, eval, unsafe dependencies or unapproved external calls; imported code and CDN dependencies have compatible licences.',
             'Release evidence: GUID stable, version bump owned, lockfile preserved, existing release pairs untouched; every pbiviz MCP result cited carries a matching GUID, otherwise NOT VERIFIED.',
-            'Return REVIEW VERDICT: APPROVE | BLOCK | APPROVE WITH NONBLOCKING NOTES with blockers (path/line, impact, fix), non-blockers, evidence gaps and docs checked - verbatim in the WORK RESULT `payload`.'
+            'Return REVIEW VERDICT: APPROVE | BLOCK | APPROVE WITH NONBLOCKING NOTES with blockers (path/line, impact, fix), non-blockers, evidence gaps and docs checked - verbatim in the WORK RESULT `payload`. State the visual and the FULL source commit SHA you reviewed: a release records your verdict only for that exact commit.'
         )
         validate = @('Each blocker has a path and a concrete impact; missing evidence is listed as a gap, never as a pass.')
         tools = @('read/search only; microsoftDocs/* to check current API and certification requirements.')
@@ -8769,10 +9349,10 @@ $agentKnowledge = @{
             'Level 1: status, diff, history. Checkpoint = stage one visual by path, show the staged list, check Git identity, commit `<visual>: <summary> (v<version>)`; refuse when unrelated visuals are staged. Restore = `git restore --source=<sha> -- <paths>` or `git revert <sha>`.',
             'Level 2 connect (`APPROVED:CONNECT:<url>`): `Test-PbivizRemoteUrl`, `git ls-remote --symref`, then `Connect-PbivizRemoteHistory -Fetch`; it applies the adoption case table (empty remote, related history, unrelated history merged with clean abort, unborn + empty, unborn + files = NEEDS CHECKPOINT) and asserts the outcome. Push only with `APPROVED:PUSH:<branch>`; daily sync = one-branch fetch + ff-only merge.',
             'Level 3 migration (`APPROVED:BRANCHES:<repo>`): create PBVIZ_Team_Dev at origin/main and PBVIZ_Team_Prod at the user-confirmed commit (or empty), PBVIZ_Team_Test only on request; `main` untouched; branch policies as a checklist, applied only with `APPROVED:POLICY:<branch>` and provider permission.',
-            'Selective promotion: `New-PbivizPromotionCandidate` (temp worktree from Prod, source-scope file lists, never releases/), build and test in the worktree under the candidate state contract, `Add-PbivizRelease -Worktree`, `Test-PbivizPromotionGates` (G0-G6 must all PASS), commit on the release branch, then push / open the PR only with `APPROVED:PUSH` and `APPROVED:PR`.',
+            'Selective promotion: `New-PbivizPromotionCandidate` (temp worktree from Prod, source-scope file lists, never releases/), build and test in the worktree under the candidate state contract, `Add-PbivizRelease -Worktree` with the evidence exactly as received (`-Tests` lint/unit/host/certification from 083, `-Review` reviewer/verdict/sourceSha from 084, `-ToolsVersion` / `-NodeVersion` from 082/085 - never fill a gap; a missing item leaves `validated: false`), `Test-PbivizPromotionGates` (G0-G6 must all PASS), commit on the release branch, then push / open the PR only with `APPROVED:PUSH` and `APPROVED:PR`.',
             'Merge only with `APPROVED:MERGE:<repo>#<pr>` AND the provider reporting every required review and check satisfied (`gh pr view --json reviewDecision,mergeStateStatus,statusCheckRollup` or `az repos pr policy list`); never `--admin`, never `--bypass-policy`, never vote on your own PR.',
-            'After the merge write nothing to Prod: report the Prod commit from `Get-PbivizReleaseProvenance`, verify it with `Test-PbivizReleaseIntegrity`, tag only with `APPROVED:TAG` and provider permission, then `Remove-PbivizPromotionWorktree`.',
-            'Level 1/2 official release: `Add-PbivizRelease -Root` on a clean tree adds the new release pair. Legacy dist packages are archived only on request, per visual (`Add-PbivizLegacyArchive`, validated: false).',
+            'After the merge write nothing to Prod: report the Prod commit from `Get-PbivizReleaseProvenance`, verify it with `Test-PbivizReleaseIntegrity` (report CommitEvidence and SourceRevision separately; NOT AVAILABLE is not VERIFIED), tag only with `APPROVED:TAG` and provider permission, then `Remove-PbivizPromotionWorktree` (a committed candidate is removed without force; an uncommitted one only with `-DiscardApproval APPROVED:DISCARD-CANDIDATE:<branch>` from the user; a refusal is final - report it, never force).',
+            'Level 1/2 official release: `Add-PbivizRelease -Root` on a clean tree adds the new release pair, with the same evidence parameters. Legacy dist packages are archived only on request, per visual (`Add-PbivizLegacyArchive`, validated: false; a package whose content does not match its file name is skipped).',
             'Report the four states separately - code versioned, package released, code promoted, distributed; distribution only on explicit request (`APPROVED:DISTRIBUTE:<destination>`).'
         )
         validate = @(
@@ -9588,7 +10168,7 @@ if (-not (Test-Path $gitignorePath)) {
 Write-ManagedFile "$rootPath\.github\agent-docs\Pbiviz-Alm.ps1" $pbivizAlmScript
 Write-Host "  Written: .github/agent-docs/Pbiviz-Alm.ps1" -ForegroundColor Green
 $mcpMerge = Merge-McpJson -Path "$rootPath\.vscode\mcp.json"
-Write-Host "  .vscode/mcp.json: $($mcpMerge.Status)" -ForegroundColor $(if ($mcpMerge.Status -match 'malformed|unexpected') { 'Yellow' } else { 'Green' })
+Write-Host "  .vscode/mcp.json: $($mcpMerge.Status)" -ForegroundColor $(if ($mcpMerge.Status -match 'malformed|unexpected|manually') { 'Yellow' } else { 'Green' })
 
 $pbivizInitStatus = $null
 $pbivizInit = $null

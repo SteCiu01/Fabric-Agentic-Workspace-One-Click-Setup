@@ -54,4 +54,20 @@ Describe 'Version single source of truth' {
         # No other version string may linger in the launcher.
         ([regex]::Matches($bat, 'v\d+\.\d+\.\d+') | ForEach-Object { $_.Value } | Sort-Object -Unique) | Should -Be @("v$ver")
     }
+
+    It 'release status agrees across CHANGELOG, README and SECURITY.md (an unreleased version is never "supported")' {
+        $ver = $script:Manifest.productVersion
+        $changelog = Get-Content (Join-Path $PSScriptRoot '..\CHANGELOG.md') -Raw
+        $readme = Get-Content (Join-Path $PSScriptRoot '..\README.md') -Raw
+        $security = Get-Content (Join-Path $PSScriptRoot '..\SECURITY.md') -Raw
+        $row = @(($security -split "`r?`n") | Where-Object { $_ -match "^\|\s*v$([regex]::Escape($ver))\b" })
+        $row.Count | Should -Be 1 -Because 'SECURITY.md must state the support status of the current version'
+        if ($changelog -match ("(?m)^## \[v" + [regex]::Escape($ver) + "\] - Unreleased")) {
+            $row[0] | Should -Not -Match 'white_check_mark' -Because 'an unreleased candidate is not a supported release'
+            $row[0] | Should -Match 'not published'
+            $readme | Should -Match 'development candidate' -Because 'the README must not present an unreleased version as released'
+        } else {
+            $row[0] | Should -Match 'white_check_mark' -Because 'a released version is the supported one'
+        }
+    }
 }
