@@ -413,3 +413,99 @@ Describe 'Generated configuration (settings, docs, status script)' {
         }
     }
 }
+
+Describe 'Generated PBIVIZ capability (helper, skills, MCP)' {
+
+    BeforeAll {
+        $script:HelperPath = Join-Path $script:EmitDir '.github\agent-docs\Pbiviz-Alm.ps1'
+        $tokens = $null; $errors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile($script:HelperPath, [ref]$tokens, [ref]$errors) | Out-Null
+        $script:HelperErrors = @($errors)
+        # Code only (comments dropped), argument arrays collapsed so @('reset', '--hard') reads 'reset --hard'.
+        $code = (@($tokens | Where-Object { $_.Kind -ne 'Comment' }) | ForEach-Object { $_.Text }) -join ' '
+        $script:HelperCode = [regex]::Replace($code, "'\s*,\s*'", ' ')
+        $script:HelperStrings = @($tokens | Where-Object { $_ -is [System.Management.Automation.Language.StringToken] } | ForEach-Object { $_.Value })
+        $script:Banned = @('switch -C', 'checkout -B', 'branch -f', 'branch -D', 'reset --hard', 'clean -f', 'push --force', 'push -f', '--force-with-lease', '--admin', '--bypass-policy', 'update-ref refs/heads', 'tag -f')
+    }
+
+    It 'emits Pbiviz-Alm.ps1 byte-identical to the installer heredoc, and it parses' {
+        Test-Path -LiteralPath $script:HelperPath | Should -BeTrue
+        $script:HelperErrors.Count | Should -Be 0
+        $raw = [IO.File]::ReadAllText($script:Installer)
+        $m = [regex]::Match($raw, "(?s)\`$pbivizAlmScript = @'\r?\n(.*?)\r?\n'@")
+        [IO.File]::ReadAllText($script:HelperPath) | Should -BeExactly $m.Groups[1].Value
+    }
+
+    It 'the helper contains no destructive Git command (<_>)' -ForEach @('switch -C', 'checkout -B', 'branch -f', 'branch -D', 'reset --hard', 'clean -f', 'push --force', 'push -f', '--force-with-lease', '--admin', '--bypass-policy', 'update-ref refs/heads', 'tag -f') {
+        $script:HelperCode | Should -Not -MatchExactly ([regex]::Escape($_))
+    }
+
+    It 'the helper never pushes, merges into protected branches or creates PRs' {
+        $script:HelperStrings.Count | Should -BeGreaterThan 100
+        $script:HelperStrings | Should -Not -Contain 'push'
+        $script:HelperCode | Should -Not -MatchExactly '\bgh\s+pr\b|az\s+repos\s+pr'
+    }
+
+    It 'the helper never passes a literal glob or magic pathspec to Git' {
+        @($script:HelperStrings | Where-Object { $_ -like ':(*' }).Count | Should -Be 0 -Because 'magic pathspecs are never used'
+        $script:HelperCode | Should -Not -Match "--\s+['""]?[^'""\s$]*[*?\[]" -Because 'user paths go through --pathspec-from-file with literal pathspecs, never a glob after --'
+        $script:HelperCode | Should -Match 'GIT_LITERAL_PATHSPECS'
+    }
+
+    It 'the helper invokes Git only through Invoke-PbivizGit and writes files without Set-Content/Out-File/Add-Content' {
+        $script:HelperCode | Should -Not -Match '(?<![\w''])&\s+[''"]?git(\.exe)?[''"]?\s'
+        $script:HelperCode | Should -Not -Match 'Start-Process'
+        $script:HelperCode | Should -Not -Match '\b(Set-Content|Out-File|Add-Content)\b'
+        $script:HelperCode | Should -Match 'function Invoke-PbivizGit'
+    }
+
+    It 'the release skill names banned commands only under its "## Never" section' {
+        $skill = Join-Path $script:EmitDir '.github\skills\pbiviz-alm-release\SKILL.md'
+        Test-Path -LiteralPath $skill | Should -BeTrue
+        $sections = [regex]::Split([IO.File]::ReadAllText($skill), '(?m)^(?=## )')
+        @($sections | Where-Object { $_ -match '^## Never' }).Count | Should -Be 1
+        foreach ($s in ($sections | Where-Object { $_ -notmatch '^## Never' })) {
+            foreach ($b in $script:Banned) { $s | Should -Not -MatchExactly ([regex]::Escape($b)) -Because "'$b' may only appear under ## Never" }
+        }
+    }
+
+    It 'emits all six PBIVIZ skills' {
+        foreach ($n in 'pbiviz-pbip-reconstruction', 'pbiviz-source-conversion', 'pbiviz-ibcs-semantic-contract', 'pbiviz-interaction-regression', 'pbiviz-release-safety', 'pbiviz-alm-release') {
+            Test-Path -LiteralPath (Join-Path $script:EmitDir ".github\skills\$n\SKILL.md") | Should -BeTrue -Because $n
+        }
+    }
+
+    It 'adds the Microsoft Learn MCP server to .vscode/mcp.json and keeps it out of the installer-managed purge list' {
+        $p = Join-Path $script:EmitDir '.vscode\mcp.json'
+        Test-Path -LiteralPath $p | Should -BeTrue
+        $j = [IO.File]::ReadAllText($p) | ConvertFrom-Json
+        $j.servers.microsoftDocs.url | Should -Be 'https://learn.microsoft.com/api/mcp'
+        $man = [IO.File]::ReadAllText((Join-Path $script:EmitDir '.github\agent-docs\installed-manifest.json')) | ConvertFrom-Json
+        @($man.files | ForEach-Object { $_.path }) | Should -Contain '.github/agent-docs/Pbiviz-Alm.ps1'
+        @($man.files | ForEach-Object { $_.path }) | Should -Not -Contain '.vscode/mcp.json'
+    }
+
+    It 'emit mode creates no PBIVIZ folder and no machine mapping' {
+        Test-Path -LiteralPath (Join-Path $script:EmitDir '.github\agent-docs\local\pbiviz-workspace.json') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $script:EmitDir '0 - PBIVIZ Developing Environment') | Should -BeFalse
+    }
+
+    It 'grants pbiviz/* to the PBIVIZ team only and microsoftDocs/* to executives, leads and PBIVIZ specialists' {
+        foreach ($agent in $script:Manifest.agents) {
+            $slug = $agent.filename -replace '^\d+-', ''
+            $tools = @($script:GenBySlug[$slug].Tools)
+            if ($agent.department -eq 'pbiviz-development') { $tools | Should -Contain 'pbiviz/*' -Because $agent.filename }
+            else { $tools | Should -Not -Contain 'pbiviz/*' -Because $agent.filename }
+            if ($agent.level -in @('executive', 'team-lead')) { $tools | Should -Contain 'microsoftDocs/*' -Because $agent.filename }
+        }
+    }
+
+    It 'routes .pbiviz SDK work to 080 and keeps 024 on in-report visuals' {
+        $lead = $script:GenBySlug.Keys | Where-Object { $_ -like 'pbiviz-development-team-lead*' } | Select-Object -First 1
+        $lead | Should -Not -BeNullOrEmpty
+        $adv = $script:GenBySlug.Keys | Where-Object { $_ -like 'advanced-custom-visuals*' } | Select-Object -First 1
+        $advBody = Get-Content -LiteralPath $script:GenBySlug[$adv].Path -Raw
+        $advBody | Should -Match 'PBIVIZ Development Team Lead'
+        $advBody | Should -Not -Match 'powerbi-custom-visuals/SKILL\.md'
+    }
+}

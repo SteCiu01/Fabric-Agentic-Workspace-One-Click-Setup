@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [v0.8.0] - Unreleased
+
+A feature release adding Power BI custom visual (`.pbiviz`) development as an eighth team, with three levels of Git versioning for custom visual projects. The organisation grows from 47 to 54 agents (3 executives, 8 Team Leads, 43 workers).
+
+### Added
+
+- **080 - PBIVIZ Development Team Lead** with six workers: 081 Planner, 082 Developer, 083 Tester, 084 Reviewer (read-only), 085 Maintainer, 086 ALM & Release. The Master and the Architect can route to the new lead.
+- **Six embedded skills**: `pbiviz-pbip-reconstruction`, `pbiviz-source-conversion`, `pbiviz-ibcs-semantic-contract`, `pbiviz-interaction-regression`, `pbiviz-release-safety`, `pbiviz-alm-release`.
+- **Optional PBIVIZ folder** (Step 1, default `0 - PBIVIZ Developing Environment`), created in Step 3 and initialised in Step 8 as its own local Git repository on `main` (Level 1). A baseline commit is made only when the folder was empty and a Git identity exists; an existing repository is reused and never committed to. OneDrive-synced paths ask first (default No); Git older than 2.28, nested repositories, `.git` files and folders tracked by the outer repository stop with a reason. The outer `.gitignore` ignores the folder, and the decision is recorded in the gitignored `local/pbiviz-workspace.json`.
+- **`Pbiviz-Alm.ps1`**, a deterministic Git helper shipped to `.github/agent-docs/` and used by 086:
+  - Level 2 remote adoption keeps both histories (unrelated histories merged with both roots, conflicts aborted with nothing changed, fast-forward only for related history, backup refs before any branch moves, no tags fetched, strict post-condition checks).
+  - Level 3 single-visual promotion from `PBVIZ_Team_Dev` to `PBVIZ_Team_Prod` through a candidate branch in a temporary worktree, gated by G0-G6 (input, scope, other visuals, version, GUID and an archive gate on the full staged diff), with append-only release pairs (`.pbiviz` + `.release.json`, which records allowlisted shared files by blob id) and post-merge provenance derived for merge, squash and rebase merges.
+  - Never pushes, merges into protected branches, forces, resets or uses admin bypass.
+- **Microsoft Learn MCP** (`microsoftDocs`) merged into `.vscode/mcp.json` when missing, without touching existing servers; granted to the executives, all Team Leads and the PBIVIZ specialists. `pbiviz/*` is granted to the PBIVIZ team only.
+- **Step 2 detection** (no installs): Node.js (warns below 20.19.0), npm, a global `pbiviz` (not required) and the Git identity.
+- **Status line**: Step 9 and the session status script print `PBIVIZ <folder> | n visual(s) | git: ... | Level n`.
+
+### Changed
+
+- **024 - Advanced & Custom Visuals Agent** now covers in-report Deneb, SVG, Python and R visuals only and returns `.pbiviz` SDK work to 080.
+- **Reporting** imports custom visual packages only from a visual's `releases/` folder; **050 - ALM & DevOps** leaves day-to-day Git of the PBIVIZ repository to 086.
+- The session status script skips informational `pbiviz-info` entries when re-checking tools.
+
+### Tests and Validation
+
+- Added `PBIVIZ.Alm.Tests.ps1`: the shipped helper against throwaway local repositories and bare remotes under TEMP (remote adoption cases, adoption post-conditions, archive protection, selective promotion, pathspec-independent archive gate, binary-safe file lists, candidate worktree state, provenance after merge, squash and rebase, release pairs and legacy archive).
+- Added `PBIVIZ.Install.Tests.ps1`: Step 1 prompt flows through the real installer, folder-name validation, the Level 1 decision tree, the outer ignore rule, the `mcp.json` merge and the status line.
+- Extended `Generated.Tests.ps1` (helper parses, contains no destructive Git command, invokes Git only through one function; skills, MCP grants and routing) and `SessionStatus.Tests.ps1` (PBIVIZ line, `pbiviz-info` skip). Manifest and hierarchy tests updated to 54 agents.
+
+This remains a **prerelease**.
+
 
 ## [v0.7.3] - 2026-10-21
 

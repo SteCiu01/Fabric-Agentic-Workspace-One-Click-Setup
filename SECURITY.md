@@ -9,8 +9,8 @@ Security fixes and maintenance updates are targeted at the latest prerelease ver
 
 | Version | Supported |
 |---|---|
-| v0.7.3 (current prerelease) | :white_check_mark: |
-| v0.7.2 and earlier prereleases | :x: — Upgrade recommended |
+| v0.8.0 (current prerelease) | :white_check_mark: |
+| v0.7.3 and earlier prereleases | :x: — Upgrade recommended |
 
 Users are encouraged to keep their workspace up to date by downloading the latest installer and re-running the setup process.
 

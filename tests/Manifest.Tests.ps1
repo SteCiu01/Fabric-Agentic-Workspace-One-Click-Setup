@@ -15,14 +15,14 @@ Describe 'Manifest - structure' {
         $script:manifest.productVersion | Should -Match '^\d+\.\d+\.\d+$'
     }
 
-    It 'defines exactly 47 agents' {
-        $script:agents.Count | Should -Be 47
+    It 'defines exactly 54 agents' {
+        $script:agents.Count | Should -Be 54
     }
 
-    It 'has the expected tier counts (3 executive, 7 team-lead, 37 worker)' {
+    It 'has the expected tier counts (3 executive, 8 team-lead, 43 worker)' {
         ($script:agents | Where-Object level -eq 'executive').Count | Should -Be 3
-        ($script:agents | Where-Object level -eq 'team-lead').Count  | Should -Be 7
-        ($script:agents | Where-Object level -eq 'worker').Count     | Should -Be 37
+        ($script:agents | Where-Object level -eq 'team-lead').Count  | Should -Be 8
+        ($script:agents | Where-Object level -eq 'worker').Count     | Should -Be 43
     }
 }
 

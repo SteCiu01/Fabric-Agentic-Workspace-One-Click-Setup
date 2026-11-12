@@ -12,13 +12,15 @@ Contributions and feedback welcome.
 > - **What** — a one-click installer that scaffolds an opinionated Microsoft Fabric development workspace in VS Code.
 > - **Who it's for** — anyone working in Fabric (semantic models, data engineering, reports, pipelines, admin, app dev, DevOps) who wants Copilot agents that already know the right tools and house conventions.
 > - **How to run** — double-click `Setup-FabricAgenticWorkspace.bat`, answer a few prompts, and let it scaffold.
-> - **What you get** — a numbered 47-agent organisation (10 clear dropdown entries + 37 delegated workers), three embedded Fabric skills, two curated open-source skill sources, optional CLI/MCP tooling, optional GitHub/Azure DevOps repository onboarding, and governed DEV→PROD guidance.
+> - **What you get** — a numbered 54-agent organisation (11 clear dropdown entries + 43 delegated workers), nine embedded skills (three for Fabric, six for Power BI custom visual development), two curated open-source skill sources, optional CLI/MCP tooling, an optional custom visual (`.pbiviz`) folder with its own local Git history, optional GitHub/Azure DevOps repository onboarding, and governed DEV→PROD guidance.
 
 > Windows installer (PowerShell + `.bat`); the workspace itself is OS-agnostic once created.
 
 <p align="center">
   <img src="assets/architecture-overview.png" alt="Fabric Agentic Workspace — Architecture Overview" width="100%"/>
 </p>
+
+> The overview image shows the v0.7 organisation (historical: it predates the PBIVIZ team). The current organisation chart is in [3.4](#34-the-agent-organisation).
 
 ---
 
@@ -49,6 +51,8 @@ Contributions and feedback welcome.
 - [2.4 Optional CLIs and MCP servers — what each unlocks](#24-optional-clis-and-mcp-servers--what-each-unlocks)
 - [2.5 Workspace structure](#25-workspace-structure)
 - [2.6 FAQ](#26-faq)
+- [2.7 Custom visual (.pbiviz) development](#27-custom-visual-pbiviz-development)
+- [2.8 Versioning custom visuals — three levels](#28-versioning-custom-visuals--three-levels)
 
 **Part 3 — Understand it** *(background and reference)*
 - [3.1 Why this exists](#31-why-this-exists)
@@ -61,7 +65,7 @@ Contributions and feedback welcome.
 - [3.8 How it works under the hood](#38-how-it-works-under-the-hood)
 - [3.9 A bit of history](#39-a-bit-of-history-how-fabricpower-bi-work-used-to-flow)
 - [3.10 Quality & validation](#310-quality--validation)
-- [3.11 Current status (v0.7.3)](#311-current-status-v073)
+- [3.11 Current status (v0.8.0)](#311-current-status-v080)
 - [3.12 Disclaimer](#312-disclaimer)
 - [Contributing](#contributing) · [Files in this repository](#files-in-this-repository) · [License](#license) · [Third-party notices](#third-party-notices)
 
@@ -87,6 +91,8 @@ The installer **stops** if a required item is missing. It **installs** the auto 
 | 🤖 Auto | **Fabric MCP server** `fabric.vscode-fabric-mcp-server` | Installer | VS Code extension; live/hybrid mode. |
 | 🤖 Auto | **Power BI semantic-model MCP** `analysis-services.powerbi-modeling-mcp` | Installer | VS Code extension; live DAX/model edits. |
 | ❓ Asks Y/N | `pbir`, Tabular Editor CLI, `pbi-tools`, `sqlcmd`, `gh`, `az devops` | Installer, only on **Yes** | See [2.4](#24-optional-clis-and-mcp-servers--what-each-unlocks). Declined = remembered, agents fall back. |
+| 🔎 Detected only | **Node.js 20.19+ and npm** | You — [nodejs.org](https://nodejs.org) (LTS) | Only for custom visual (`.pbiviz`) development. Reported in Step 2, never installed. Each visual uses its own project-local `powerbi-visuals-tools`; a global `pbiviz` is not required. |
+| 🔎 Detected only | **Git 2.28+ and a Git identity** (`user.name` / `user.email`) | You | Only for the optional PBIVIZ folder: older Git skips its repository; without an identity it is initialised but nothing is committed. |
 
 > **Full-local mode needs none of the 🤖 / ❓ items.** They power the live and hybrid ways of working ([2.2](#22-three-ways-of-working)). If a corporate policy blocks one, the installer prints a warning and continues.
 
@@ -97,9 +103,11 @@ The installer **stops** if a required item is missing. It **installs** the auto 
 
 **In your chosen workspace folder**
 - One sub-folder per Fabric workspace you choose to scaffold.
-- Installer-managed files: 47 agent definitions, 3 custom skills, `copilot-instructions.md`, `AGENTS.md`, `.vscode/` settings & tasks, `.github/agent-docs/` (status script, flow docs, `tool-status.json`). A `.gitignore` is written only if none exists; an existing one gets only the required exclusions appended.
+- Installer-managed files: 54 agent definitions, 9 custom skills, `copilot-instructions.md`, `AGENTS.md`, `.vscode/` settings & tasks, `.github/agent-docs/` (status script, PBIVIZ helper `Pbiviz-Alm.ps1`, flow docs, `tool-status.json`). A `.gitignore` is written only if none exists; an existing one gets only the required exclusions appended.
+- `.vscode/mcp.json`: the Microsoft Learn documentation MCP server (`microsoftDocs`, `https://learn.microsoft.com/api/mcp`) is **added** when no server with that URL exists. Your servers and inputs are kept; a malformed file is left untouched; the file is yours (never purged).
 - Two public clones (gitignored): [`microsoft/skills-for-fabric`](https://github.com/microsoft/skills-for-fabric) and [`data-goblin/power-bi-agentic-development`](https://github.com/data-goblin/power-bi-agentic-development). Already present → force-refreshed to upstream.
 - If you opt in: your business repositories under `source-control-repositories/` (independent Git repos, gitignored by the outer repo).
+- If you opt in: one PBIVIZ folder for custom visual projects (default `0 - PBIVIZ Developing Environment`), initialised as its **own** local Git repository on `main` and ignored by the outer repo. Existing visuals in it are never imported or committed automatically.
 - Git: a new repo gets an initial commit; an existing repo gets a commit limited to installer-owned paths.
 
 **On your system** — exactly the 🤖 and ❓ rows of the checklist above, nothing else. The installer never installs Git, VS Code or the authoring extensions.
@@ -138,6 +146,9 @@ Each step prints a banner `STEP n of 9 - <title>` and ends with `Press Enter to 
 | *Information screen:* **HOW THIS WORKSPACE WORKS — ONE LIFECYCLE, THREE WAYS** | read | Same content as [2.2](#22-three-ways-of-working) / [2.3](#23-the-fabric-development-lifecycle). |
 | `Number of workspaces (default: 1)` | how many Fabric workspaces you'll sync here | `0` is fine. |
 | `Name for Workspace n` | e.g. `Sales DEV` | One sub-folder each; the Fabric extension pulls items into them. |
+| `Create a dedicated folder for Power BI custom visual development? (y/N)` | `n` unless you build `.pbiviz` visuals | Optional — see [2.7](#27-custom-visual-pbiviz-development). |
+| *(y)* `Folder name (default: 0 - PBIVIZ Developing Environment)` | Enter for the default, or a single folder name | Paths, `..`, reserved names (`.github`, `.vscode`, the skill clones, `source-control-repositories`, `scripts`, workspace names from this run) and Windows device names are refused; five invalid answers skip it. An existing folder is reused, its contents untouched. |
+| *(re-run)* | — | Enabled and present → `PBIVIZ folder: <name> (kept)`, no question. Disabled → `PBIVIZ folder: not configured. Configure now? (y/N)`. Enabled but missing → `[R]ecreate / [C]hoose another name / [D]isable` (default R). An unreadable mapping file is preserved and PBIVIZ setup skipped. |
 | `Set up business source control now? (y/N)` | `n` unless you want Git repos cloned | Optional — see [Step 4](#step-4-of-9--business-source-control-repositories). |
 | *(y)* `How many repositories do you want to clone?` then `Clone URL (no PAT or password)` per repo | plain HTTPS/SSH clone URL from GitHub or Azure DevOps | Provider and folder name are derived from the URL. URLs with credentials are rejected. |
 
@@ -150,8 +161,9 @@ Runs mostly on its own. Order of events:
 3. **Optional specialist CLIs** — for each missing tool it prints provider + purpose and asks:
    `Install <tool> now? (Y/N)` for `pbir`, Tabular Editor CLI, `pbi-tools`, `sqlcmd`, `gh`, and `Install the azure-devops az extension now? (Y/N)`.
    **No** is remembered: it stays quiet on later runs. A tool you install yourself later is still detected.
-4. `Check installed tools for updates now? (y/N)` — default **No**. **Yes** shows Current / Update / Unverified per installed tool and asks per-tool before updating.
-5. Prints `All prerequisites OK.` (or the missing list and exits).
+4. **Custom visual development (detect only)** — Node.js (warns below 20.19.0, the floor of current `powerbi-visuals-tools`), npm, a global `pbiviz` (not required) and your Git identity. Nothing is installed; results go to `tool-status.json`.
+5. `Check installed tools for updates now? (y/N)` — default **No**. **Yes** shows Current / Update / Unverified per installed tool and asks per-tool before updating.
+6. Prints `All prerequisites OK.` (or the missing list and exits).
 
 Result: a tool inventory in memory, written to `.github/agent-docs/tool-status.json` in Step 8.
 
@@ -159,7 +171,7 @@ Result: a tool inventory in memory, written to `.github/agent-docs/tool-status.j
 
 ### Step 3 of 9 — Creating Folder Structure
 
-No prompts. Creates the workspace folder, the Fabric workspace sub-folders from Step 1, `.github/agents`, `.github/skills`, `.github/agent-docs`, `.vscode`, and `source-control-repositories/` if you opted in.
+No prompts. Creates the workspace folder, the Fabric workspace sub-folders from Step 1, `.github/agents`, `.github/skills`, `.github/agent-docs`, `.vscode`, `source-control-repositories/` if you opted in, and the PBIVIZ folder if you opted in (only the folder: existing contents are never touched).
 
 ### Step 4 of 9 — Business Source-Control Repositories
 
@@ -181,15 +193,27 @@ No prompts. Clones `skills-for-fabric` and `power-bi-agentic-development`; if th
 
 ### Step 6 of 9 — Writing Custom Skills
 
-No prompts. Writes the three maintainer-authored skills: `fabric-tmdl`, `fabric-pipelines`, `fabric-cli-policy` under `.github/skills/`.
+No prompts. Writes the nine maintainer-authored skills under `.github/skills/`: `fabric-tmdl`, `fabric-pipelines`, `fabric-cli-policy`, and six for custom visuals — `pbiviz-pbip-reconstruction`, `pbiviz-source-conversion`, `pbiviz-ibcs-semantic-contract`, `pbiviz-interaction-regression`, `pbiviz-release-safety`, `pbiviz-alm-release`.
 
 ### Step 7 of 9 — Writing Agent Definitions
 
-No prompts. Generates the 47 `.agent.md` files (10 visible + 37 workers), resolving each agent's pinned skill paths against the clones just refreshed (renamed folders matched by prefix, new upstream skills auto-attached by keyword). Then self-tests the generated set against the embedded manifest.
+No prompts. Generates the 54 `.agent.md` files (11 visible + 43 workers), resolving each agent's pinned skill paths against the clones just refreshed (renamed folders matched by prefix, new upstream skills auto-attached by keyword). Then self-tests the generated set against the embedded manifest.
 
 ### Step 8 of 9 — Writing Configuration Files
 
-Writes/merges `copilot-instructions.md`, `AGENTS.md`, `.gitignore` rules, `.vscode/settings.json` (merge — your keys survive, JSONC comments become values), `tool-status.json`, `guardrail-status.json`, `installed-manifest.json`, and purges files the installer shipped before but no longer ships.
+Writes/merges `copilot-instructions.md`, `AGENTS.md`, `.gitignore` rules, `.vscode/settings.json` (merge — your keys survive, JSONC comments become values), `.vscode/mcp.json` (adds the Microsoft Learn MCP server only if missing), `Pbiviz-Alm.ps1`, `tool-status.json`, `guardrail-status.json`, `installed-manifest.json`, and purges files the installer shipped before but no longer ships.
+
+**PBIVIZ folder (only if enabled in Step 1).** The outer `.gitignore` gets `/<folder>/` first, then the folder becomes its own repository (Level 1, see [2.8](#28-versioning-custom-visuals--three-levels)):
+
+| Situation | Result |
+|---|---|
+| Empty folder, Git identity set | `git init -b main`, `core.longpaths=true`, a `.gitignore`/`.gitattributes` for visual projects, one baseline commit (trailer `Fabric-Agentic-Installer: pbiviz-baseline`) |
+| Folder already had files, or no Git identity | Initialised, **no commit** — your files stay untracked until you commit them |
+| Already a repository | Reused as is — never re-initialised, never committed to |
+| Inside a OneDrive-synced path | Warning, then `Initialize Git here anyway? (y/N)` — default **No** (sync clients can corrupt `.git`) |
+| Git older than 2.28, nested repositories, a `.git` file, or files tracked by the outer repo | Stopped/skipped with the reason; nothing in the folder changes |
+
+The decision is recorded in the gitignored `.github/agent-docs/local/pbiviz-workspace.json` (keys added later by agents are preserved).
 
 **The one prompt that matters (v0.7.2):**
 
@@ -227,7 +251,7 @@ It never installs agents or skills anywhere else, never changes what built-in Co
 ### Step 9 of 9 — Finishing Up
 
 1. `git init` if needed; initial commit, or an update commit limited to installer-owned paths (skipped with a warning if `git user.name/email` is not set).
-2. `Setup complete! v0.7.3` and the workspace path.
+2. `Setup complete! v0.8.0` and the workspace path; with a PBIVIZ folder also `PBIVIZ: <folder> | n visual(s) | git: main, 1 commit(s), clean | Level 1 (local only - not an off-device backup)`.
 3. `Press Enter to open VS Code...` → opens the multi-root workspace.
 
 > Re-ran with VS Code already open? Run **Developer: Reload Window** so the agent dropdown rebuilds.
@@ -260,6 +284,7 @@ On your first message the Master runs **one** status script and shows **one** bl
 | Identity | `fab auth status` → `az account show`; informational, never blocking. |
 | Tools | Live re-check; refreshes `tool-status.json` if something was installed/removed since setup. |
 | MCP servers | *installed* vs *connected* — installed is never presented as callable. |
+| PBIVIZ | Only with a PBIVIZ folder: visuals found, Git branch/commits/clean state and the derived level (1 local, 2 remote, 3 team). |
 
 Then it routes your request to the owning Team Lead(s). You never switch agent for normal work; the only optional switch is the **Run capability maintenance** handoff.
 
@@ -309,6 +334,10 @@ TLS inspection, endpoint security, winget policy, PATH delays or missing elevati
 **Tabular Editor 2 or `pbi-tools` download is empty (0 bytes).** Known on TLS-inspection proxies: both ship only as GitHub-release ZIPs. The installer detects it and prints the exact portable link — download it yourself, drop the ZIP in Downloads, re-run setup to auto-pick it up. `az` had the same class of problem and is handled automatically.
 
 **`az` is slow to install.** Expected when it has to be installed from scratch; let it finish.
+
+**The PBIVIZ line says `local Git NOT initialized`.** The reason is in brackets: `synced path` (you declined Git inside OneDrive — recommended; move the workspace to a non-synced folder and re-run), `git <version> < 2.28.0` (upgrade Git and re-run), or a `stopped:` reason (nested repository, `.git` file, files tracked by the outer repo). Nothing in the folder was changed; ask **080 - PBIVIZ Development Team Lead** to resolve it.
+
+**The PBIVIZ line says `no commits yet`.** The folder already had files, or your Git identity was not set, so the installer made no commit. Ask the 080 team for a checkpoint (or `git add` / `git commit` yourself).
 
 **I want to check the installed workspace wasn't tampered with.** `Setup-FabricAgenticWorkspace.ps1 -VerifyRoot <folder>` re-hashes the managed files against `installed-manifest.json`.
 
@@ -402,22 +431,26 @@ Fabric Workspaces/
 │   │   ├── 000-fabric-workspace-master.agent.md        ← primary orchestrator
 │   │   ├── 001-fabric-solution-architect.agent.md
 │   │   ├── 002-integration-qa-change-controller.agent.md
-│   │   ├── 010-… 070-…-team-lead.agent.md              ← seven Team Leads
-│   │   └── <37 delegated worker .agent.md files>
+│   │   ├── 010-… 080-…-team-lead.agent.md              ← eight Team Leads
+│   │   └── <43 delegated worker .agent.md files>
 │   ├── agent-docs/
 │   │   ├── starting-flow.md                           ← lean session startup
 │   │   ├── working-flow-reference.md                  ← team protocol, routing, WORK ORDER/RESULT
 │   │   ├── Get-SessionStatus.ps1                      ← status script
+│   │   ├── Pbiviz-Alm.ps1                             ← deterministic PBIVIZ Git helper
 │   │   ├── local/repository-map.local.json            ← business-repo map (gitignored)
+│   │   ├── local/pbiviz-workspace.json                ← PBIVIZ folder mapping (gitignored)
 │   │   └── tool-status.json                           ← tool inventory (gitignored)
 │   ├── copilot-instructions.md
 │   └── skills/
 │       ├── fabric-tmdl/SKILL.md
 │       ├── fabric-pipelines/SKILL.md
-│       └── fabric-cli-policy/SKILL.md
+│       ├── fabric-cli-policy/SKILL.md
+│       └── pbiviz-*/SKILL.md                          ← six custom visual skills
 ├── .gitignore
-├── .vscode/  (settings.json, tasks.json)
+├── .vscode/  (settings.json, tasks.json, mcp.json)
 ├── AGENTS.md
+├── 0 - PBIVIZ Developing Environment/                 ← optional; its own Git repository (gitignored outside)
 ├── source-control-repositories/                       ← business clones (gitignored)
 ├── skills-for-fabric/                                 ← Microsoft skills (gitignored)
 ├── power-bi-agentic-development/                      ← data-goblin skills (gitignored)
@@ -446,6 +479,40 @@ Fabric Workspaces/
 
 **How does the workspace know which tools I have?** `.github/agent-docs/tool-status.json`, gitignored and machine-specific; agents read `<tool>.found` before invoking anything.
 
+## 2.7 Custom visual (.pbiviz) development
+
+Power BI custom visual SDK projects (TypeScript, `capabilities.json`, `pbiviz.json`, packaged `.pbiviz`) belong to **080 - PBIVIZ Development Team Lead**. In-report Deneb, SVG, Python and R visuals stay with **024** under the Reporting team.
+
+| Worker | Role |
+|---|---|
+| 081 Planner | Read-only: reconstructs the visual from a PBIP/report or an existing source, returns a `PBIVIZ_PLAN` (data roles, formatting, interactions, acceptance checks) |
+| 082 Developer | Scaffolds and edits one visual folder; uses the project-local `powerbi-visuals-tools` |
+| 083 Tester | Lint, unit, package and interaction-regression checks; reports anything it cannot run as `NOT RUN` |
+| 084 Reviewer | Read-only `REVIEW VERDICT` (semantic contract, IBCS rules, release safety) |
+| 085 Maintainer | API/tooling upgrades and dependency hygiene for existing visuals |
+| 086 ALM & Release | Every Git action on the PBIVIZ repository, through `Pbiviz-Alm.ps1` |
+
+**Layout.** One folder (default `0 - PBIVIZ Developing Environment`) holds every visual as a sub-folder (`<Visual>/pbiviz.json`, `src/`, `capabilities.json`, ...). Released packages live in `<Visual>/releases/` and are append-only; reports import packages **only** from there.
+
+**MCP.** The `pbiviz` MCP server is per project: run `pbiviz mcp --init` inside one visual folder and open that folder as a workspace root; the installer only records whether Node.js is present. The Microsoft Learn MCP (`microsoftDocs/*`) is granted to the executives, the eight Team Leads and the PBIVIZ specialists.
+
+## 2.8 Versioning custom visuals — three levels
+
+| Level | What you have | Who sets it up | What it protects |
+|---|---|---|---|
+| **1 — Local** | The PBIVIZ folder is its own Git repository on `main` | Installer (Step 8) | History, checkpoints and restore on this PC. **Not an off-device backup.** |
+| **2 — Remote** | The same repository connected to a GitHub or Azure DevOps remote | 086 on request, with approval | Off-device copy. Connecting **keeps both histories**: an independent remote is merged with both root commits preserved; conflicts abort the merge and leave everything as it was; a backup ref is written before any branch moves; tags are never fetched. |
+| **3 — Team** | `PBVIZ_Team_Dev` and `PBVIZ_Team_Prod` branches | Your team (protected branches, PRs) | Selective, reviewable promotion of **one visual at a time** to Prod. |
+
+**Level 3 promotion** (086, deterministic helper):
+1. A candidate branch `release/pbiviz/<visual>/<version>` is created from Prod in a temporary worktree; your own checkout is never touched and an existing branch is never moved.
+2. Only that visual's source is copied from Dev (plus explicitly allowlisted shared files); other visuals and every existing release archive are left byte-identical.
+3. Gates G0–G6 must all pass: valid input, clean scope, no other visual touched, version above Prod and every archived release, same GUID, and **no existing release file modified, renamed or deleted** — the full staged diff is checked, independent of pathspec settings.
+4. The packaged visual is added as a release pair (`<guid>.<version>.pbiviz` + `.release.json` with SHA-256, source fingerprint, allowlisted shared files and test results).
+5. The release branch is pushed and the PR to `PBVIZ_Team_Prod` opened only with your explicit approval (`APPROVED:PUSH`, `APPROVED:PR`); a merge needs `APPROVED:MERGE` **and** every required review and check reported satisfied by GitHub/Azure DevOps. The helper itself never pushes, merges, uses admin bypass or rewrites history; after the merge it **derives** the Prod commit (merge, squash or rebase) and verifies the archive — it never writes to Prod.
+
+Legacy packages already in `dist/` can be archived once as `releases/legacy/...` (marked `validated: false`).
+
 ---
 
 # Part 3 — Understand it
@@ -462,7 +529,7 @@ So I built a multi-agent workspace that brings everything together. A **master a
 
 As I went deeper I realised the **agent → tools → skills** chain matters as much as the agents themselves. So each agent now owns a **minimum, deterministic set of tools** — the right CLI for its workload and the MCP servers where they help — instead of a vague "all tools to everyone" pile. Tool availability is discovered once and recorded in a machine-specific `tool-status.json` inventory. An agent then checks what's actually installed, uses it if present, and **falls back cleanly when it isn't** — which is what keeps the whole thing working on locked-down corporate PCs. A custom **`fabric-cli-policy`** skill encodes the decision rule: prefer `fab`, with `az` as a documented fallback. And each agent loads **only the skills its current subtask needs**.
 
-This is a **starting point, not a finished system.** V0.6 evolved the previous nine-agent set into a **Master-led organisation**: two cross-domain reviewers, seven Team Leads, and 37 focused workers, plus a **Capability Maintenance** team. V0.7 fine-tunes how that organisation works together: nested delegation is configured by the installer, every agent carries specialist knowledge drawn from the custom, Microsoft and Kurt skills, the teams share one WORK ORDER / WORK RESULT contract, destructive work is gated behind explicit approval tokens, and the vendor skill refresh is more robust.
+This is a **starting point, not a finished system.** V0.6 evolved the previous nine-agent set into a **Master-led organisation**: two cross-domain reviewers, seven Team Leads, and 37 focused workers, plus a **Capability Maintenance** team. V0.7 fine-tunes how that organisation works together: nested delegation is configured by the installer, every agent carries specialist knowledge drawn from the custom, Microsoft and Kurt skills, the teams share one WORK ORDER / WORK RESULT contract, destructive work is gated behind explicit approval tokens, and the vendor skill refresh is more robust. V0.8 adds an eighth team for Power BI custom visual (`.pbiviz`) development, with its own six skills and a deterministic Git helper for local, remote and team-level versioning.
 
 Then I thought: *this should be replicable*. So I packaged everything into a one-click installer and a shareable agent configuration.
 
@@ -489,6 +556,31 @@ This workspace targets **VS Code GitHub Copilot Chat / Agent Mode**: the install
 
 ## 3.4 The agent organisation
 
+```mermaid
+flowchart TD
+    M[000 Fabric Workspace Master]
+    M --> A[001 Solution Architect]
+    M --> Q[002 Integration QA]
+    M --> L10[010 Semantic Model]
+    M --> L20[020 Reporting]
+    M --> L30[030 Data Engineering]
+    M --> L40[040 Administration & Governance]
+    M --> L50[050 ALM & DevOps]
+    M --> L60[060 Applications & Integration]
+    M --> L70[070 Capability Maintenance]
+    M --> L80[080 PBIVIZ Development]
+    L10 --> W10[011-016 six workers]
+    L20 --> W20[021-026 six workers]
+    L30 --> W30[031-038 eight workers]
+    L40 --> W40[041-043 three workers]
+    L50 --> W50[051-055 five workers]
+    L60 --> W60[061-063 three workers]
+    L70 --> W70[071-076 six workers]
+    L80 --> W80[081-086 six workers]
+```
+
+11 dropdown entries (Master, two reviewers, eight Team Leads) and 43 delegated workers.
+
 | Component | Description |
 |---|---|
 | **000 — Fabric Workspace Master** | Startup, intent classification, working-mode choice, minimum-team routing, one-writer ownership, one consolidated result |
@@ -501,12 +593,14 @@ This workspace targets **VS Code GitHub Copilot Chat / Agent Mode**: the install
 | **050 — ALM & DevOps Team Lead** | GitHub, Azure DevOps, Fabric Git Integration, deployments/releases, Power BI ALM |
 | **060 — Applications & Integration Team Lead** | Python/Fabric SDK, REST/authentication/XMLA, SQL/ODBC, data-access integrations |
 | **070 — Capability Maintenance Team Lead** | Vendor repo refresh, skill and agent coverage, tool lifecycle, failed-install recovery, installer regression |
+| **080 — PBIVIZ Development Team Lead** | Power BI custom visual SDK projects: planning, development, testing, review, maintenance, and Git/release work on the PBIVIZ repository ([2.7](#27-custom-visual-pbiviz-development)) |
 | **Custom TMDL / Pipelines / CLI-policy skills** *(original to this repo)* | TMDL syntax & validation; pipeline activity reference; `fab`-first / `az`-fallback decision policy |
+| **Custom PBIVIZ skills** *(original to this repo)* | PBIP reconstruction, source conversion, IBCS semantic contract, interaction regression, release safety, ALM & release |
 | **Microsoft skills-for-fabric** | Spark, SQL, Eventhouse, medallion, and more |
 | **Data-goblin skills** by [Kurt Buhler](https://www.linkedin.com/in/kurtbuhler/) | PBIP, DAX, reports, Fabric CLI, Fabric admin |
 | **Git version control** · **Business repository onboarding** · **VS Code configuration** | See Part 1 |
 
-Each of the 47 agents is generated from a **knowledge catalog** in the installer: **Knowledge and skills** (owned artifacts, write permission, resolved skill paths + keyword-discovered upstream skills), **Playbook**, **Validation you must run before reporting**, **Tool ladder** (preferred → fallback → last resort, gated by `tool-status.json`), **Avoid** list. Team Leads additionally get a roster and dispatch rules; the Architect returns a PLAN, QA a VERDICT.
+Each of the 54 agents is generated from a **knowledge catalog** in the installer: **Knowledge and skills** (owned artifacts, write permission, resolved skill paths + keyword-discovered upstream skills), **Playbook**, **Validation you must run before reporting**, **Tool ladder** (preferred → fallback → last resort, gated by `tool-status.json`), **Avoid** list. Team Leads additionally get a roster and dispatch rules; the Architect returns a PLAN, QA a VERDICT.
 
 ## 3.5 Agent → tools → skills matrix
 
@@ -524,8 +618,9 @@ Each agent has a **bounded purpose**, owns a **minimum set of deterministic tool
 | **050 ALM & DevOps** | `git`, `gh`, `az devops`, `fab`, `pbi-tools` | Source-control safety, CLI policy, definition reads |
 | **060 Applications & Integration** | `fab`, `az`, REST, Modeling MCP/TOM, `sqlcmd` | CLI policy + selective Microsoft SDK/integration skills |
 | **070 Capability Maintenance** | `git`, approved user-scope/portable installers, live detection | Maintenance, tool-policy, source-control safety |
+| **080 PBIVIZ Development** | Project-local `pbiviz`/npm, `pbiviz` MCP (per project), `Pbiviz-Alm.ps1` for Git, Microsoft Learn MCP | The six `pbiviz-*` skills + Kurt `powerbi-custom-visuals` |
 
-The 37 workers inherit the same gates and loading rules with a narrower artifact each. Tool ownership is complete — every tool in [2.4](#24-optional-clis-and-mcp-servers--what-each-unlocks) has an agent-level owner; installation/update/recovery belongs to Capability Maintenance with explicit approval.
+The 43 workers inherit the same gates and loading rules with a narrower artifact each. Tool ownership is complete — every tool in [2.4](#24-optional-clis-and-mcp-servers--what-each-unlocks) has an agent-level owner; installation/update/recovery belongs to Capability Maintenance with explicit approval.
 
 > `tool-status.json` records `found`, `version`, `command`, `path`, `category`, `installMode` and a `reason` when missing — honouring real command names (Tabular Editor is `TabularEditor.exe`/`TabularEditor2.exe`/`TabularEditor3.exe`, not `te`).
 
@@ -549,7 +644,7 @@ The 37 workers inherit the same gates and loading rules with a narrower artifact
 
 | Source | Covers | Updated |
 |---|---|---|
-| **Custom embedded** (`.github/skills/`) | TMDL syntax, pipeline JSON, CLI policy — original to this repo | Re-run installer |
+| **Custom embedded** (`.github/skills/`) | TMDL syntax, pipeline JSON, CLI policy, six custom visual skills — original to this repo | Re-run installer |
 | **Microsoft** (`skills-for-fabric/`) | Spark, SQL Warehouse/Database, Eventhouse/Eventstream/Activator, Dataflows, pipelines, deployment pipelines, Git integration, OneLake governance, medallion, Power BI reports, semantic models, FabricIQ | Mirrored to upstream every run / via Capability Maintenance |
 | **Data-goblin** ([Kurt Buhler](https://www.linkedin.com/in/kurtbuhler/), `power-bi-agentic-development/`) | PBIP/TMDL/PBIR, DAX, semantic models, reports, themes, Deneb/custom visuals, paginated, Tabular Editor, Fabric CLI/admin | Mirrored to upstream every run / via Capability Maintenance |
 
@@ -574,8 +669,9 @@ Before the Fabric VS Code extension and AI agents there were two places to build
 ## 3.10 Quality & validation
 
 - **JSON Schema** (`schema/agent-manifest.schema.json`, draft-07) — shape of every agent entry; validated in CI.
-- **Pester suite** (`tests/`) — manifest integrity (47 agents, 3/7/37 tiers, unique ids), hierarchy (single root, no cycles), least-privilege tools, version/doc consistency, generated-file **content** (Knowledge/Playbook/Return-contract, approval-token rule, resolved skill refs, granted tools), emitted settings, vendor refresh failure paths, business-repository branch mirroring under default Git with >260-char paths (plus the phantom `origin` branch and skip diagnostics), Python detection with fake interpreters (Store stub rejected, supported version preferred, cached probe, bounded winget), update-mode safety (JSONC, workspace merge, purge containment, saved-workspace detection/patch idempotency), the status script run offline, and the real installer driven through the Step 1 prompts.
+- **Pester suite** (`tests/`) — manifest integrity (54 agents, 3/8/43 tiers, unique ids), hierarchy (single root, no cycles), least-privilege tools, version/doc consistency, generated-file **content** (Knowledge/Playbook/Return-contract, approval-token rule, resolved skill refs, granted tools), emitted settings, vendor refresh failure paths, business-repository branch mirroring under default Git with >260-char paths (plus the phantom `origin` branch and skip diagnostics), Python detection with fake interpreters (Store stub rejected, supported version preferred, cached probe, bounded winget), update-mode safety (JSONC, workspace merge, purge containment, saved-workspace detection/patch idempotency), the status script run offline, and the real installer driven through the Step 1 prompts.
 - **Real generator smoke test** (`tests/Generated.Tests.ps1`) — `-EmitAgentsTo` dry-run asserting on actual generated files.
+- **PBIVIZ suites** — `PBIVIZ.Alm.Tests.ps1` runs the shipped Git helper against throwaway repositories and bare remotes under TEMP (remote adoption, archive protection, selective promotion, binary-safe file lists, candidate state, post-merge provenance); `PBIVIZ.Install.Tests.ps1` drives the Step 1 prompt and exercises the Level 1 decision tree, the outer ignore rule and the `mcp.json` merge.
 - **CI** (`.github/workflows/validate.yml`) — PowerShell 7 on every push/PR; badge above.
 - **Install-time self-test + integrity manifest** — `guardrail-status.json` and SHA-256 `installed-manifest.json`.
 
@@ -586,10 +682,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "Import-Module Pester; In
 
 Not covered: a full end-to-end install against live Fabric/VS Code, and the *behavioural* quality of prompts — validated by real-world use (v0.7.0: single-team TMDL edit, multi-team Architect → Leads → QA with a live publish and regression DAX, and a destructive-action approval bubble).
 
-## 3.11 Current status (v0.7.3)
+## 3.11 Current status (v0.8.0)
 
 | Area | Status |
 |---|---|
+| Custom visual (`.pbiviz`) team | **New in v0.8.0** — 080 Team Lead + six workers, six embedded skills, 024 narrowed to in-report Deneb/SVG/Python/R |
+| PBIVIZ versioning | **New in v0.8.0** — optional folder initialised as a local repository (Level 1); remote adoption that keeps both histories (Level 2); single-visual promotion with append-only release archive and derived provenance (Level 3). Covered by automated tests on local repositories; not yet exercised against a real team remote |
+| Microsoft Learn MCP | **New in v0.8.0** — merged into `.vscode/mcp.json` without touching your servers |
 | Business repositories on default Git | **Fixed in v0.7.3** — long Fabric item paths check out on any machine (`core.longpaths` set on the mirror the installer owns, not on your Git); phantom `origin` branch gone; a skipped branch now shows git's own error |
 | Python detection | **Widened in v0.7.3** — finds Python off PATH (PEP 514 registry, python.org/conda folders), prefers a version the Fabric CLI supports (3.10–3.14), winget attempt bounded (no more frozen installer) |
 | Works however the folder is opened | **New in v0.7.2** — opt-in user-level enablement (nested-dispatch flag + workspace-relative skill locations, edited in place); status script reports the scope in effect; v0.7.1 saved-file patching kept as fallback |

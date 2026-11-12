@@ -37,10 +37,15 @@ BeforeAll {
         fab = @{ found = $true; command = 'definitely-not-a-real-command-xyz'; path = ''; category = 'core-cli'; reason = '' }
         az = @{ found = $true; command = 'definitely-not-a-real-command-abc'; path = ''; category = 'core-cli'; reason = '' }
         teCli = @{ found = $false; command = ''; path = ''; category = 'specialist-cli'; installMode = 'detect'; reason = '' }
+        gitIdentity = @{ found = $true; command = ''; path = ''; category = 'pbiviz-info'; installMode = 'detect'; reason = '' }
         powerBiModelMcpServer = @{ found = $true; category = 'mcp-extension'; extensionInstalled = $true; mcpToolsCallable = 'unknown' }
         fabricMcpServer = @{ found = $false; category = 'mcp-extension'; extensionInstalled = $false; mcpToolsCallable = 'unknown' }
     } | ConvertTo-Json -Depth 5
     [IO.File]::WriteAllText((Join-Path $script:Root '.github\agent-docs\tool-status.json'), $toolStatus, (New-Object System.Text.UTF8Encoding($false)))
+
+    # 3b. An enabled PBIVIZ mapping whose folder exists but is not a repository (no Git needed).
+    New-Item -ItemType Directory -Path (Join-Path $script:Root 'Viz Dev'), (Join-Path $script:Root '.github\agent-docs\local') -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $script:Root '.github\agent-docs\local\pbiviz-workspace.json'), '{ "schemaVersion": 1, "enabled": true, "relativePath": "Viz Dev", "git": { "initStatus": "skipped: synced path" } }', (New-Object System.Text.UTF8Encoding($false)))
 
     # 4. Run from an unrelated CWD, with a controlled (absent) USER settings file so the
     #    developer's real %APPDATA% settings cannot change the outcome.
@@ -110,6 +115,16 @@ Describe 'Get-SessionStatus.ps1 (emitted status script)' {
 
     It 'does not nag about detect-only tools (te CLI) in the missing list' {
         $script:Output | Should -Not -Match 'missing:[^\r\n]*teCli'
+    }
+
+    It 'never re-checks informational PBIVIZ entries (Git identity has no executable)' {
+        $ts = Get-Content (Join-Path $script:Root '.github\agent-docs\tool-status.json') -Raw | ConvertFrom-Json
+        $ts.gitIdentity.found | Should -BeTrue
+        $script:Output | Should -Not -Match 'gitIdentity'
+    }
+
+    It 'prints an honest PBIVIZ line from the mapping and the shipped helper' {
+        $script:Output | Should -Match '(?m)^PBIVIZ\s+Viz Dev \| local Git NOT initialized - PBIVIZ work is not versioned \(skipped: synced path\)'
     }
 
     It 'does not warn about saved workspace files when none open this root' {

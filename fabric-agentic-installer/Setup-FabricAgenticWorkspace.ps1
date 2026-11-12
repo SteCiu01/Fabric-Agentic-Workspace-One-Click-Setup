@@ -29,7 +29,7 @@ param(
 
 # Keep the window open on any error so the user can read it
 $ErrorActionPreference = 'Stop'
-$productVersion = '0.7.3'
+$productVersion = '0.8.0'
 $workspaceFileName = 'Fabric-Agentic-Workspace.code-workspace'
 
 # SHA256 helper that does not hard-depend on the Get-FileHash cmdlet. A Windows
@@ -176,7 +176,7 @@ if ($VerifyRoot) {
 $agentManifestJson = @'
 {
   "schemaVersion": 1,
-  "productVersion": "0.7.3",
+  "productVersion": "0.8.0",
   "defaults": {
     "mode": "both",
     "tools": ["read","search"],
@@ -191,8 +191,8 @@ $agentManifestJson = @'
     "environmentRestrictions": "PROD read-only by default; unknown environment requires clarification"
   },
   "agents": [
-    {"id":"fabric-workspace-master","displayName":"Fabric Workspace Master","filename":"00-fabric-workspace-master.agent.md","level":"executive","department":"executive","parent":null,"allowedChildren":["Fabric Solution Architect","Integration QA & Change Controller","Semantic Model Team Lead","Reporting Team Lead","Data Engineering Team Lead","Fabric Administration & Governance Team Lead","ALM & DevOps Team Lead","Applications & Integration Team Lead","Capability Maintenance Team Lead"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search","execute"],"primarySkills":["fabric-orchestration","fabric-working-modes","fabric-source-control-safety","fabric-cli-policy"],"artifactTypes":["work orders","consolidated outcomes"],"writePermissions":"orchestration only; delegate implementation","defaultRisk":"high","focus":"Classify intent, select the authoritative write surface, invoke the minimum teams, prevent conflicting writes, and own the final outcome."},
-    {"id":"fabric-solution-architect","displayName":"Fabric Solution Architect","filename":"01-fabric-solution-architect.agent.md","level":"executive","department":"executive","parent":"fabric-workspace-master","allowedChildren":["Semantic Model Team Lead","Reporting Team Lead","Data Engineering Team Lead","Fabric Administration & Governance Team Lead","ALM & DevOps Team Lead","Applications & Integration Team Lead"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search"],"primarySkills":["fabric-orchestration","fabric-working-modes"],"artifactTypes":["architecture plans","dependency maps","rollback plans"],"writePermissions":"read-only planning","defaultRisk":"low","focus":"Design artifact boundaries, dependencies, sequence, ownership, validation, rollback, and team assignments without broad implementation."},
+    {"id":"fabric-workspace-master","displayName":"Fabric Workspace Master","filename":"00-fabric-workspace-master.agent.md","level":"executive","department":"executive","parent":null,"allowedChildren":["Fabric Solution Architect","Integration QA & Change Controller","Semantic Model Team Lead","Reporting Team Lead","Data Engineering Team Lead","Fabric Administration & Governance Team Lead","ALM & DevOps Team Lead","Applications & Integration Team Lead","Capability Maintenance Team Lead","PBIVIZ Development Team Lead"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search","execute"],"primarySkills":["fabric-orchestration","fabric-working-modes","fabric-source-control-safety","fabric-cli-policy"],"artifactTypes":["work orders","consolidated outcomes"],"writePermissions":"orchestration only; delegate implementation","defaultRisk":"high","focus":"Classify intent, select the authoritative write surface, invoke the minimum teams, prevent conflicting writes, and own the final outcome."},
+    {"id":"fabric-solution-architect","displayName":"Fabric Solution Architect","filename":"01-fabric-solution-architect.agent.md","level":"executive","department":"executive","parent":"fabric-workspace-master","allowedChildren":["Semantic Model Team Lead","Reporting Team Lead","Data Engineering Team Lead","Fabric Administration & Governance Team Lead","ALM & DevOps Team Lead","Applications & Integration Team Lead","PBIVIZ Development Team Lead"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search"],"primarySkills":["fabric-orchestration","fabric-working-modes"],"artifactTypes":["architecture plans","dependency maps","rollback plans"],"writePermissions":"read-only planning","defaultRisk":"low","focus":"Design artifact boundaries, dependencies, sequence, ownership, validation, rollback, and team assignments without broad implementation."},
     {"id":"integration-qa-change-controller","displayName":"Integration QA & Change Controller","filename":"02-integration-qa-change-controller.agent.md","level":"executive","department":"executive","parent":"fabric-workspace-master","allowedChildren":[],"visibility":"visible","userInvocable":true,"tools":["read","search","execute"],"primarySkills":["fabric-orchestration","fabric-working-modes","fabric-source-control-safety"],"artifactTypes":["acceptance reports","release evidence"],"writePermissions":"read-only validation; return defects to Master","defaultRisk":"low","focus":"Validate cross-artifact references, environment and branch alignment, security, privacy, coherent diffs, rollback, and release readiness."},
 
     {"id":"semantic-model-team-lead","displayName":"Semantic Model Team Lead","filename":"10-semantic-model-team-lead.agent.md","level":"team-lead","department":"semantic-model","parent":"fabric-workspace-master","allowedChildren":["Model Architecture Agent","Relationships & Storage Mode Agent","TMDL Agent","DAX Agent","Semantic Security & AI Metadata Agent","Semantic Validation & Performance Agent"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search","execute","edit"],"primarySkills":["fabric-tmdl","fabric-working-modes","fabric-cli-policy"],"conditionalSkills":["Microsoft semantic model and Direct Lake skills","Kurt TMDL, DAX, TE2, BPA, and performance skills"],"artifactTypes":["semantic models","TMDL","DAX"],"focus":"Decompose semantic work, select TE2, Modeling MCP/TOM, TMDL, fab, or sqlcmd, coordinate dependencies, and own model-wide validation."},
@@ -207,7 +207,7 @@ $agentManifestJson = @'
     {"id":"report-planning-ux-agent","displayName":"Report Planning & UX Agent","filename":"21-report-planning-ux.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search"],"primarySkills":[],"conditionalSkills":["Kurt report planning and UX skills"],"artifactTypes":["report design contracts"],"writePermissions":"read-only planning","defaultRisk":"low","focus":"Define audience, business questions, page plan, navigation, visual selection, accessibility, interactions, and required measures before implementation."},
     {"id":"pbir-authoring-agent","displayName":"PBIR Authoring Agent","filename":"22-pbir-authoring.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":["fabric-cli-policy"],"conditionalSkills":["Kurt pbir-cli and pbir-format skills"],"artifactTypes":["PBIR pages","visuals","bindings","filters","bookmarks"],"focus":"Use pbir first for report structure and visuals, verify current help, validate after each mutation, and use controlled direct PBIR only as fallback."},
     {"id":"theme-formatting-agent","displayName":"Theme & Formatting Agent","filename":"23-theme-formatting.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","edit"],"primarySkills":[],"conditionalSkills":["Kurt report theme skills"],"artifactTypes":["report themes","format properties"],"focus":"Own typography, palette, spacing, conditional formatting, branding, and accessibility; never edit the same visual concurrently with PBIR Authoring."},
-    {"id":"advanced-custom-visuals-agent","displayName":"Advanced & Custom Visuals Agent","filename":"24-advanced-custom-visuals.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","edit"],"primarySkills":[],"conditionalSkills":["Kurt Deneb, SVG, and custom-visual skills"],"artifactTypes":["Deneb specs","SVG","custom visual configuration"],"focus":"Implement Deneb, SVG, Python/R visuals, custom visuals, and advanced interactions only when the design requires them."},
+    {"id":"advanced-custom-visuals-agent","displayName":"Advanced & Custom Visuals Agent","filename":"24-advanced-custom-visuals.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","edit"],"primarySkills":[],"conditionalSkills":["Kurt Deneb, SVG, Python and R visual skills"],"artifactTypes":["Deneb specs","SVG measures","Python/R visual scripts"],"focus":"Implement Deneb, SVG, Python/R visuals and advanced interactions inside PBIR reports only when the design requires them; route Power BI custom visual SDK (.pbiviz) projects to the PBIVIZ Development team via the Master."},
     {"id":"paginated-reports-agent","displayName":"Paginated Reports Agent","filename":"25-paginated-reports.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","edit"],"primarySkills":[],"conditionalSkills":["Microsoft and Kurt paginated report skills"],"artifactTypes":["paginated report definitions"],"focus":"Own paginated definitions, parameters, data sources, layout, rendering, and export validation."},
     {"id":"report-qa-desktop-agent","displayName":"Report QA & Desktop Verification Agent","filename":"26-report-qa-desktop-verification.agent.md","level":"worker","department":"reporting","parent":"reporting-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-cli-policy"],"conditionalSkills":["Kurt PBIR validation skills"],"artifactTypes":["report validation evidence","screenshots"],"writePermissions":"read-only verification","defaultRisk":"low","focus":"Run pbir validation and available Desktop refresh/screenshots; detect overlap, truncation, blanks, broken bindings, accessibility, and theme defects."},
 
@@ -244,7 +244,15 @@ $agentManifestJson = @'
     {"id":"agent-coverage-organization-agent","displayName":"Agent Coverage & Organization Agent","filename":"73-agent-coverage-organization.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","edit"],"primarySkills":["fabric-maintenance","fabric-orchestration"],"artifactTypes":["coverage analysis","mapping proposals"],"focus":"Evaluate coverage, overlap, overload, gaps, team fit, workers, and teams; auto-apply only obvious low-risk mappings and seek approval for structural changes."},
     {"id":"environment-tooling-agent","displayName":"Environment & Tooling Agent","filename":"74-environment-tooling.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":["fabric-maintenance","fabric-cli-policy"],"artifactTypes":["tool status","installation plans","lockdown remediation reports"],"writePermissions":"approved environment/tool changes only","defaultRisk":"high","optionalToolRequestPermissions":"the only worker allowed to install default or optional tools, always after explicit user approval","focus":"Own current and future default-tool updates, failed installer follow-up, optional installation, locked-down laptop remediation, validation, rollback guidance, and tool-status refresh."},
     {"id":"installer-health-regression-agent","displayName":"Installer Health & Regression Agent","filename":"75-installer-health-regression.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-maintenance"],"artifactTypes":["test results","installer diagnostics"],"writePermissions":"read-only validation","defaultRisk":"low","focus":"Validate source, manifests, templates, generated installer, clean/update installs, schemas, skills, tools, multi-root behavior, and privacy."},
-    {"id":"managed-file-review-agent","displayName":"Managed File Review Agent","filename":"76-managed-file-review.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","edit"],"primarySkills":["fabric-maintenance"],"artifactTypes":["managed-file diffs","review proposals"],"writePermissions":"apply user-requested managed-file changes only after explicit approval","defaultRisk":"high","focus":"Review requested differences between installer-managed files and local customisations without changing the original installer update behaviour; apply an approved amendment only when the user asks."}
+    {"id":"managed-file-review-agent","displayName":"Managed File Review Agent","filename":"76-managed-file-review.agent.md","level":"worker","department":"capability-maintenance","parent":"capability-maintenance-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","edit"],"primarySkills":["fabric-maintenance"],"artifactTypes":["managed-file diffs","review proposals"],"writePermissions":"apply user-requested managed-file changes only after explicit approval","defaultRisk":"high","focus":"Review requested differences between installer-managed files and local customisations without changing the original installer update behaviour; apply an approved amendment only when the user asks."},
+
+    {"id":"pbiviz-development-team-lead","displayName":"PBIVIZ Development Team Lead","filename":"80-pbiviz-development-team-lead.agent.md","level":"team-lead","department":"pbiviz-development","parent":"fabric-workspace-master","allowedChildren":["PBIVIZ Planner Agent","PBIVIZ Developer Agent","PBIVIZ Tester Agent","PBIVIZ Reviewer Agent","PBIVIZ Maintainer Agent","PBIVIZ ALM & Release Agent"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search","execute"],"primarySkills":["pbiviz-release-safety","pbiviz-alm-release","fabric-working-modes"],"conditionalSkills":["Kurt powerbi-custom-visuals skill","house pbiviz skills"],"artifactTypes":["Power BI custom visual projects",".pbiviz packages","PBIVIZ repository releases"],"writePermissions":"orchestration only; 082/085 write visual source, 086 writes Git state and release pairs","defaultRisk":"medium","focus":"Own Power BI custom visual SDK projects end to end: plan, implement, test, review, maintain, version and release .pbiviz packages with one writer per artifact, and hand report integration back to the Master for the Reporting team."},
+    {"id":"pbiviz-planner-agent","displayName":"PBIVIZ Planner Agent","filename":"81-pbiviz-planner.agent.md","level":"worker","department":"pbiviz-development","parent":"pbiviz-development-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search"],"primarySkills":["pbiviz-pbip-reconstruction","pbiviz-source-conversion","pbiviz-ibcs-semantic-contract"],"conditionalSkills":["Kurt powerbi-custom-visuals skill"],"artifactTypes":["PBIVIZ_PLAN specifications","data and semantic contracts","acceptance criteria"],"writePermissions":"read-only planning","defaultRisk":"low","focus":"Read-only PBIVIZ planner: reverse-engineer PBIP visuals, write source-conversion contracts, choose the archetype, record DAX aggregation semantics, data roles, interactions and executable acceptance criteria."},
+    {"id":"pbiviz-developer-agent","displayName":"PBIVIZ Developer Agent","filename":"82-pbiviz-developer.agent.md","level":"worker","department":"pbiviz-development","parent":"pbiviz-development-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":["pbiviz-ibcs-semantic-contract","pbiviz-release-safety"],"conditionalSkills":["Kurt powerbi-custom-visuals skill"],"artifactTypes":["visual source (TypeScript, capabilities.json, pbiviz.json, styles, lockfile)","feature version bumps"],"writePermissions":"the assigned visual project folder only; never commits","defaultRisk":"medium","focus":"Implement new or changed Power BI custom visual projects from the approved PBIVIZ_PLAN with the project-local pbiviz CLI; own the feature version bump; package only with evidence; never commit."},
+    {"id":"pbiviz-tester-agent","displayName":"PBIVIZ Tester Agent","filename":"83-pbiviz-tester.agent.md","level":"worker","department":"pbiviz-development","parent":"pbiviz-development-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["pbiviz-interaction-regression"],"artifactTypes":["test reports","regression evidence"],"writePermissions":"read-only; non-destructive execution only","defaultRisk":"low","focus":"Independently verify PBIVIZ builds, data correctness, interactions and regressions in tiers T0-T4 without editing source; host checks are NOT RUN unless actually executed."},
+    {"id":"pbiviz-reviewer-agent","displayName":"PBIVIZ Reviewer Agent","filename":"84-pbiviz-reviewer.agent.md","level":"worker","department":"pbiviz-development","parent":"pbiviz-development-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search"],"primarySkills":["pbiviz-release-safety","pbiviz-ibcs-semantic-contract"],"artifactTypes":["review verdicts"],"writePermissions":"read-only review","defaultRisk":"low","focus":"Independent read-only review of PBIVIZ changes: semantics, API correctness, security, accessibility, licences and release evidence; returns APPROVE, BLOCK or APPROVE WITH NONBLOCKING NOTES."},
+    {"id":"pbiviz-maintainer-agent","displayName":"PBIVIZ Maintainer Agent","filename":"85-pbiviz-maintainer.agent.md","level":"worker","department":"pbiviz-development","parent":"pbiviz-development-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":["pbiviz-release-safety","pbiviz-interaction-regression"],"artifactTypes":["SDK/API migrations","dependency updates","maintenance version bumps"],"writePermissions":"the assigned existing visual project only, after an audit and an approved change set; never commits","defaultRisk":"high","focus":"Audit first, then maintain existing custom visuals for current SDK/runtime compatibility and security findings; own the maintenance version bump; never work concurrently with the Developer on the same visual."},
+    {"id":"pbiviz-alm-release-agent","displayName":"PBIVIZ ALM & Release Agent","filename":"86-pbiviz-alm-release.agent.md","level":"worker","department":"pbiviz-development","parent":"pbiviz-development-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":["pbiviz-alm-release","pbiviz-release-safety"],"artifactTypes":["PBIVIZ repository commits, remotes and branches","release branches and pull requests","release archive pairs (releases/<guid>.<version>.pbiviz + .release.json)"],"writePermissions":"PBIVIZ repository Git state, its root .gitignore/.gitattributes and new release pairs only; never visual source","defaultRisk":"high","focus":"Own the PBIVIZ repository lifecycle across three levels: local checkpoints and restores (L1), remote onboarding and sync (L2), isolated single-visual promotion with append-only releases and derived provenance (L3), always through the Pbiviz-Alm.ps1 helper and approval tokens."}
   ]
 }
 
@@ -281,13 +289,20 @@ $legacyManagedAgents += @($agentManifest.agents | ForEach-Object { [string]$_.fi
 $managedSkills = @(
     'fabric-tmdl',
     'fabric-pipelines',
-    'fabric-cli-policy'
+    'fabric-cli-policy',
+    'pbiviz-pbip-reconstruction',
+    'pbiviz-source-conversion',
+    'pbiviz-ibcs-semantic-contract',
+    'pbiviz-interaction-regression',
+    'pbiviz-release-safety',
+    'pbiviz-alm-release'
 )
 $managedConfigs = @(
     '.github\copilot-instructions.md',
     '.github\agent-docs\starting-flow.md',
     '.github\agent-docs\working-flow-reference.md',
     '.github\agent-docs\Get-SessionStatus.ps1',
+    '.github\agent-docs\Pbiviz-Alm.ps1',
     'AGENTS.md',
     '.gitignore',
     '.vscode\tasks.json',
@@ -2333,6 +2348,1676 @@ function Add-GitIgnoreRules {
     Add-Content -LiteralPath $Path -Value $content -Encoding UTF8
 }
 
+# -- Helpers: optional PBIVIZ (custom visual) development folder ----------
+# The folder name becomes a path, an outer .gitignore rule and a mapping value, so it is
+# restricted to letters, digits, space and ._()- and may not collide with workspace content.
+function Get-PbivizFolderNameProblem {
+    param([string]$Name, [string[]]$Reserved = @())
+    if ([string]::IsNullOrWhiteSpace($Name)) { return 'Enter a folder name.' }
+    if ([IO.Path]::IsPathRooted($Name) -or $Name -match '[\\/]' -or $Name.StartsWith('..')) { return 'Enter a single folder name inside the workspace, not a path.' }
+    if ($Name -notmatch '^[\p{L}\p{N}][\p{L}\p{N} ._()-]{0,79}$') { return 'Use letters, digits, spaces and . _ ( ) - only, starting with a letter or digit (max 80 characters).' }
+    if ($Name.EndsWith('.') -or $Name.EndsWith(' ')) { return 'The name must not end with a dot or a space.' }
+    $stem = $Name.Split('.')[0].Trim().ToUpperInvariant()
+    if (@('CON', 'PRN', 'AUX', 'NUL') + @(1..9 | ForEach-Object { "COM$_"; "LPT$_" }) -contains $stem) { return "'$Name' is a reserved Windows device name." }
+    foreach ($r in $Reserved) { if ($Name.Equals([string]$r, [StringComparison]::OrdinalIgnoreCase)) { return "'$Name' is already used by the workspace." } }
+    return $null
+}
+
+# Safe merge of the workspace .vscode/mcp.json: adds the Microsoft Learn MCP server only when no
+# server with that URL exists (any key, including a legacy 'microsoft.docs.mcp'); never removes or
+# changes existing servers or inputs; a malformed file is left untouched.
+function Merge-McpJson {
+    param([string]$Path)
+    $docsUrl = 'https://learn.microsoft.com/api/mcp'
+    $result = [pscustomobject]@{ Changed = $false; Status = '' }
+    $obj = $null; $raw = ''
+    if (Test-Path -LiteralPath $Path) {
+        $raw = [IO.File]::ReadAllText($Path)
+        if (-not [string]::IsNullOrWhiteSpace($raw)) {
+            $obj = ConvertFrom-JsonLenient $raw
+            if ($null -eq $obj -or $obj -isnot [PSCustomObject]) { $result.Status = 'malformed - left untouched'; return $result }
+        }
+    }
+    if ($null -eq $obj) { $obj = [pscustomobject]@{} }
+    if (-not $obj.PSObject.Properties['servers'] -or $obj.servers -isnot [PSCustomObject]) {
+        if ($obj.PSObject.Properties['servers'] -and $null -ne $obj.servers) { $result.Status = 'unexpected servers block - left untouched'; return $result }
+        $obj | Add-Member -NotePropertyName 'servers' -NotePropertyValue ([pscustomobject]@{}) -Force
+    }
+    $norm = { param($u) ([string]$u).Trim().TrimEnd('/').ToLowerInvariant() }
+    foreach ($p in $obj.servers.PSObject.Properties) {
+        if ($p.Value -is [PSCustomObject] -and $p.Value.PSObject.Properties['url'] -and ((& $norm $p.Value.url) -eq (& $norm $docsUrl))) { $result.Status = "Microsoft Learn MCP already configured ('$($p.Name)')"; return $result }
+    }
+    if ($obj.servers.PSObject.Properties['microsoftDocs']) { $result.Status = "a server named 'microsoftDocs' already exists - left unchanged"; return $result }
+    $obj.servers | Add-Member -NotePropertyName 'microsoftDocs' -NotePropertyValue ([pscustomobject][ordered]@{ type = 'http'; url = $docsUrl })
+    Write-ManagedFile -Path $Path -Content ($obj | ConvertTo-Json -Depth 20)
+    $result.Changed = $true
+    $result.Status = 'added microsoftDocs (Microsoft Learn MCP)' + $(if ($raw -match '(?m)^\s*//|/\*') { '; comments in the file were not preserved' } else { '' })
+    return $result
+}
+
+# -- PBIVIZ repository helper (single source; emitted to .github/agent-docs/Pbiviz-Alm.ps1) --
+# Dot-sourced here so Steps 1-9 use the same validated functions 086 uses later.
+$pbivizAlmScript = @'
+# Pbiviz-Alm.ps1 -- deterministic helper for the PBIVIZ repository (Fabric Agentic Workspace).
+# Dot-source it:  . .github/agent-docs/Pbiviz-Alm.ps1
+# Every function validates its inputs, runs git through Invoke-PbivizGit (binary-safe, literal
+# pathspecs, UTF-8, no shell) and returns an object with a Status. Nothing here pushes, opens or
+# merges pull requests, creates tags, or commits to a target branch: those remain explicit,
+# approval-gated agent actions. Windows PowerShell 5.1 compatible.
+
+$script:PbivizHelperVersion   = '0.8.0'
+$script:PbivizGitFloor        = [version]'2.28.0'
+$script:PbivizWorktreePrefix  = 'pbiviz-release-'
+$script:PbivizBackupNamespace = 'refs/pbiviz-backup/'
+$script:PbivizUtf8            = New-Object System.Text.UTF8Encoding($false)
+$script:PbivizGitExe          = $null
+$script:PbivizDeviceNames     = @('CON', 'PRN', 'AUX', 'NUL') + @(1..9 | ForEach-Object { "COM$_"; "LPT$_" })
+$script:PbivizBuildExcludes   = @('node_modules/', 'dist/', '.tmp/', 'typings/', '*.log', 'webpack.statistics.*.html')
+$script:PbivizGitignoreLines  = @(
+    '# PBIVIZ repository - written by Fabric Agentic Workspace; edit freely',
+    'node_modules/', '.tmp/', 'typings/', 'dist/', '*.log', 'webpack.statistics.*.html',
+    '.DS_Store', 'Thumbs.db', '**/.pbi/localSettings.json', '**/.pbi/cache.abf'
+)
+$script:PbivizGitattributesLines = @(
+    '# PBIVIZ repository - written by Fabric Agentic Workspace; edit freely',
+    '# eol=lf: checkouts byte-identical to the LF files this helper writes, whatever core.autocrlf says',
+    '* text=auto eol=lf', '*.pbiviz binary', '*.png binary'
+)
+
+# ---------------------------------------------------------------- results
+function New-PbivizResult {
+    param([string]$Status = 'PASS', [string]$Reason = '')
+    return [pscustomobject][ordered]@{ Status = $Status; Reason = $Reason; Evidence = (New-Object System.Collections.Generic.List[string]) }
+}
+
+# ---------------------------------------------------------------- binary-safe git
+function Get-PbivizGitExe {
+    if ($script:PbivizGitExe -and (Test-Path -LiteralPath $script:PbivizGitExe)) { return $script:PbivizGitExe }
+    $cmd = Get-Command git -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($cmd) { $script:PbivizGitExe = $cmd.Source }
+    return $script:PbivizGitExe
+}
+
+# Windows argv quoting (CommandLineToArgvW rules); nothing goes through a shell.
+function ConvertTo-PbivizCommandLine {
+    param([string[]]$Arguments)
+    $parts = New-Object System.Collections.Generic.List[string]
+    foreach ($a in $Arguments) {
+        if ($null -eq $a) { $a = '' }
+        if ($a.Length -gt 0 -and $a -notmatch '[\s"]') { $parts.Add($a); continue }
+        $sb = New-Object System.Text.StringBuilder
+        [void]$sb.Append('"')
+        $bs = 0
+        foreach ($ch in $a.ToCharArray()) {
+            if ($ch -eq [char]92) { $bs++; continue }
+            if ($ch -eq [char]34) { [void]$sb.Append([char]92, (2 * $bs) + 1); [void]$sb.Append([char]34); $bs = 0; continue }
+            if ($bs -gt 0) { [void]$sb.Append([char]92, $bs); $bs = 0 }
+            [void]$sb.Append($ch)
+        }
+        if ($bs -gt 0) { [void]$sb.Append([char]92, 2 * $bs) }
+        [void]$sb.Append('"')
+        $parts.Add($sb.ToString())
+    }
+    return ($parts -join ' ')
+}
+
+# The only way this helper runs git: a .NET process (no PowerShell pipeline decoding), UTF-8
+# stdout/stderr, literal pathspecs forced in the CHILD environment, no prompts, repository
+# discovery stopped at the working directory's parent.
+function Invoke-PbivizGit {
+    param(
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][AllowEmptyCollection()][string[]]$Arguments,
+        [System.Collections.IDictionary]$Environment = $null,
+        [string[]]$Config = @(),
+        [switch]$BinaryOutput,
+        [int]$TimeoutSeconds = 600
+    )
+    $exe = Get-PbivizGitExe
+    if (-not $exe) { return [pscustomobject]@{ ExitCode = -1; Out = ''; Err = 'git executable not found on PATH'; Bytes = $null; TimedOut = $false } }
+    $all = New-Object System.Collections.Generic.List[string]
+    foreach ($c in (@('core.quotePath=false', 'core.longpaths=true', 'advice.detachedHead=false') + @($Config))) { $all.Add('-c'); $all.Add([string]$c) }
+    foreach ($a in $Arguments) { $all.Add([string]$a) }
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $exe
+    $psi.Arguments = ConvertTo-PbivizCommandLine $all.ToArray()
+    $psi.WorkingDirectory = $WorkingDirectory
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    if (-not $BinaryOutput) { $psi.StandardOutputEncoding = $script:PbivizUtf8 }
+    $psi.StandardErrorEncoding = $script:PbivizUtf8
+    $envs = $psi.EnvironmentVariables
+    $envs['GIT_LITERAL_PATHSPECS'] = '1'
+    foreach ($k in @('GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS')) { if ($envs.ContainsKey($k)) { $envs.Remove($k) } }
+    $envs['GIT_TERMINAL_PROMPT'] = '0'
+    $envs['GIT_OPTIONAL_LOCKS'] = '0'
+    try {
+        $parent = [IO.Path]::GetDirectoryName(([IO.Path]::GetFullPath($WorkingDirectory)).TrimEnd('\', '/'))
+        if ($parent) { $envs['GIT_CEILING_DIRECTORIES'] = $parent }
+    } catch { }
+    if ($Environment) {
+        foreach ($k in $Environment.Keys) {
+            if ($null -eq $Environment[$k]) { if ($envs.ContainsKey($k)) { $envs.Remove($k) } }
+            else { $envs[$k] = [string]$Environment[$k] }
+        }
+    }
+    $p = New-Object System.Diagnostics.Process
+    $p.StartInfo = $psi
+    try { [void]$p.Start() } catch {
+        return [pscustomobject]@{ ExitCode = -1; Out = ''; Err = $_.Exception.Message; Bytes = $null; TimedOut = $false }
+    }
+    $p.StandardInput.Close()
+    $errTask = $p.StandardError.ReadToEndAsync()
+    $ms = $null
+    if ($BinaryOutput) { $ms = New-Object System.IO.MemoryStream; $outTask = $p.StandardOutput.BaseStream.CopyToAsync($ms) }
+    else { $outTask = $p.StandardOutput.ReadToEndAsync() }
+    $timedOut = -not $p.WaitForExit($TimeoutSeconds * 1000)
+    if ($timedOut) { try { $p.Kill() } catch { } }
+    $p.WaitForExit()
+    [void]$outTask.Wait(30000)
+    [void]$errTask.Wait(30000)
+    $outText = ''; $bytes = $null
+    if ($BinaryOutput) { $bytes = $ms.ToArray() } else { $outText = [string]$outTask.Result }
+    $code = if ($timedOut) { -2 } else { $p.ExitCode }
+    $p.Dispose()
+    return [pscustomobject]@{ ExitCode = $code; Out = $outText; Err = [string]$errTask.Result; Bytes = $bytes; TimedOut = $timedOut }
+}
+
+function Get-PbivizGitError {
+    param($Result)
+    $lines = @(([string]$Result.Err) -split "`r?`n" | Where-Object { $_ -match '\S' })
+    $hit = $lines | Where-Object { $_ -match '^\s*(fatal|error):' } | Select-Object -Last 1
+    if (-not $hit) { $hit = $lines | Select-Object -Last 1 }
+    if (-not $hit) { $hit = "git exit code $($Result.ExitCode)" }
+    return ([string]$hit).Trim()
+}
+
+# NUL-separated output -> string[]; only the terminator after the last record is dropped, so a
+# malformed stream (an empty record in the middle) stays visible to fail-closed parsers.
+function Split-PbivizNul {
+    param([string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return @() }
+    $parts = $Text.Split([char]0)
+    $n = $parts.Length
+    if ($n -gt 0 -and $parts[$n - 1].Length -eq 0) { $n-- }
+    $out = New-Object 'string[]' $n
+    [Array]::Copy($parts, $out, $n)
+    return $out
+}
+
+# Pathspec files: UTF-8 WITHOUT a BOM, every entry NUL-terminated, written as raw bytes.
+function Write-PbivizPathspecFile {
+    param([string[]]$Paths, [string]$Directory = ([IO.Path]::GetTempPath()))
+    $file = Join-Path $Directory ('pbiviz-pathspec-' + [guid]::NewGuid().ToString('N') + '.lst')
+    $sb = New-Object System.Text.StringBuilder
+    foreach ($p in $Paths) { [void]$sb.Append($p); [void]$sb.Append([char]0) }
+    [IO.File]::WriteAllBytes($file, $script:PbivizUtf8.GetBytes($sb.ToString()))
+    return $file
+}
+
+function Get-PbivizSha256Hex {
+    param([byte[]]$Bytes)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash($Bytes))).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }
+}
+
+# .NET Framework file APIs reject paths beyond MAX_PATH unless they carry the \\?\ prefix.
+function ConvertTo-PbivizIoPath {
+    param([string]$Path)
+    if ($Path.Length -lt 240 -or $Path.StartsWith('\\?\')) { return $Path }
+    $full = [IO.Path]::GetFullPath($Path)
+    if ($full.StartsWith('\\')) { return '\\?\UNC\' + $full.Substring(2) }
+    return '\\?\' + $full
+}
+
+function Get-PbivizFileSha256 {
+    param([string]$Path)
+    return Get-PbivizSha256Hex ([IO.File]::ReadAllBytes((ConvertTo-PbivizIoPath $Path)))
+}
+
+function Write-PbivizTextFile {
+    param([string]$Path, [string]$Text)
+    [IO.File]::WriteAllText((ConvertTo-PbivizIoPath $Path), $Text, $script:PbivizUtf8)
+}
+
+function ConvertTo-PbivizJson {
+    param($Object)
+    return (($Object | ConvertTo-Json -Depth 8) -replace "`r`n", "`n") + "`n"
+}
+
+# Long-path-aware existence check (paths beyond the classic 260-character limit).
+function Test-PbivizFsPath {
+    param([string]$Path)
+    foreach ($candidate in @($Path, ('\\?\' + $Path))) {
+        try { if ([IO.File]::Exists($candidate) -or [IO.Directory]::Exists($candidate)) { return $true } } catch { }
+    }
+    return $false
+}
+
+# 8.3 short names (C:\Users\ABCDEF~1\...) are expanded so paths compare equal to git's output.
+function ConvertTo-PbivizLongPath {
+    param([string]$Path)
+    $full = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    if ($full -notmatch '~') { return $full }
+    if (-not ('PbivizHelper.Native' -as [type])) {
+        Add-Type -Namespace PbivizHelper -Name Native -MemberDefinition '[System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] public static extern uint GetLongPathName(string shortPath, System.Text.StringBuilder longPath, uint size);'
+    }
+    $probe = $full; $tail = ''
+    while ($probe -and -not (Test-Path -LiteralPath $probe)) {
+        $tail = '\' + (Split-Path $probe -Leaf) + $tail
+        $probe = Split-Path $probe -Parent
+    }
+    if (-not $probe) { return $full }
+    $sb = New-Object System.Text.StringBuilder 1024
+    $n = [PbivizHelper.Native]::GetLongPathName($probe, $sb, 1024)
+    if ($n -eq 0 -or $n -gt 1024) { return $full }
+    return ($sb.ToString().TrimEnd('\') + $tail)
+}
+
+function Test-PbivizSamePath {
+    param([string]$A, [string]$B)
+    $x = (ConvertTo-PbivizLongPath ($A -replace '/', '\')).TrimEnd('\')
+    $y = (ConvertTo-PbivizLongPath ($B -replace '/', '\')).TrimEnd('\')
+    return $x.Equals($y, [StringComparison]::OrdinalIgnoreCase)
+}
+
+# ---------------------------------------------------------------- versions and identity
+function Get-PbivizGitVersion {
+    param([string]$VersionText = $null)
+    if (-not $VersionText) {
+        $r = Invoke-PbivizGit -WorkingDirectory ([IO.Path]::GetTempPath()) -Arguments @('--version')
+        if ($r.ExitCode -ne 0) { return $null }
+        $VersionText = $r.Out
+    }
+    $m = [regex]::Match([string]$VersionText, '(\d+)\.(\d+)(?:\.(\d+))?')
+    if (-not $m.Success) { return $null }
+    $patch = if ($m.Groups[3].Success) { $m.Groups[3].Value } else { '0' }
+    return [version]("$($m.Groups[1].Value).$($m.Groups[2].Value).$patch")
+}
+
+function Test-PbivizGitVersion {
+    param([string]$VersionText = $null)
+    $v = Get-PbivizGitVersion -VersionText $VersionText
+    return ($null -ne $v -and $v -ge $script:PbivizGitFloor)
+}
+
+function Test-PbivizIdentity {
+    param([string]$Root)
+    $envOk = $env:GIT_AUTHOR_NAME -and $env:GIT_AUTHOR_EMAIL -and $env:GIT_COMMITTER_NAME -and $env:GIT_COMMITTER_EMAIL
+    if ($envOk) { return $true }
+    $dir = if ($Root -and (Test-Path -LiteralPath $Root)) { $Root } else { [IO.Path]::GetTempPath() }
+    $n = Invoke-PbivizGit -WorkingDirectory $dir -Arguments @('config', 'user.name')
+    $e = Invoke-PbivizGit -WorkingDirectory $dir -Arguments @('config', 'user.email')
+    return ($n.ExitCode -eq 0 -and $n.Out.Trim() -and $e.ExitCode -eq 0 -and $e.Out.Trim())
+}
+
+# pbiviz versions are 2-4 numeric parts; normalised to four so 1.2.3 equals 1.2.3.0.
+function ConvertTo-PbivizVersion {
+    param([string]$Text)
+    if ([string]$Text -notmatch '^\d+(\.\d+){1,3}$') { return $null }
+    $p = @(([string]$Text).Split('.') | ForEach-Object { [int]$_ })
+    while ($p.Count -lt 4) { $p += 0 }
+    return New-Object System.Version($p[0], $p[1], $p[2], $p[3])
+}
+
+function Test-PbivizSyncedPath {
+    param([string]$Path)
+    $full = [IO.Path]::GetFullPath($Path).TrimEnd('\') + '\'
+    foreach ($name in @('OneDrive', 'OneDriveCommercial', 'OneDriveConsumer')) {
+        $v = [Environment]::GetEnvironmentVariable($name)
+        if ([string]::IsNullOrWhiteSpace($v)) { continue }
+        try { $base = [IO.Path]::GetFullPath($v).TrimEnd('\') + '\' } catch { continue }
+        if ($full.StartsWith($base, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
+}
+
+# ---------------------------------------------------------------- input validation (G0)
+function Test-PbivizPathRepresentable {
+    param([string]$Path)
+    if ([string]::IsNullOrEmpty($Path)) { return $false }
+    foreach ($seg in $Path.Split('/')) {
+        if ($seg.Length -eq 0) { return $false }
+        if ($seg -match '[<>:"|?*\\]') { return $false }
+        foreach ($ch in $seg.ToCharArray()) { if ([int]$ch -lt 32) { return $false } }
+        if ($seg.EndsWith('.') -or $seg.EndsWith(' ')) { return $false }
+        $stem = $seg.Split('.')[0].Trim()
+        if ($script:PbivizDeviceNames -contains $stem.ToUpperInvariant()) { return $false }
+    }
+    return $true
+}
+
+function Test-PbivizArchivePath {
+    param([string]$Path)
+    $segs = $Path.Split('/')
+    return ($segs.Length -ge 3 -and $segs[1].Equals('releases', [StringComparison]::OrdinalIgnoreCase))
+}
+
+function Test-PbivizNameSyntax {
+    param([string]$Name)
+    if ([string]::IsNullOrEmpty($Name)) { return 'empty name' }
+    if ($Name -notmatch '^[A-Za-z0-9][A-Za-z0-9 ._-]{0,99}$') { return 'name must be one path segment of letters, digits, space, dot, underscore or hyphen, starting with a letter or digit' }
+    if ($Name.EndsWith('.') -or $Name.EndsWith(' ')) { return 'name must not end with a dot or a space' }
+    if (@('.', '..', '.git', 'node_modules', 'releases') -contains $Name.ToLowerInvariant()) { return "reserved name '$Name'" }
+    $stem = $Name.Split('.')[0].Trim().ToUpperInvariant()
+    if ($script:PbivizDeviceNames -contains $stem) { return "Windows device name '$Name'" }
+    return $null
+}
+
+function Test-PbivizIsRepoRoot {
+    param([string]$Root)
+    if (-not $Root -or -not (Test-Path -LiteralPath $Root -PathType Container)) { return $false }
+    $r = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('rev-parse', '--is-inside-work-tree', '--show-cdup')
+    if ($r.ExitCode -ne 0) { return $false }
+    $lines = @($r.Out -split "`r?`n")
+    return ($lines.Count -ge 1 -and $lines[0].Trim() -eq 'true' -and ($lines.Count -lt 2 -or $lines[1].Trim() -eq ''))
+}
+
+function Resolve-PbivizCommit {
+    param([string]$Root, [string]$Ref)
+    if ([string]::IsNullOrWhiteSpace($Ref) -or $Ref.StartsWith('-') -or $Ref -match '[\s\x00-\x1f]') { return $null }
+    $r = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('rev-parse', '--verify', '--quiet', '--end-of-options', "$Ref^{commit}")
+    if ($r.ExitCode -ne 0) { return $null }
+    $sha = $r.Out.Trim()
+    if ($sha -notmatch '^[0-9a-f]{40}([0-9a-f]{24})?$') { return $null }
+    return $sha
+}
+
+function Test-PbivizBranchName {
+    param([string]$Root, [string]$Name)
+    if ([string]::IsNullOrWhiteSpace($Name) -or $Name.StartsWith('-') -or $Name -match '[\s\x00-\x1f]') { return $false }
+    $dir = if ($Root -and (Test-Path -LiteralPath $Root)) { $Root } else { [IO.Path]::GetTempPath() }
+    $r = Invoke-PbivizGit -WorkingDirectory $dir -Arguments @('check-ref-format', '--branch', $Name)
+    return ($r.ExitCode -eq 0)
+}
+
+# Top-level entries of a tree-ish: name -> @{ Mode; Type; Object }.
+function Get-PbivizTopEntries {
+    param([string]$Root, [string]$TreeIsh)
+    $r = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('ls-tree', '-z', '--full-tree', $TreeIsh)
+    if ($r.ExitCode -ne 0) { throw "ls-tree failed: $(Get-PbivizGitError $r)" }
+    $map = [ordered]@{}
+    foreach ($rec in @(Split-PbivizNul $r.Out)) {
+        $tab = $rec.IndexOf([char]9)
+        if ($tab -lt 0) { throw 'malformed ls-tree record' }
+        $meta = $rec.Substring(0, $tab).Split(' ')
+        $map[$rec.Substring($tab + 1)] = [pscustomobject]@{ Mode = $meta[0]; Type = $meta[1]; Object = $meta[2] }
+    }
+    return $map
+}
+
+# Recursive entries with the exact git record (used for fingerprints and file lists).
+function Get-PbivizTreeEntries {
+    param([string]$Root, [string]$TreeIsh)
+    $r = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('ls-tree', '-r', '-z', '--full-tree', $TreeIsh)
+    if ($r.ExitCode -ne 0) { throw "ls-tree failed: $(Get-PbivizGitError $r)" }
+    $list = New-Object System.Collections.Generic.List[object]
+    foreach ($rec in @(Split-PbivizNul $r.Out)) {
+        $tab = $rec.IndexOf([char]9)
+        if ($tab -lt 0) { throw 'malformed ls-tree record' }
+        $meta = $rec.Substring(0, $tab).Split(' ')
+        $list.Add([pscustomobject]@{ Mode = $meta[0]; Type = $meta[1]; Object = $meta[2]; Path = $rec.Substring($tab + 1); Record = $rec })
+    }
+    return $list.ToArray()
+}
+
+function Get-PbivizTreePaths {
+    param([string]$Root, [string]$TreeIsh)
+    return @(Get-PbivizTreeEntries -Root $Root -TreeIsh $TreeIsh | ForEach-Object { $_.Path })
+}
+
+function Test-PbivizSourceScope {
+    param([string]$Path, [string]$Visual)
+    return ($Path.StartsWith("$Visual/", [StringComparison]::Ordinal) -and -not (Test-PbivizArchivePath $Path))
+}
+
+# SHA-256 over git's own NUL-terminated ls-tree records of the visual's source scope (git order).
+function Get-PbivizSourceFingerprint {
+    param([string]$Root, [string]$TreeIsh, [string]$Visual)
+    $sb = New-Object System.Text.StringBuilder
+    foreach ($e in @(Get-PbivizTreeEntries -Root $Root -TreeIsh $TreeIsh)) {
+        if (Test-PbivizSourceScope -Path $e.Path -Visual $Visual) { [void]$sb.Append($e.Record); [void]$sb.Append([char]0) }
+    }
+    return Get-PbivizSha256Hex ($script:PbivizUtf8.GetBytes($sb.ToString()))
+}
+
+function Test-PbivizVisualInput {
+    param([string]$Root, [string]$Name, [string]$Ref = $null, [switch]$RequireOnDisk)
+    $res = New-PbivizResult
+    $why = Test-PbivizNameSyntax $Name
+    if ($why) { $res.Status = 'BLOCKED'; $res.Reason = "invalid input: $why"; return $res }
+    if ($Ref) {
+        $sha = Resolve-PbivizCommit -Root $Root -Ref $Ref
+        if (-not $sha) { $res.Status = 'BLOCKED'; $res.Reason = "invalid input: unknown commit '$Ref'"; return $res }
+        $top = Get-PbivizTopEntries -Root $Root -TreeIsh $sha
+        $exact = $null
+        foreach ($k in $top.Keys) { if ($k.Equals($Name, [StringComparison]::Ordinal) -and $top[$k].Type -eq 'tree') { $exact = $k } }
+        if (-not $exact) {
+            $ci = @($top.Keys | Where-Object { $_.Equals($Name, [StringComparison]::OrdinalIgnoreCase) })
+            if ($ci.Count -gt 0) { $res.Status = 'BLOCKED'; $res.Reason = "invalid input: '$Name' differs only by case from '$($ci[0])' at $Ref - commit the rename first"; return $res }
+            $res.Status = 'BLOCKED'; $res.Reason = "invalid input: no visual folder '$Name' at $Ref"; return $res
+        }
+        $pj = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('rev-parse', '--verify', '--quiet', "${sha}:$Name/pbiviz.json")
+        if ($pj.ExitCode -ne 0) { $res.Status = 'BLOCKED'; $res.Reason = "invalid input: '$Name' has no pbiviz.json at $Ref"; return $res }
+    }
+    if ($RequireOnDisk) {
+        $rootFull = (ConvertTo-PbivizLongPath $Root).TrimEnd('\')
+        $full = [IO.Path]::GetFullPath((Join-Path $rootFull $Name))
+        if (-not $full.StartsWith($rootFull + '\', [StringComparison]::OrdinalIgnoreCase)) { $res.Status = 'BLOCKED'; $res.Reason = 'invalid input: path escapes the PBIVIZ root'; return $res }
+        $dirs = @(Get-ChildItem -LiteralPath $rootFull -Directory -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name.Equals($Name, [StringComparison]::OrdinalIgnoreCase) })
+        if ($dirs.Count -eq 0) { $res.Status = 'BLOCKED'; $res.Reason = "invalid input: folder '$Name' not found under the PBIVIZ root"; return $res }
+        if (-not ($dirs | Where-Object { $_.Name.Equals($Name, [StringComparison]::Ordinal) })) { $res.Status = 'BLOCKED'; $res.Reason = "invalid input: '$Name' differs only by case from the folder on disk"; return $res }
+        if ($dirs[0].Attributes -band [IO.FileAttributes]::ReparsePoint) { $res.Status = 'BLOCKED'; $res.Reason = 'invalid input: the visual folder is a junction or symbolic link'; return $res }
+        if (-not (Test-Path -LiteralPath (Join-Path $full 'pbiviz.json') -PathType Leaf)) { $res.Status = 'BLOCKED'; $res.Reason = "invalid input: '$Name' has no pbiviz.json on disk"; return $res }
+    }
+    $res.Evidence.Add("G0 visual '$Name' validated")
+    return $res
+}
+
+# Shared-file allowlist entries: relative, normalised, literal, outside every visual and archive.
+function Test-PbivizRelativePath {
+    param([string]$Root, [string]$Path, [string]$Ref = $null, [string[]]$VisualNames = @())
+    $res = New-PbivizResult
+    $p = ([string]$Path).Replace('\', '/')
+    if ([string]::IsNullOrWhiteSpace($p) -or $p.StartsWith('/') -or $p -match '^[A-Za-z]:' -or $p.StartsWith('-') -or $p.StartsWith(':')) {
+        $res.Status = 'BLOCKED'; $res.Reason = "invalid input: '$Path' is not a plain relative path"; return $res
+    }
+    foreach ($seg in $p.Split('/')) {
+        if ($seg -in @('', '.', '..') -or $seg.Equals('.git', [StringComparison]::OrdinalIgnoreCase) -or $seg -notmatch '^[A-Za-z0-9._][A-Za-z0-9 ._-]*$') {
+            $res.Status = 'BLOCKED'; $res.Reason = "invalid input: '$Path' contains a disallowed segment '$seg'"; return $res
+        }
+        if ($seg.Equals('releases', [StringComparison]::OrdinalIgnoreCase)) { $res.Status = 'BLOCKED'; $res.Reason = "invalid input: '$Path' is inside a release archive"; return $res }
+    }
+    if (-not (Test-PbivizPathRepresentable $p)) { $res.Status = 'BLOCKED'; $res.Reason = "invalid input: '$Path' is not representable on Windows"; return $res }
+    $first = $p.Split('/')[0]
+    foreach ($v in $VisualNames) {
+        if ($first.Equals($v, [StringComparison]::OrdinalIgnoreCase)) { $res.Status = 'BLOCKED'; $res.Reason = "invalid input: '$Path' is inside visual '$v'"; return $res }
+    }
+    if ($Ref) {
+        $sha = Resolve-PbivizCommit -Root $Root -Ref $Ref
+        if (-not $sha) { $res.Status = 'BLOCKED'; $res.Reason = "invalid input: unknown commit '$Ref'"; return $res }
+        $paths = @(Get-PbivizTreePaths -Root $Root -TreeIsh $sha)
+        if (-not ($paths -ccontains $p)) { $res.Status = 'BLOCKED'; $res.Reason = "invalid input: '$Path' does not exist at $Ref"; return $res }
+    }
+    $res.Evidence.Add("allowlist entry '$p' validated")
+    return $res
+}
+
+function Get-PbivizVisualNames {
+    param([string]$Root, [string]$TreeIsh)
+    $names = New-Object System.Collections.Generic.List[string]
+    $paths = @(Get-PbivizTreePaths -Root $Root -TreeIsh $TreeIsh)
+    foreach ($pth in $paths) {
+        $segs = $pth.Split('/')
+        if ($segs.Length -eq 2 -and $segs[1] -ceq 'pbiviz.json' -and -not $names.Contains($segs[0])) { $names.Add($segs[0]) }
+    }
+    return $names.ToArray()
+}
+
+# ---------------------------------------------------------------- repository state
+function Get-PbivizStatus {
+    param([string]$Directory, [string[]]$Config = @())
+    $r = Invoke-PbivizGit -WorkingDirectory $Directory -Config (@('status.renames=false') + $Config) -Arguments @('status', '--porcelain=v2', '-z', '--untracked-files=all', '--ignore-submodules=none')
+    if ($r.ExitCode -ne 0) { throw "git status failed: $(Get-PbivizGitError $r)" }
+    $o = [pscustomobject]@{ Staged = (New-Object System.Collections.Generic.List[string]); Unstaged = (New-Object System.Collections.Generic.List[string]); Unmerged = (New-Object System.Collections.Generic.List[string]); Untracked = (New-Object System.Collections.Generic.List[string]) }
+    $tokens = @(Split-PbivizNul $r.Out)
+    for ($i = 0; $i -lt $tokens.Count; $i++) {
+        $t = $tokens[$i]
+        if ($t.Length -lt 2) { continue }
+        switch ($t[0]) {
+            '1' { $f = $t.Split(' ', 9); if ($f[1][0] -ne '.') { $o.Staged.Add($f[8]) }; if ($f[1][1] -ne '.') { $o.Unstaged.Add($f[8]) } }
+            '2' { $f = $t.Split(' ', 10); if ($f[1][0] -ne '.') { $o.Staged.Add($f[9]) }; if ($f[1][1] -ne '.') { $o.Unstaged.Add($f[9]) }; $i++ }
+            'u' { $f = $t.Split(' ', 11); $o.Unmerged.Add($f[10]) }
+            '?' { $o.Untracked.Add($t.Substring(2)) }
+        }
+    }
+    return $o
+}
+
+function Get-PbivizRefSnapshot {
+    param([string]$Root)
+    # A symbolic ref (e.g. refs/remotes/origin/HEAD from a clone) is recorded by its target, so a
+    # fetch that moves the target branch does not look like an unexplained change to the symref.
+    $r = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('for-each-ref', '--format=%(refname)%00%(objectname)%00%(symref)')
+    if ($r.ExitCode -ne 0) { throw "for-each-ref failed: $(Get-PbivizGitError $r)" }
+    $map = [ordered]@{}
+    foreach ($line in ($r.Out -split "`n")) {
+        if (-not $line) { continue }
+        $parts = $line.TrimEnd("`r").Split([char]0)
+        if ($parts.Length -eq 3) { $map[$parts[0]] = if ($parts[2]) { "symref:$($parts[2])" } else { $parts[1] } }
+    }
+    return $map
+}
+
+function Compare-PbivizRefSnapshot {
+    param($Before, $After)
+    $c = [pscustomobject]@{ Created = (New-Object System.Collections.Generic.List[string]); Updated = (New-Object System.Collections.Generic.List[string]); Deleted = (New-Object System.Collections.Generic.List[string]) }
+    foreach ($k in $After.Keys) {
+        if (-not $Before.Contains($k)) { $c.Created.Add($k) }
+        elseif ($Before[$k] -ne $After[$k]) { $c.Updated.Add($k) }
+    }
+    foreach ($k in $Before.Keys) { if (-not $After.Contains($k)) { $c.Deleted.Add($k) } }
+    return $c
+}
+
+function Test-PbivizIsAncestor {
+    param([string]$Root, [string]$Ancestor, [string]$Descendant)
+    $r = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('merge-base', '--is-ancestor', $Ancestor, $Descendant)
+    return ($r.ExitCode -eq 0)
+}
+
+# History invariant over refs/heads/* and refs/tags/* only. Backup refs and remote-tracking refs
+# are deliberately excluded: a backup ref holding an orphaned commit does NOT satisfy it.
+function Assert-PbivizNoCommitLoss {
+    param([string]$Root, $Before, $After)
+    $res = New-PbivizResult
+    $problems = New-Object System.Collections.Generic.List[string]
+    foreach ($k in $Before.Keys) {
+        $isHead = $k.StartsWith('refs/heads/', [StringComparison]::Ordinal)
+        $isTag = $k.StartsWith('refs/tags/', [StringComparison]::Ordinal)
+        if (-not ($isHead -or $isTag)) { continue }
+        if (-not $After.Contains($k)) { $problems.Add("$k was deleted"); continue }
+        if ($Before[$k] -eq $After[$k]) { continue }
+        if ($isTag) { $problems.Add("$k was moved"); continue }
+        if (-not (Test-PbivizIsAncestor -Root $Root -Ancestor $Before[$k] -Descendant $After[$k])) {
+            $problems.Add("$k moved from $($Before[$k].Substring(0,12)) to $($After[$k].Substring(0,12)), which does not contain the old tip")
+        }
+    }
+    foreach ($k in $After.Keys) {
+        if ($k.StartsWith('refs/tags/', [StringComparison]::Ordinal) -and -not $Before.Contains($k)) { $problems.Add("$k was created") }
+    }
+    if ($problems.Count -gt 0) { $res.Status = 'FAILED'; $res.Reason = ($problems -join '; ') }
+    foreach ($p in $problems) { $res.Evidence.Add($p) }
+    return $res
+}
+
+function New-PbivizBackupRef {
+    param([string]$Root, [string]$Operation, [string]$Sha)
+    $name = $script:PbivizBackupNamespace + $Operation + '-' + (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 6)
+    $r = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('update-ref', '--no-deref', '-m', "pbiviz backup before $Operation", $name, $Sha, '')
+    if ($r.ExitCode -ne 0) { throw "could not create backup ref: $(Get-PbivizGitError $r)" }
+    return $name
+}
+
+function Get-PbivizGitPath {
+    param([string]$Root, [string]$Name)
+    $r = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('rev-parse', '--git-path', $Name)
+    if ($r.ExitCode -ne 0) { return $null }
+    $p = $r.Out.Trim()
+    if (-not [IO.Path]::IsPathRooted($p)) { $p = Join-Path $Root $p }
+    return $p
+}
+
+function Test-PbivizOperationInProgress {
+    param([string]$Root)
+    foreach ($n in @('MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply')) {
+        $p = Get-PbivizGitPath -Root $Root -Name $n
+        if ($p -and (Test-Path -LiteralPath $p)) { return $n }
+    }
+    return $null
+}
+
+# Exact working-state digest: HEAD, index, tracked changes, untracked (and selected ignored)
+# file contents, in-progress markers and the worktree list.
+function Get-PbivizWorkingStateDigest {
+    param([string]$Root, [string[]]$ExtraPaths = @())
+    $sym = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('symbolic-ref', '-q', 'HEAD')
+    $head = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('rev-parse', '-q', '--verify', 'HEAD')
+    $idx = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('ls-files', '-s', '-z')
+    $st = Get-PbivizStatus -Directory $Root
+    $files = [ordered]@{}
+    $unt = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('ls-files', '-z', '--others', '--exclude-standard')
+    $all = @(Split-PbivizNul $unt.Out) + @($ExtraPaths)
+    foreach ($rel in ($all | Sort-Object -Unique)) {
+        $full = Join-Path $Root ($rel -replace '/', '\')
+        if (Test-Path -LiteralPath $full -PathType Leaf) { $files[$rel] = Get-PbivizFileSha256 $full }
+        elseif (Test-PbivizFsPath $full) { $files[$rel] = 'directory' }
+        else { $files[$rel] = 'absent' }
+    }
+    $wt = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('worktree', 'list', '--porcelain')
+    return [pscustomobject][ordered]@{
+        HeadRef    = if ($sym.ExitCode -eq 0) { $sym.Out.Trim() } else { '(detached)' }
+        HeadSha    = if ($head.ExitCode -eq 0) { $head.Out.Trim() } else { '(unborn)' }
+        Index      = Get-PbivizSha256Hex ($script:PbivizUtf8.GetBytes($idx.Out))
+        Tracked    = (@($st.Staged) + @($st.Unstaged) + @($st.Unmerged) | Sort-Object) -join '|'
+        Files      = $files
+        InProgress = [string](Test-PbivizOperationInProgress -Root $Root)
+        Worktrees  = $wt.Out.Trim()
+    }
+}
+
+function Compare-PbivizWorkingState {
+    param($Before, $After)
+    $d = New-Object System.Collections.Generic.List[string]
+    foreach ($k in @('HeadRef', 'HeadSha', 'Index', 'Tracked', 'InProgress', 'Worktrees')) {
+        if ([string]$Before.$k -ne [string]$After.$k) { $d.Add("$k changed") }
+    }
+    $keys = @($Before.Files.Keys) + @($After.Files.Keys) | Sort-Object -Unique
+    foreach ($k in $keys) {
+        $b = if ($Before.Files.Contains($k)) { $Before.Files[$k] } else { 'absent' }
+        $a = if ($After.Files.Contains($k)) { $After.Files[$k] } else { 'absent' }
+        if ($b -ne $a) { $d.Add("file '$k' changed ($b -> $a)") }
+    }
+    return $d.ToArray()
+}
+
+function Get-PbivizNestedRepos {
+    param([string]$Root, [int]$MaxDepth = 3)
+    $found = New-Object System.Collections.Generic.List[string]
+    $queue = New-Object System.Collections.Generic.Queue[object]
+    $queue.Enqueue(@($Root, 0))
+    while ($queue.Count -gt 0) {
+        $item = $queue.Dequeue(); $dir = $item[0]; $depth = $item[1]
+        foreach ($child in @(Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue)) {
+            if ($child.Name -eq '.git') {
+                if ($depth -gt 0) { $found.Add($child.FullName.Substring($Root.TrimEnd('\').Length + 1)) }
+                continue
+            }
+            if (-not $child.PSIsContainer -or $child.Name -eq 'node_modules') { continue }
+            if ($child.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+            if ($depth + 1 -le $MaxDepth) { $queue.Enqueue(@($child.FullName, ($depth + 1))) }
+        }
+    }
+    return $found.ToArray()
+}
+
+function Get-PbivizRepoState {
+    param([string]$Root, [string]$OuterRoot = $null)
+    $s = [ordered]@{
+        root = $Root; exists = $false; isRepoRoot = $false; gitIsFile = $false; gitIsDir = $false
+        outerTracked = $false; nestedRepos = @(); syncedPath = $false
+        gitVersion = $null; gitVersionOk = $false; branch = $null; detached = $false; unborn = $false
+        headSha = $null; commitCount = 0; dirty = @(); untracked = 0; upstream = $null; ahead = 0; behind = 0
+        remotes = @(); localBranches = @(); remoteBranches = @(); shallow = $false
+        derivedLevel = 0; levelText = 'not a repository'; identityPresent = $false; error = $null
+    }
+    try {
+        $gv = Get-PbivizGitVersion
+        $s.gitVersion = if ($gv) { $gv.ToString() } else { $null }
+        $s.gitVersionOk = ($null -ne $gv -and $gv -ge $script:PbivizGitFloor)
+        $s.exists = (Test-Path -LiteralPath $Root -PathType Container)
+        if (-not $s.exists) { return [pscustomobject]$s }
+        $s.syncedPath = Test-PbivizSyncedPath $Root
+        $dotGit = Join-Path $Root '.git'
+        $s.gitIsDir = Test-Path -LiteralPath $dotGit -PathType Container
+        $s.gitIsFile = Test-Path -LiteralPath $dotGit -PathType Leaf
+        $s.nestedRepos = @(Get-PbivizNestedRepos -Root $Root)
+        if ($OuterRoot -and (Test-PbivizIsRepoRoot $OuterRoot)) {
+            $rootFull = (ConvertTo-PbivizLongPath $Root).TrimEnd('\')
+            $outerFull = (ConvertTo-PbivizLongPath $OuterRoot).TrimEnd('\')
+            if ($rootFull.StartsWith($outerFull + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                $rel = $rootFull.Substring($outerFull.Length + 1).Replace('\', '/') + '/'
+                $ls = Invoke-PbivizGit -WorkingDirectory $OuterRoot -Arguments @('ls-files', '-z')
+                $s.outerTracked = @(Split-PbivizNul $ls.Out | Where-Object { $_.StartsWith($rel, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+            }
+        }
+        $s.identityPresent = [bool](Test-PbivizIdentity -Root $Root)
+        $s.isRepoRoot = $s.gitIsDir -and (Test-PbivizIsRepoRoot $Root)
+        if (-not $s.isRepoRoot) { return [pscustomobject]$s }
+        $sym = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('symbolic-ref', '-q', '--short', 'HEAD')
+        if ($sym.ExitCode -eq 0) { $s.branch = $sym.Out.Trim() } else { $s.detached = $true }
+        $head = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('rev-parse', '-q', '--verify', 'HEAD')
+        if ($head.ExitCode -eq 0) {
+            $s.headSha = $head.Out.Trim()
+            $cnt = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('rev-list', '--count', 'HEAD')
+            if ($cnt.ExitCode -eq 0) { $s.commitCount = [int]$cnt.Out.Trim() }
+        } else { $s.unborn = $true }
+        $st = Get-PbivizStatus -Directory $Root
+        $s.dirty = @(@($st.Staged) + @($st.Unstaged) + @($st.Unmerged) | Sort-Object -Unique)
+        $s.untracked = $st.Untracked.Count
+        $rem = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('remote')
+        $remoteNames = @(($rem.Out -split "`r?`n") | Where-Object { $_.Trim() } | ForEach-Object { $_.Trim() })
+        $s.remotes = @(foreach ($rn in $remoteNames) {
+            $u = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('remote', 'get-url', $rn)
+            $url = ($u.Out.Trim() -replace '://[^/@]+@', '://<redacted>@')
+            [pscustomobject]@{ name = $rn; url = $url }
+        })
+        $refs = Get-PbivizRefSnapshot -Root $Root
+        $s.localBranches = @($refs.Keys | Where-Object { $_.StartsWith('refs/heads/') } | ForEach-Object { $_.Substring(11) })
+        $s.remoteBranches = @($refs.Keys | Where-Object { $_.StartsWith('refs/remotes/') -and -not $_.EndsWith('/HEAD') } | ForEach-Object { $_.Substring(13) })
+        $sh = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('rev-parse', '--is-shallow-repository')
+        $s.shallow = ($sh.Out.Trim() -eq 'true')
+        if ($s.branch -and -not $s.unborn) {
+            $up = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}')
+            if ($up.ExitCode -eq 0) {
+                $s.upstream = $up.Out.Trim()
+                $ab = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('rev-list', '--left-right', '--count', 'HEAD...@{upstream}')
+                if ($ab.ExitCode -eq 0 -and $ab.Out -match '(\d+)\s+(\d+)') { $s.ahead = [int]$Matches[1]; $s.behind = [int]$Matches[2] }
+            }
+        }
+        $allBranches = @($s.localBranches) + @($s.remoteBranches | ForEach-Object { ($_ -split '/', 2)[-1] })
+        if (($allBranches -contains 'PBVIZ_Team_Dev') -and ($allBranches -contains 'PBVIZ_Team_Prod')) { $s.derivedLevel = 3; $s.levelText = 'Level 3 (PBVIZ_Team_Dev / PBVIZ_Team_Prod)' }
+        elseif ($remoteNames.Count -gt 0) { $s.derivedLevel = 2; $s.levelText = 'Level 2 (remote configured)' }
+        else { $s.derivedLevel = 1; $s.levelText = 'Level 1 (local only - not an off-device backup)' }
+    } catch { $s.error = $_.Exception.Message }
+    return [pscustomobject]$s
+}
+
+# One-line summary used by the installer (Step 9) and the session status script.
+function Get-PbivizStatusLine {
+    param([string]$Root, [string]$RelativePath, [string]$InitStatus = $null)
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) { return "$RelativePath | folder missing - re-run the installer to recreate it, choose another name or disable it" }
+    $s = Get-PbivizRepoState -Root $Root
+    if (-not $s.isRepoRoot) {
+        $why = if ($InitStatus) { $InitStatus } else { 'no repository' }
+        return "$RelativePath | local Git NOT initialized - PBIVIZ work is not versioned ($why)"
+    }
+    $visuals = @(Get-ChildItem -LiteralPath $Root -Directory -ErrorAction SilentlyContinue | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'pbiviz.json') }).Count
+    $branch = if ($s.branch) { $s.branch } else { '(detached)' }
+    $git = if ($s.unborn) { "git: local $branch, no commits yet - make a first commit to create a restore point" }
+           else { "git: $branch, $($s.commitCount) commit(s), $(if (@($s.dirty).Count -or $s.untracked) { 'uncommitted changes' } else { 'clean' })" }
+    $lvl = switch ($s.derivedLevel) {
+        1 { 'Level 1 (local only - not an off-device backup)' }
+        2 { "Level 2 (remote: $((@($s.remotes) | ForEach-Object { $_.name }) -join ', ')$(if ($s.upstream) { "; ahead $($s.ahead), behind $($s.behind)" }))" }
+        default { 'Level 3 (PBVIZ_Team_Dev / PBVIZ_Team_Prod)' }
+    }
+    return "$RelativePath | $visuals visual(s) | $git | $lvl"
+}
+
+function Add-PbivizTextLines {
+    param([string]$Path, [string[]]$Lines)
+    $existing = @()
+    $text = ''
+    if (Test-Path -LiteralPath $Path) {
+        $text = [IO.File]::ReadAllText($Path)
+        $existing = @($text -split "`r?`n" | ForEach-Object { $_.Trim() })
+    }
+    $missing = @($Lines | Where-Object { $existing -notcontains $_.Trim() })
+    if ($missing.Count -eq 0) { return $false }
+    $prefix = if ($text.Length -gt 0 -and -not $text.EndsWith("`n")) { "`n" } else { '' }
+    Write-PbivizTextFile -Path $Path -Text ($text + $prefix + (($missing -join "`n") + "`n"))
+    return $true
+}
+
+# Level 1 decision tree (installer). Never re-initialises, never commits on reuse.
+function Initialize-PbivizRepository {
+    param([string]$Root, [switch]$FolderWasEmpty, [switch]$AllowSyncedPath, [string]$OuterRoot = $null, [string]$GitVersionText = $null)
+    $res = [pscustomobject][ordered]@{ Status = 'FAILED'; InitStatus = ''; Created = $false; BaselineCommit = $null; Messages = (New-Object System.Collections.Generic.List[string]) }
+    try {
+        if (-not (Test-PbivizGitVersion -VersionText $GitVersionText)) {
+            $v = Get-PbivizGitVersion -VersionText $GitVersionText
+            $res.Status = 'SKIPPED'; $res.InitStatus = if ($v) { "skipped: git $v < $($script:PbivizGitFloor)" } else { 'skipped: git not found' }
+            $res.Messages.Add("Git $($script:PbivizGitFloor) or newer is needed for PBIVIZ versioning; upgrade Git (https://git-scm.com) and re-run the installer.")
+            return $res
+        }
+        $state = Get-PbivizRepoState -Root $Root -OuterRoot $OuterRoot
+        if (-not $state.exists) { $res.Status = 'FAILED'; $res.InitStatus = 'failed: folder does not exist'; return $res }
+        if ($state.gitIsDir -and $state.isRepoRoot) {
+            $res.Status = 'REUSED'; $res.InitStatus = 'reused existing repository'
+            $what = if ($state.unborn) { 'no commits yet' } else { "$($state.commitCount) commit(s)" }
+            $res.Messages.Add("existing repository reused: branch $($state.branch), $what, $(if ($state.dirty.Count -or $state.untracked) { 'uncommitted changes' } else { 'clean' })")
+            return $res
+        }
+        if ($state.gitIsDir) { $res.Status = 'STOPPED'; $res.InitStatus = 'stopped: .git folder is not a usable repository root'; return $res }
+        if ($state.gitIsFile) { $res.Status = 'STOPPED'; $res.InitStatus = 'stopped: unexpected .git file (worktree or submodule pointer)'; return $res }
+        if ($state.outerTracked) { $res.Status = 'STOPPED'; $res.InitStatus = 'stopped: the outer workspace repository tracks files in this folder'; return $res }
+        if (@($state.nestedRepos).Count -gt 0) { $res.Status = 'STOPPED'; $res.InitStatus = "stopped: nested repositories found ($(@($state.nestedRepos) -join ', '))"; return $res }
+        if ($state.syncedPath -and -not $AllowSyncedPath) { $res.Status = 'SKIPPED'; $res.InitStatus = 'skipped: synced path'; return $res }
+        $init = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('init', '-b', 'main')
+        if ($init.ExitCode -ne 0) { $res.InitStatus = "failed: $(Get-PbivizGitError $init)"; return $res }
+        $res.Created = $true
+        $cfg = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('config', 'core.longpaths', 'true')
+        if ($cfg.ExitCode -ne 0) { $res.Messages.Add("core.longpaths not set: $(Get-PbivizGitError $cfg)") }
+        [void](Add-PbivizTextLines -Path (Join-Path $Root '.gitignore') -Lines $script:PbivizGitignoreLines)
+        [void](Add-PbivizTextLines -Path (Join-Path $Root '.gitattributes') -Lines $script:PbivizGitattributesLines)
+        $res.Status = 'INITIALIZED'; $res.InitStatus = 'initialized'
+        if (-not $FolderWasEmpty) { $res.InitStatus = 'initialized (no restore point yet: the folder already had files - commit them when ready)'; return $res }
+        if (-not (Test-PbivizIdentity -Root $Root)) { $res.InitStatus = 'initialized (no restore point yet: Git user.name/user.email not configured)'; return $res }
+        $add = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('add', '--', '.gitignore', '.gitattributes')
+        if ($add.ExitCode -ne 0) { $res.InitStatus = "initialized (baseline commit failed: $(Get-PbivizGitError $add))"; return $res }
+        $commit = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('commit', '-q', '-m', 'chore(pbiviz): initialize repository configuration', '-m', 'Fabric-Agentic-Installer: pbiviz-baseline', '--only', '--', '.gitignore', '.gitattributes')
+        if ($commit.ExitCode -ne 0) { $res.InitStatus = "initialized (baseline commit failed: $(Get-PbivizGitError $commit))"; return $res }
+        $sha = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('rev-parse', 'HEAD')
+        $res.BaselineCommit = $sha.Out.Trim()
+        $res.InitStatus = "initialized (baseline commit $($res.BaselineCommit.Substring(0, 7)))"
+    } catch {
+        $res.Status = 'FAILED'; $res.InitStatus = "failed: $($_.Exception.Message)"
+    }
+    return $res
+}
+
+function Test-PbivizRemoteUrl {
+    param([string]$Url)
+    $v = ([string]$Url).Trim()
+    if ([string]::IsNullOrWhiteSpace($v) -or $v.StartsWith('-') -or $v -match '[\s\x00-\x1f]' -or $v -match '::') { return $false }
+    if ($v -match '^https?://') {
+        try {
+            $u = [Uri]$v
+            if ($u.Query -or $u.Fragment) { return $false }
+            if ($u.UserInfo -match ':') { return $false }
+            if ($u.Host -eq 'github.com' -and $u.UserInfo) { return $false }
+        } catch { return $false }
+    }
+    return ($v -match '^https://github\.com/[^/\s]+/[^/\s]+/?$' -or
+            $v -match '^git@github\.com:[^/\s]+/[^/\s]+$' -or
+            $v -match '^ssh://git@github\.com/[^/\s]+/[^/\s]+/?$' -or
+            $v -match '^https://(?:[^/@\s:]+@)?dev\.azure\.com/[^/\s]+/[^/\s]+/_git/[^/\s]+/?$' -or
+            $v -match '^https://[^./\s]+\.visualstudio\.com/[^/\s]+/_git/[^/\s]+/?$' -or
+            $v -match '^git@ssh\.dev\.azure\.com:v3/[^/\s]+/[^/\s]+/[^/\s]+$' -or
+            $v -match '^ssh://git@ssh\.dev\.azure\.com/v3/[^/\s]+/[^/\s]+/[^/\s]+/?$')
+}
+
+# ---------------------------------------------------------------- Level 2 adoption
+function Get-PbivizCollisions {
+    param([string]$Root, [string[]]$RemotePaths, [string[]]$TrackedPaths)
+    $tracked = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($t in $TrackedPaths) { [void]$tracked.Add($t) }
+    $hits = New-Object System.Collections.Generic.List[string]
+    foreach ($rp in $RemotePaths) {
+        if ($tracked.Contains($rp)) { continue }
+        $full = Join-Path $Root ($rp -replace '/', '\')
+        if (Test-PbivizFsPath $full) { $hits.Add($rp); continue }
+        $segs = $rp.Split('/')
+        for ($i = 1; $i -lt $segs.Length; $i++) {
+            $prefix = ($segs[0..($i - 1)] -join '/')
+            $pfull = Join-Path $Root ($prefix -replace '/', '\')
+            if ((Test-Path -LiteralPath $pfull -PathType Leaf) -and -not $tracked.Contains($prefix)) { $hits.Add($rp); break }
+        }
+    }
+    return $hits.ToArray()
+}
+
+function Assert-PbivizAdoptionOutcome {
+    param([string]$Root, [string]$Case, $BeforeRefs, $AfterRefs, $BeforeState = $null, $AfterState = $null,
+          [string]$OldTip, [string]$RemoteTip, [string]$NewTip, [string]$LocalBranch, [string]$RemoteTrackingRef, [string]$BackupRef)
+    $res = New-PbivizResult
+    $problems = New-Object System.Collections.Generic.List[string]
+    $loss = Assert-PbivizNoCommitLoss -Root $Root -Before $BeforeRefs -After $AfterRefs
+    if ($loss.Status -ne 'PASS') { $problems.Add("history: $($loss.Reason)") }
+    $unchangedCases = @('empty-remote', 'up-to-date', 'conflict', 'blocked', 'failed', 'needs-checkpoint', 'needs-merge-decision')
+    if ($unchangedCases -contains $Case) {
+        if ($NewTip -ne $OldTip) { $problems.Add("local branch moved during a '$Case' outcome") }
+    } elseif ($Case -eq 'fast-forward') {
+        if ($NewTip -ne $RemoteTip) { $problems.Add('fast-forward did not end at the remote tip') }
+        if (-not (Test-PbivizIsAncestor -Root $Root -Ancestor $OldTip -Descendant $NewTip)) { $problems.Add('old local tip is not an ancestor of the new tip') }
+    } elseif ($Case -eq 'unrelated-merge') {
+        $par = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('rev-list', '--parents', '-n', '1', $NewTip)
+        $ids = @($par.Out.Trim().Split(' '))
+        if ($ids.Count -ne 3 -or $ids[1] -ne $OldTip -or $ids[2] -ne $RemoteTip) { $problems.Add("merge parents are not exactly [old local tip, remote tip]: $($par.Out.Trim())") }
+        if (-not (Test-PbivizIsAncestor -Root $Root -Ancestor $OldTip -Descendant $NewTip)) { $problems.Add('old local tip is not an ancestor of the new tip') }
+    } elseif ($Case -eq 'tracking-checkout') {
+        if ($NewTip -ne $RemoteTip) { $problems.Add('tracking checkout did not end at the remote tip') }
+    }
+    if ($OldTip -and $NewTip -and $OldTip -ne $NewTip) {
+        $oldPaths = @(Get-PbivizTreePaths -Root $Root -TreeIsh $OldTip)
+        $newSet = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+        foreach ($p in @(Get-PbivizTreePaths -Root $Root -TreeIsh $NewTip)) { [void]$newSet.Add($p) }
+        $lost = @($oldPaths | Where-Object { -not $newSet.Contains($_) })
+        if ($lost.Count -gt 0) { $problems.Add("files tracked before are missing at the new tip: $($lost -join ', ')") }
+    }
+    if ($BeforeState -and $AfterState -and ($unchangedCases -contains $Case)) {
+        foreach ($d in @(Compare-PbivizWorkingState -Before $BeforeState -After $AfterState)) { $problems.Add("restoration: $d") }
+    }
+    $diff = Compare-PbivizRefSnapshot -Before $BeforeRefs -After $AfterRefs
+    $allowed = @(@($RemoteTrackingRef, $BackupRef) | Where-Object { $_ })
+    if (@('fast-forward', 'unrelated-merge', 'tracking-checkout') -contains $Case) { $allowed += "refs/heads/$LocalBranch" }
+    foreach ($k in (@($diff.Created) + @($diff.Updated))) { if ($allowed -notcontains $k) { $problems.Add("unaccounted ref change: $k") } }
+    foreach ($k in @($diff.Deleted)) { $problems.Add("ref deleted: $k") }
+    if ($problems.Count -gt 0) { $res.Status = 'FAILED'; $res.Reason = ($problems -join '; ') }
+    $res | Add-Member -NotePropertyName CreatedRefs -NotePropertyValue @($diff.Created)
+    $res | Add-Member -NotePropertyName UpdatedRefs -NotePropertyValue @($diff.Updated)
+    foreach ($p in $problems) { $res.Evidence.Add($p) }
+    return $res
+}
+
+function Connect-PbivizRemoteHistory {
+    param([string]$Root, [string]$Remote = 'origin', [string]$Branch = 'main', [string]$LocalBranch = 'main', [switch]$Fetch)
+    $res = [pscustomobject][ordered]@{
+        Status = 'FAILED'; Case = 'failed'; Reason = ''; OldTip = $null; RemoteTip = $null; NewTip = $null
+        BackupRef = $null; CreatedRefs = @(); UpdatedRefs = @(); ConflictPaths = @(); Collisions = @(); RemoteHeads = @(); RemoteDefault = $null
+        Evidence = (New-Object System.Collections.Generic.List[string])
+    }
+    try {
+        if (-not (Test-PbivizIsRepoRoot $Root)) { $res.Status = 'BLOCKED'; $res.Case = 'blocked'; $res.Reason = 'not the root of the PBIVIZ repository'; return $res }
+        if ($Remote -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') { $res.Status = 'BLOCKED'; $res.Case = 'blocked'; $res.Reason = "invalid input: remote name '$Remote'"; return $res }
+        if (-not (Test-PbivizBranchName -Root $Root -Name $Branch) -or -not (Test-PbivizBranchName -Root $Root -Name $LocalBranch)) { $res.Status = 'BLOCKED'; $res.Case = 'blocked'; $res.Reason = 'invalid input: branch name'; return $res }
+        $url = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('remote', 'get-url', $Remote)
+        if ($url.ExitCode -ne 0) { $res.Status = 'BLOCKED'; $res.Case = 'blocked'; $res.Reason = "remote '$Remote' is not configured"; return $res }
+        $refsBefore = Get-PbivizRefSnapshot -Root $Root
+        $old = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('rev-parse', '-q', '--verify', "refs/heads/$LocalBranch")
+        $res.OldTip = if ($old.ExitCode -eq 0) { $old.Out.Trim() } else { $null }
+        $trackingRef = "refs/remotes/$Remote/$Branch"
+        if ($Fetch) {
+            $ls = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('ls-remote', '--symref', $Remote)
+            if ($ls.ExitCode -ne 0) { $res.Reason = "cannot read the remote: $(Get-PbivizGitError $ls)"; return $res }
+            $heads = New-Object System.Collections.Generic.List[string]
+            foreach ($line in ($ls.Out -split "`r?`n")) {
+                if ($line -match '^ref: refs/heads/(\S+)\s+HEAD$') { $res.RemoteDefault = $Matches[1] }
+                elseif ($line -match '^[0-9a-f]{40}\s+refs/heads/(.+)$') { $heads.Add($Matches[1]) }
+            }
+            $res.RemoteHeads = $heads.ToArray()
+            if ($heads.Count -eq 0) {
+                $res.Status = 'PASS'; $res.Case = 'empty-remote'; $res.NewTip = $res.OldTip
+                $res.Reason = 'remote is empty: nothing changed locally; push the local branch with approval'
+                return $res
+            }
+            if (-not $heads.Contains($Branch)) {
+                $res.Status = 'NEEDS INPUT'; $res.Case = 'blocked'; $res.NewTip = $res.OldTip
+                $res.Reason = "remote has no branch '$Branch' (default: $($res.RemoteDefault); branches: $($heads -join ', ')) - choose the branch to track"
+                return $res
+            }
+            # followRemoteHEAD=never: Git 2.48+ would otherwise create refs/remotes/<remote>/HEAD as a side effect.
+            $f = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('-c', "remote.$Remote.followRemoteHEAD=never", 'fetch', '--no-tags', '--no-prune', '--no-recurse-submodules', $Remote, "+refs/heads/${Branch}:$trackingRef")
+            if ($f.ExitCode -ne 0) { $res.Reason = "fetch failed: $(Get-PbivizGitError $f)"; return $res }
+        }
+        $res.RemoteTip = Resolve-PbivizCommit -Root $Root -Ref $trackingRef
+        if (-not $res.RemoteTip) { $res.Status = 'BLOCKED'; $res.Case = 'blocked'; $res.NewTip = $res.OldTip; $res.Reason = "no $trackingRef - run with -Fetch"; return $res }
+        $sym = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('symbolic-ref', '-q', 'HEAD')
+        if ($sym.ExitCode -ne 0 -or $sym.Out.Trim() -ne "refs/heads/$LocalBranch") { $res.Status = 'BLOCKED'; $res.Case = 'blocked'; $res.NewTip = $res.OldTip; $res.Reason = "HEAD must be on '$LocalBranch' (not detached, not another branch)"; return $res }
+        $busy = Test-PbivizOperationInProgress -Root $Root
+        if ($busy) { $res.Status = 'BLOCKED'; $res.Case = 'blocked'; $res.NewTip = $res.OldTip; $res.Reason = "an operation is in progress ($busy)"; return $res }
+        $remotePaths = @(Get-PbivizTreePaths -Root $Root -TreeIsh $res.RemoteTip)
+        $bad = @($remotePaths | Where-Object { -not (Test-PbivizPathRepresentable $_) })
+        if ($bad.Count -gt 0) { $res.Status = 'BLOCKED'; $res.Case = 'blocked'; $res.NewTip = $res.OldTip; $res.Reason = "remote paths not representable on Windows: $($bad -join ', ')"; return $res }
+        $lsf = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('ls-files', '-z')
+        $trackedPaths = @(Split-PbivizNul $lsf.Out)
+        $st = Get-PbivizStatus -Directory $Root
+        $res.Collisions = @(Get-PbivizCollisions -Root $Root -RemotePaths $remotePaths -TrackedPaths $trackedPaths)
+        $case = $null
+        $stateBefore = $null
+        if (-not $res.OldTip) {
+            if ($st.Staged.Count -gt 0 -or $st.Untracked.Count -gt 0) {
+                $res.Status = 'NEEDS CHECKPOINT'; $res.Case = 'needs-checkpoint'; $res.Reason = 'the branch has no commits but the folder has files: commit them first (approval), then connect again'
+                return $res
+            }
+            if ($res.Collisions.Count -gt 0) { $res.Status = 'BLOCKED'; $res.Case = 'blocked'; $res.Reason = "local untracked or ignored files would be overwritten: $($res.Collisions -join ', ')"; return $res }
+            $sw = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('switch', '-c', $LocalBranch, '--track', "$Remote/$Branch")
+            if ($sw.ExitCode -ne 0) { $res.Reason = "tracking checkout failed: $(Get-PbivizGitError $sw)"; return $res }
+            $case = 'tracking-checkout'
+        } else {
+            if ($st.Staged.Count -gt 0 -or $st.Unstaged.Count -gt 0 -or $st.Unmerged.Count -gt 0) {
+                $res.Status = 'NEEDS CHECKPOINT'; $res.Case = 'needs-checkpoint'; $res.NewTip = $res.OldTip; $res.Reason = 'tracked files have uncommitted changes: commit or restore them first'
+                return $res
+            }
+            if ($res.Collisions.Count -gt 0) { $res.Status = 'BLOCKED'; $res.Case = 'blocked'; $res.NewTip = $res.OldTip; $res.Reason = "local untracked or ignored files would be overwritten by the remote: $($res.Collisions -join ', ')"; return $res }
+            if ($res.RemoteTip -eq $res.OldTip -or (Test-PbivizIsAncestor -Root $Root -Ancestor $res.RemoteTip -Descendant $res.OldTip)) {
+                $case = 'up-to-date'
+            } else {
+                $mb = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('merge-base', $res.OldTip, $res.RemoteTip)
+                if ($mb.ExitCode -eq 0) {
+                    if (Test-PbivizIsAncestor -Root $Root -Ancestor $res.OldTip -Descendant $res.RemoteTip) {
+                        $res.BackupRef = New-PbivizBackupRef -Root $Root -Operation 'connect' -Sha $res.OldTip
+                        $ff = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('merge', '--ff-only', '-q', $trackingRef)
+                        if ($ff.ExitCode -ne 0) { $res.Reason = "fast-forward failed: $(Get-PbivizGitError $ff)"; $case = 'failed' } else { $case = 'fast-forward' }
+                    } else {
+                        $res.Status = 'NEEDS INPUT'; $res.Case = 'needs-merge-decision'; $res.NewTip = $res.OldTip
+                        $res.Reason = 'local and remote histories have diverged: offer a merge (or a rebase of unpublished local commits) with approval'
+                        return $res
+                    }
+                } else {
+                    if (-not (Test-PbivizIdentity -Root $Root)) { $res.Status = 'BLOCKED'; $res.Case = 'blocked'; $res.NewTip = $res.OldTip; $res.Reason = 'Git identity (user.name / user.email) is needed for the merge commit'; return $res }
+                    $res.BackupRef = New-PbivizBackupRef -Root $Root -Operation 'connect' -Sha $res.OldTip
+                    $stateBefore = Get-PbivizWorkingStateDigest -Root $Root -ExtraPaths $remotePaths
+                    $m = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('merge', '--no-ff', '--no-commit', '--allow-unrelated-histories', $trackingRef)
+                    $after = Get-PbivizStatus -Directory $Root
+                    $mergeHead = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('rev-parse', '-q', '--verify', 'MERGE_HEAD')
+                    if ($m.ExitCode -ne 0 -or $after.Unmerged.Count -gt 0) {
+                        $res.ConflictPaths = @($after.Unmerged | Sort-Object -Unique)
+                        if ($mergeHead.ExitCode -eq 0) {
+                            $ab = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('merge', '--abort')
+                            if ($ab.ExitCode -ne 0) { $res.Reason = "merge --abort failed: $(Get-PbivizGitError $ab) - manual recovery required (backup ref $($res.BackupRef))"; $res.Case = 'failed'; return $res }
+                        }
+                        $case = 'conflict'
+                        $res.Reason = if ($res.ConflictPaths.Count) { "conflicting paths: $($res.ConflictPaths -join ', ') - merge aborted, nothing changed" } else { "merge refused: $(Get-PbivizGitError $m) - nothing changed" }
+                    } else {
+                        $c = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('commit', '-q', '-m', "Merge $Remote/$Branch into $LocalBranch (PBIVIZ remote adoption)", '-m', 'Unrelated histories joined; both root commits preserved.')
+                        if ($c.ExitCode -ne 0) {
+                            [void](Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('merge', '--abort'))
+                            $case = 'conflict'; $res.Reason = "merge commit failed: $(Get-PbivizGitError $c) - merge aborted"
+                        } else { $case = 'unrelated-merge' }
+                    }
+                }
+            }
+        }
+        $newTip = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('rev-parse', '-q', '--verify', "refs/heads/$LocalBranch")
+        $res.NewTip = if ($newTip.ExitCode -eq 0) { $newTip.Out.Trim() } else { $null }
+        $refsAfter = Get-PbivizRefSnapshot -Root $Root
+        $stateAfter = if ($stateBefore) { Get-PbivizWorkingStateDigest -Root $Root -ExtraPaths $remotePaths } else { $null }
+        $assert = Assert-PbivizAdoptionOutcome -Root $Root -Case $case -BeforeRefs $refsBefore -AfterRefs $refsAfter -BeforeState $stateBefore -AfterState $stateAfter `
+            -OldTip $res.OldTip -RemoteTip $res.RemoteTip -NewTip $res.NewTip -LocalBranch $LocalBranch -RemoteTrackingRef $trackingRef -BackupRef $res.BackupRef
+        $res.CreatedRefs = @($assert.CreatedRefs); $res.UpdatedRefs = @($assert.UpdatedRefs)
+        foreach ($e in $assert.Evidence) { $res.Evidence.Add($e) }
+        $res.Case = $case
+        if ($assert.Status -ne 'PASS') { $res.Status = 'FAILED'; $res.Reason = "postcondition failed - manual recovery required (backup ref $($res.BackupRef)): $($assert.Reason)"; return $res }
+        switch ($case) {
+            'conflict'          { $res.Status = 'CONFLICT' }
+            'failed'            { $res.Status = 'FAILED' }
+            default             { $res.Status = 'PASS' }
+        }
+        if (-not $res.Reason) { $res.Reason = "case $case" }
+    } catch {
+        $res.Status = 'FAILED'; $res.Case = 'failed'; $res.Reason = $_.Exception.Message
+    }
+    return $res
+}
+
+# ---------------------------------------------------------------- Level 3 promotion
+function Get-PbivizSlug {
+    param([string]$Name)
+    return (($Name -replace '[^A-Za-z0-9._-]', '-') -replace '-{2,}', '-').Trim('-', '.')
+}
+
+function Read-PbivizJsonBlob {
+    param([string]$Root, [string]$Object)
+    $r = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('cat-file', '-p', $Object)
+    if ($r.ExitCode -ne 0) { throw "cannot read object $($Object): $(Get-PbivizGitError $r)" }
+    return ($r.Out.TrimStart([char]0xFEFF) | ConvertFrom-Json)
+}
+
+function Find-PbivizEntry {
+    param($Entries, [string]$Path)
+    foreach ($e in $Entries) { if ($e.Path -ceq $Path) { return $e } }
+    return $null
+}
+
+function Get-PbivizVisualIdentity {
+    param([string]$Root, $Entries, [string]$Visual)
+    $e = Find-PbivizEntry -Entries $Entries -Path "$Visual/pbiviz.json"
+    if (-not $e) { return $null }
+    $j = Read-PbivizJsonBlob -Root $Root -Object $e.Object
+    return [pscustomobject]@{ Guid = [string]$j.visual.guid; Version = [string]$j.visual.version }
+}
+
+function Get-PbivizReleaseLedger {
+    param([string]$Root, [string]$Ref = $null, [string]$Visual = $null)
+    $list = New-Object System.Collections.Generic.List[object]
+    if ($Ref) {
+        $sha = Resolve-PbivizCommit -Root $Root -Ref $Ref
+        if (-not $sha) { throw "unknown commit '$Ref'" }
+        foreach ($e in @(Get-PbivizTreeEntries -Root $Root -TreeIsh $sha)) {
+            if (-not (Test-PbivizArchivePath $e.Path) -or -not $e.Path.EndsWith('.release.json', [StringComparison]::Ordinal)) { continue }
+            $v = $e.Path.Split('/')[0]
+            if ($Visual -and -not $v.Equals($Visual, [StringComparison]::Ordinal)) { continue }
+            try { $m = Read-PbivizJsonBlob -Root $Root -Object $e.Object } catch { $m = $null }
+            $list.Add([pscustomobject]@{ Visual = $v; Path = $e.Path; Manifest = $m; Version = if ($m) { [string]$m.version } else { $null }; Guid = if ($m) { [string]$m.guid } else { $null }; Origin = if ($m) { [string]$m.origin } else { $null } })
+        }
+    } else {
+        foreach ($dir in @(Get-ChildItem -LiteralPath $Root -Directory -ErrorAction SilentlyContinue)) {
+            if ($Visual -and -not $dir.Name.Equals($Visual, [StringComparison]::Ordinal)) { continue }
+            $arch = Join-Path $dir.FullName 'releases'
+            if (-not (Test-Path -LiteralPath $arch)) { continue }
+            foreach ($f in @(Get-ChildItem -LiteralPath $arch -Recurse -File -Filter '*.release.json' -ErrorAction SilentlyContinue)) {
+                try { $m = [IO.File]::ReadAllText($f.FullName).TrimStart([char]0xFEFF) | ConvertFrom-Json } catch { $m = $null }
+                $rel = $f.FullName.Substring($Root.TrimEnd('\').Length + 1).Replace('\', '/')
+                $list.Add([pscustomobject]@{ Visual = $dir.Name; Path = $rel; Manifest = $m; Version = if ($m) { [string]$m.version } else { $null }; Guid = if ($m) { [string]$m.guid } else { $null }; Origin = if ($m) { [string]$m.origin } else { $null } })
+            }
+        }
+    }
+    return $list.ToArray()
+}
+
+function Get-PbivizMaxArchivedVersion {
+    param($Ledger)
+    $max = $null
+    foreach ($l in $Ledger) {
+        $v = ConvertTo-PbivizVersion $l.Version
+        if ($v -and ($null -eq $max -or $v -gt $max)) { $max = $v }
+    }
+    return $max
+}
+
+function Get-PbivizCandidateRecordPath {
+    param([string]$Worktree)
+    $gd = Invoke-PbivizGit -WorkingDirectory $Worktree -Arguments @('rev-parse', '--git-dir')
+    if ($gd.ExitCode -ne 0) { return $null }
+    $p = $gd.Out.Trim()
+    if (-not [IO.Path]::IsPathRooted($p)) { $p = Join-Path $Worktree $p }
+    return (Join-Path ([IO.Path]::GetFullPath($p)) 'pbiviz-candidate.json')
+}
+
+function Test-PbivizWorktreeDir {
+    param([string]$Dir, [switch]$MustNotExist)
+    $full = ConvertTo-PbivizLongPath $Dir
+    $temp = (ConvertTo-PbivizLongPath ([IO.Path]::GetTempPath())).TrimEnd('\')
+    if (-not ([string][IO.Path]::GetDirectoryName($full)).Equals($temp, [StringComparison]::OrdinalIgnoreCase)) { return 'worktree folder must be directly under the temp folder' }
+    if (-not (Split-Path $full -Leaf).StartsWith($script:PbivizWorktreePrefix, [StringComparison]::Ordinal)) { return "worktree folder name must start with '$($script:PbivizWorktreePrefix)'" }
+    if ($full.Length -gt 180) { return 'worktree path too long' }
+    if ($MustNotExist -and (Test-Path -LiteralPath $full)) { return 'worktree folder already exists' }
+    return $null
+}
+
+function Get-PbivizWorktreeList {
+    param([string]$Directory)
+    $r = Invoke-PbivizGit -WorkingDirectory $Directory -Arguments @('worktree', 'list', '--porcelain')
+    return @(($r.Out -split "`r?`n") | Where-Object { $_.StartsWith('worktree ') } | ForEach-Object { $_.Substring(9) })
+}
+
+function New-PbivizPromotionCandidate {
+    param([string]$Root, [string]$Visual, [string]$SourceRef, [string]$TargetRef, [string[]]$Allowlist = @(), [string]$WorktreeDir = $null, [switch]$ArchiveOnly)
+    $res = [pscustomobject][ordered]@{ Status = 'BLOCKED'; Reason = ''; Worktree = $null; Branch = $null; Source = $null; Target = $null; Guid = $null; Version = $null; CandidateTree = $null; Restored = @(); Removed = @(); Evidence = (New-Object System.Collections.Generic.List[string]) }
+    $files = @()
+    try {
+        if (-not (Test-PbivizIsRepoRoot $Root)) { $res.Reason = 'not the root of the PBIVIZ repository'; return $res }
+        $src = Resolve-PbivizCommit -Root $Root -Ref $SourceRef
+        $tgt = Resolve-PbivizCommit -Root $Root -Ref $TargetRef
+        if (-not $src -or -not $tgt) { $res.Reason = 'invalid input: source or target ref does not resolve to a commit'; return $res }
+        $res.Source = $src; $res.Target = $tgt
+        $vi = Test-PbivizVisualInput -Root $Root -Name $Visual -Ref $src
+        if ($vi.Status -ne 'PASS') { $res.Reason = $vi.Reason; return $res }
+        $srcEntries = @(Get-PbivizTreeEntries -Root $Root -TreeIsh $src)
+        $tgtEntries = @(Get-PbivizTreeEntries -Root $Root -TreeIsh $tgt)
+        # Input validation first: a name Windows cannot hold is reported before any other verdict.
+        $scopeBad = @(@($srcEntries) + @($tgtEntries) | Where-Object { $_.Path.StartsWith("$Visual/", [StringComparison]::Ordinal) -and -not (Test-PbivizPathRepresentable $_.Path) } | ForEach-Object { $_.Path } | Sort-Object -Unique)
+        if ($scopeBad.Count -gt 0) { $res.Reason = "paths not representable on Windows (nothing was written): $($scopeBad -join ' | ')"; return $res }
+        $visuals = @(Get-PbivizVisualNames -Root $Root -TreeIsh $src) + @(Get-PbivizVisualNames -Root $Root -TreeIsh $tgt) | Sort-Object -Unique
+        foreach ($a in $Allowlist) {
+            $chk = Test-PbivizRelativePath -Root $Root -Path $a -VisualNames $visuals
+            if ($chk.Status -ne 'PASS') { $res.Reason = $chk.Reason; return $res }
+        }
+        $id = Get-PbivizVisualIdentity -Root $Root -Entries $srcEntries -Visual $Visual
+        if (-not $id -or $id.Guid -notmatch '^[A-Za-z0-9_]{1,128}$') { $res.Reason = 'pbiviz.json at the source has no valid visual.guid'; return $res }
+        $ver = ConvertTo-PbivizVersion $id.Version
+        if (-not $ver) { $res.Reason = "pbiviz.json at the source has an invalid visual.version '$($id.Version)'"; return $res }
+        $res.Guid = $id.Guid; $res.Version = $id.Version
+        if (-not $ArchiveOnly) {
+            $maxArch = Get-PbivizMaxArchivedVersion (Get-PbivizReleaseLedger -Root $Root -Ref $tgt -Visual $Visual)
+            if ($maxArch -and $ver -le $maxArch) { $res.Reason = "version $($id.Version) does not exceed the archived version $maxArch"; return $res }
+            $tid = Get-PbivizVisualIdentity -Root $Root -Entries $tgtEntries -Visual $Visual
+            if ($tid) {
+                if ($tid.Guid -cne $id.Guid) { $res.Reason = "GUID changed from $($tid.Guid) to $($id.Guid) - needs an approved migration"; return $res }
+                $tv = ConvertTo-PbivizVersion $tid.Version
+                if ($tv -and $ver -le $tv) { $res.Reason = "version $($id.Version) does not exceed Prod's $($tid.Version)"; return $res }
+            }
+        }
+        $slug = Get-PbivizSlug $Visual
+        $mode = if ($ArchiveOnly) { 'archive' } else { $id.Version }
+        $branch = "release/pbiviz/$slug/$mode"
+        if (-not (Test-PbivizBranchName -Root $Root -Name $branch)) { $res.Reason = "invalid release branch name '$branch'"; return $res }
+        $exists = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('rev-parse', '-q', '--verify', "refs/heads/$branch")
+        if ($exists.ExitCode -eq 0) { $res.Reason = "branch '$branch' already exists - it is never moved; remove or rename it first"; return $res }
+        if (-not $WorktreeDir) { $WorktreeDir = Join-Path ([IO.Path]::GetTempPath()) ($script:PbivizWorktreePrefix + $slug + '-' + $mode + '-' + [guid]::NewGuid().ToString('N').Substring(0, 6)) }
+        $why = Test-PbivizWorktreeDir -Dir $WorktreeDir -MustNotExist
+        if ($why) { $res.Reason = "invalid input: $why"; return $res }
+        $WorktreeDir = ConvertTo-PbivizLongPath $WorktreeDir
+        $srcArch = @($srcEntries | Where-Object { $_.Path.StartsWith("$Visual/", [StringComparison]::Ordinal) -and (Test-PbivizArchivePath $_.Path) })
+        $tgtSet = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+        foreach ($e in $tgtEntries) { [void]$tgtSet.Add($e.Path) }
+        if ($ArchiveOnly) {
+            $S = @($srcArch | Where-Object { -not $tgtSet.Contains($_.Path) } | ForEach-Object { $_.Path })
+            $TminusS = @()
+            if ($S.Count -eq 0) { $res.Reason = 'nothing to promote: every archive file of the source already exists in the target'; return $res }
+        } else {
+            $S = @($srcEntries | Where-Object { Test-PbivizSourceScope -Path $_.Path -Visual $Visual } | ForEach-Object { $_.Path })
+            $T = @($tgtEntries | Where-Object { Test-PbivizSourceScope -Path $_.Path -Visual $Visual } | ForEach-Object { $_.Path })
+            foreach ($a in $Allowlist) {
+                $ap = $a.Replace('\', '/')
+                if (Find-PbivizEntry -Entries $srcEntries -Path $ap) { $S += $ap } elseif ($tgtSet.Contains($ap)) { $T += $ap } else { $res.Reason = "allowlisted '$ap' exists in neither source nor target"; return $res }
+            }
+            $sSet = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+            foreach ($x in $S) { [void]$sSet.Add($x) }
+            $TminusS = @($T | Where-Object { -not $sSet.Contains($_) })
+        }
+        $bad = @(@($S) + @($TminusS) | Where-Object { -not (Test-PbivizPathRepresentable $_) })
+        if ($bad.Count -gt 0) { $res.Reason = "paths not representable on Windows (nothing was written): $($bad -join ' | ')"; return $res }
+        $wt = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('worktree', 'add', '-q', '-b', $branch, $WorktreeDir, $tgt)
+        if ($wt.ExitCode -ne 0) { $res.Reason = "worktree add failed: $(Get-PbivizGitError $wt)"; return $res }
+        $res.Worktree = $WorktreeDir; $res.Branch = $branch
+        if ($S.Count -gt 0) {
+            $f = Write-PbivizPathspecFile -Paths $S; $files += $f
+            $rs = Invoke-PbivizGit -WorkingDirectory $WorktreeDir -Arguments @('restore', "--source=$src", '--staged', '--worktree', "--pathspec-from-file=$f", '--pathspec-file-nul')
+            if ($rs.ExitCode -ne 0) { $res.Reason = "restore failed: $(Get-PbivizGitError $rs)"; return $res }
+        }
+        if ($TminusS.Count -gt 0) {
+            $f2 = Write-PbivizPathspecFile -Paths $TminusS; $files += $f2
+            $rm = Invoke-PbivizGit -WorkingDirectory $WorktreeDir -Arguments @('rm', '-q', "--pathspec-from-file=$f2", '--pathspec-file-nul')
+            if ($rm.ExitCode -ne 0) { $res.Reason = "rm failed: $(Get-PbivizGitError $rm)"; return $res }
+        }
+        $res.Restored = @($S); $res.Removed = @($TminusS)
+        $wtree = Invoke-PbivizGit -WorkingDirectory $WorktreeDir -Arguments @('write-tree')
+        if ($wtree.ExitCode -ne 0) { $res.Reason = "write-tree failed: $(Get-PbivizGitError $wtree)"; return $res }
+        $res.CandidateTree = $wtree.Out.Trim()
+        $recordPath = Get-PbivizCandidateRecordPath -Worktree $WorktreeDir
+        $excludes = Join-Path (Split-Path $recordPath -Parent) 'pbiviz-build-excludes'
+        Write-PbivizTextFile -Path $excludes -Text (($script:PbivizBuildExcludes -join "`n") + "`n")
+        $record = [ordered]@{
+            schemaVersion = 1; helperVersion = $script:PbivizHelperVersion; mode = if ($ArchiveOnly) { 'archive-only' } else { 'release' }
+            visual = $Visual; guid = $id.Guid; version = $id.Version; src = $src; tgt = $tgt; branch = $branch
+            candidateTree = $res.CandidateTree; allowlist = @($Allowlist); worktree = $WorktreeDir
+            createdAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+        }
+        Write-PbivizTextFile -Path $recordPath -Text (ConvertTo-PbivizJson $record)
+        if (-not $ArchiveOnly) {
+            $fpSrc = Get-PbivizSourceFingerprint -Root $Root -TreeIsh $src -Visual $Visual
+            $fpCand = Get-PbivizSourceFingerprint -Root $WorktreeDir -TreeIsh $res.CandidateTree -Visual $Visual
+            if ($fpSrc -ne $fpCand) { $res.Reason = 'snapshot fidelity failed: candidate source scope differs from the source commit'; return $res }
+            $res.Evidence.Add("source fingerprint $fpSrc")
+        }
+        $res.Evidence.Add("restored $($S.Count) path(s), removed $($TminusS.Count) path(s); releases/ untouched")
+        $res.Status = 'PASS'
+    } catch {
+        $res.Status = 'BLOCKED'; $res.Reason = $_.Exception.Message
+    } finally {
+        foreach ($f in $files) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }
+    }
+    return $res
+}
+
+function Read-PbivizCandidateRecord {
+    param([string]$Worktree)
+    $p = Get-PbivizCandidateRecordPath -Worktree $Worktree
+    if (-not $p -or -not (Test-Path -LiteralPath $p)) { return $null }
+    return ([IO.File]::ReadAllText($p) | ConvertFrom-Json)
+}
+
+function Get-PbivizReleaseNames {
+    param([string]$Visual, [string]$Guid, [string]$Version)
+    $base = "$Visual/releases/$Guid.$Version"
+    return @("$base.pbiviz", "$base.release.json")
+}
+
+# S3: the candidate worktree is EXPECTED to carry the staged snapshot; anything else is BLOCKED.
+function Test-PbivizCandidateState {
+    param([string]$Worktree, [switch]$AfterRelease)
+    $res = New-PbivizResult
+    try {
+        $why = Test-PbivizWorktreeDir -Dir $Worktree
+        if ($why) { $res.Status = 'BLOCKED'; $res.Reason = "not a helper worktree: $why"; return $res }
+        if (-not (Test-Path -LiteralPath $Worktree -PathType Container)) { $res.Status = 'BLOCKED'; $res.Reason = 'candidate worktree does not exist'; return $res }
+        $rec = Read-PbivizCandidateRecord -Worktree $Worktree
+        if (-not $rec) { $res.Status = 'BLOCKED'; $res.Reason = 'candidate record missing - this worktree was not created by the helper'; return $res }
+        if (-not ($rec.worktree -and (Test-PbivizSamePath $rec.worktree $Worktree))) { $res.Status = 'BLOCKED'; $res.Reason = 'candidate record does not belong to this worktree'; return $res }
+        if (-not (@(Get-PbivizWorktreeList -Directory $Worktree) | Where-Object { Test-PbivizSamePath $_ $Worktree })) { $res.Status = 'BLOCKED'; $res.Reason = 'worktree is not registered with the repository'; return $res }
+        $head = Invoke-PbivizGit -WorkingDirectory $Worktree -Arguments @('rev-parse', '-q', '--verify', 'HEAD')
+        if ($head.Out.Trim() -ne $rec.tgt) { $res.Status = 'BLOCKED'; $res.Reason = 'candidate branch moved (HEAD is no longer the target commit)'; return $res }
+        $sym = Invoke-PbivizGit -WorkingDirectory $Worktree -Arguments @('symbolic-ref', '-q', 'HEAD')
+        if ($sym.Out.Trim() -ne "refs/heads/$($rec.branch)") { $res.Status = 'BLOCKED'; $res.Reason = 'candidate worktree is not on its release branch'; return $res }
+        $wtree = Invoke-PbivizGit -WorkingDirectory $Worktree -Arguments @('write-tree')
+        if ($wtree.ExitCode -ne 0) { $res.Status = 'BLOCKED'; $res.Reason = "index cannot be written as a tree: $(Get-PbivizGitError $wtree)"; return $res }
+        $tree = $wtree.Out.Trim()
+        if (-not $AfterRelease) {
+            if ($tree -ne $rec.candidateTree) { $res.Status = 'BLOCKED'; $res.Reason = 'staged changes differ from the authorised candidate snapshot'; return $res }
+        } else {
+            $ch = Get-PbivizStagedChanges -Directory $Worktree -Base $rec.candidateTree
+            if (-not $ch.Ok) { $res.Status = 'BLOCKED'; $res.Reason = $ch.Reason; return $res }
+            $expected = Get-PbivizReleaseNames -Visual $rec.visual -Guid $rec.guid -Version $rec.version
+            $okSet = @($ch.Changes | Where-Object { $_.Status -eq 'A' -and ($expected -ccontains $_.Path) })
+            if (@($ch.Changes).Count -ne 2 -or $okSet.Count -ne 2) { $res.Status = 'BLOCKED'; $res.Reason = "index must differ from the candidate by exactly the two new release files; found: $((@($ch.Changes) | ForEach-Object { "$($_.Status) $($_.Path)" }) -join ', ')"; return $res }
+        }
+        $excludes = Join-Path (Split-Path (Get-PbivizCandidateRecordPath -Worktree $Worktree) -Parent) 'pbiviz-build-excludes'
+        $st = Get-PbivizStatus -Directory $Worktree -Config @("core.excludesFile=$excludes")
+        if ($st.Unstaged.Count -gt 0 -or $st.Unmerged.Count -gt 0) { $res.Status = 'BLOCKED'; $res.Reason = "unstaged changes to tracked files: $((@($st.Unstaged) + @($st.Unmerged)) -join ', ')"; return $res }
+        if ($st.Untracked.Count -gt 0) { $res.Status = 'BLOCKED'; $res.Reason = "untracked non-ignored files: $($st.Untracked -join ', ')"; return $res }
+        $res.Evidence.Add("candidate state OK (tree $tree)")
+    } catch { $res.Status = 'BLOCKED'; $res.Reason = $_.Exception.Message }
+    return $res
+}
+
+function Test-PbivizCleanTree {
+    param([string]$Root, [string]$Visual)
+    $res = New-PbivizResult
+    $sym = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('symbolic-ref', '-q', 'HEAD')
+    if ($sym.ExitCode -ne 0) { $res.Status = 'BLOCKED'; $res.Reason = 'HEAD is detached'; return $res }
+    $st = Get-PbivizStatus -Directory $Root
+    $dirty = @(@($st.Staged) + @($st.Unstaged) + @($st.Unmerged))
+    if ($dirty.Count -gt 0) { $res.Status = 'BLOCKED'; $res.Reason = "uncommitted changes: $($dirty -join ', ')"; return $res }
+    $mine = @($st.Untracked | Where-Object { $_.StartsWith("$Visual/", [StringComparison]::Ordinal) })
+    if ($mine.Count -gt 0) { $res.Status = 'BLOCKED'; $res.Reason = "untracked files in the visual would not be part of the source commit: $($mine -join ', ')"; return $res }
+    return $res
+}
+
+# S1: the complete staged diff, no pathspec, parsed fail-closed.
+function Get-PbivizStagedChanges {
+    param([string]$Directory, [string]$Base)
+    $o = [pscustomobject]@{ Ok = $false; Reason = ''; Changes = @() }
+    $r = Invoke-PbivizGit -WorkingDirectory $Directory -Arguments @('diff-index', '--cached', '-z', '--name-status', '--no-renames', $Base)
+    if ($r.ExitCode -ne 0) { $o.Reason = "staged diff failed: $(Get-PbivizGitError $r)"; return $o }
+    $tokens = @(Split-PbivizNul $r.Out)
+    if (($tokens.Count % 2) -ne 0) { $o.Reason = 'malformed staged diff (odd field count)'; return $o }
+    $list = New-Object System.Collections.Generic.List[object]
+    for ($i = 0; $i -lt $tokens.Count; $i += 2) {
+        $status = $tokens[$i]; $path = $tokens[$i + 1]
+        if ($status -notmatch '^[AMDT]$') { $o.Reason = "unexpected diff status '$status'"; return $o }
+        if ([string]::IsNullOrEmpty($path)) { $o.Reason = 'malformed staged diff (empty path)'; return $o }
+        $list.Add([pscustomobject]@{ Status = $status; Path = $path })
+    }
+    $o.Ok = $true; $o.Changes = $list.ToArray()
+    return $o
+}
+
+function Add-PbivizRelease {
+    param([string]$Root = $null, [string]$Worktree = $null, [string]$Visual, [string]$SourceSha, [string]$PackagePath = $null,
+          [string]$BuildCommand = 'pbiviz package', [System.Collections.IDictionary]$Tests = $null, [string]$ToolsVersion = $null, [string]$NodeVersion = $null)
+    $res = [pscustomobject][ordered]@{ Status = 'BLOCKED'; Reason = ''; PackagePath = $null; ManifestPath = $null; Sha256 = $null; Bytes = 0; Guid = $null; Version = $null; Staged = @(); Evidence = (New-Object System.Collections.Generic.List[string]) }
+    $files = @()
+    try {
+        if (($Root -and $Worktree) -or (-not $Root -and -not $Worktree)) { $res.Reason = 'use exactly one of -Root or -Worktree'; return $res }
+        $dir = if ($Root) { $Root } else { $Worktree }
+        $level = 'local'
+        $sharedPaths = @()
+        if ($Worktree) {
+            $cs = Test-PbivizCandidateState -Worktree $Worktree
+            if ($cs.Status -ne 'PASS') { $res.Reason = $cs.Reason; return $res }
+            $rec = Read-PbivizCandidateRecord -Worktree $Worktree
+            if ($rec.mode -ne 'release') { $res.Reason = 'candidate is not a release candidate'; return $res }
+            if ($rec.visual -cne $Visual -or $rec.src -ne $SourceSha) { $res.Reason = 'visual or source commit does not match the candidate record'; return $res }
+            $level = 'promotion'
+            $sharedPaths = @(@($rec.allowlist) | Where-Object { $_ } | ForEach-Object { ([string]$_).Replace('\', '/') })
+        } else {
+            if (-not (Test-PbivizIsRepoRoot $Root)) { $res.Reason = 'not the root of the PBIVIZ repository'; return $res }
+            $vi = Test-PbivizVisualInput -Root $Root -Name $Visual -Ref 'HEAD' -RequireOnDisk
+            if ($vi.Status -ne 'PASS') { $res.Reason = $vi.Reason; return $res }
+            $clean = Test-PbivizCleanTree -Root $Root -Visual $Visual
+            if ($clean.Status -ne 'PASS') { $res.Reason = $clean.Reason; return $res }
+            $head = Resolve-PbivizCommit -Root $Root -Ref 'HEAD'
+            if ($SourceSha -ne $head) { $res.Reason = 'source commit must be the current HEAD of a clean tree'; return $res }
+        }
+        $entries = @(Get-PbivizTreeEntries -Root $dir -TreeIsh $SourceSha)
+        $id = Get-PbivizVisualIdentity -Root $dir -Entries $entries -Visual $Visual
+        if (-not $id -or $id.Guid -notmatch '^[A-Za-z0-9_]{1,128}$' -or -not (ConvertTo-PbivizVersion $id.Version)) { $res.Reason = 'pbiviz.json has no valid guid/version at the source commit'; return $res }
+        $res.Guid = $id.Guid; $res.Version = $id.Version
+        if (-not $PackagePath) { $PackagePath = Join-Path $dir (Join-Path $Visual "dist\$($id.Guid).$($id.Version).pbiviz") }
+        if (-not (Test-Path -LiteralPath $PackagePath -PathType Leaf) -or (Get-Item -LiteralPath $PackagePath).Length -eq 0) { $res.Reason = "package not found or empty: $PackagePath"; return $res }
+        $ledger = @(Get-PbivizReleaseLedger -Root $dir -Visual $Visual)
+        $maxArch = Get-PbivizMaxArchivedVersion $ledger
+        $ver = ConvertTo-PbivizVersion $id.Version
+        if ($maxArch -and $ver -le $maxArch) { $res.Reason = "version $($id.Version) does not exceed the archived version $maxArch"; return $res }
+        $foreign = @($ledger | Where-Object { $_.Origin -eq 'release' -and $_.Guid -and $_.Guid -cne $id.Guid })
+        if ($foreign.Count -gt 0) { $res.Reason = "GUID $($id.Guid) differs from earlier releases ($($foreign[0].Guid)) - needs an approved migration"; return $res }
+        $names = Get-PbivizReleaseNames -Visual $Visual -Guid $id.Guid -Version $id.Version
+        $pkgFull = Join-Path $dir ($names[0] -replace '/', '\')
+        $manFull = Join-Path $dir ($names[1] -replace '/', '\')
+        if ((Test-Path -LiteralPath $pkgFull) -or (Test-Path -LiteralPath $manFull)) { $res.Reason = 'a release with this GUID and version already exists - releases are never overwritten'; return $res }
+        $tracked = Invoke-PbivizGit -WorkingDirectory $dir -Arguments @('ls-files', '-z')
+        $trackedSet = @(Split-PbivizNul $tracked.Out)
+        foreach ($n in $names) { if ($trackedSet | Where-Object { $_.Equals($n, [StringComparison]::OrdinalIgnoreCase) }) { $res.Reason = "release path already tracked: $n"; return $res } }
+        $arch = Split-Path $pkgFull -Parent
+        if (-not (Test-Path -LiteralPath $arch)) { New-Item -ItemType Directory -Path $arch -Force | Out-Null }
+        [IO.File]::Copy((ConvertTo-PbivizIoPath $PackagePath), (ConvertTo-PbivizIoPath $pkgFull), $false)
+        $bytes = [IO.File]::ReadAllBytes((ConvertTo-PbivizIoPath $pkgFull))
+        $res.Sha256 = Get-PbivizSha256Hex $bytes
+        $res.Bytes = $bytes.Length
+        $fp = Get-PbivizSourceFingerprint -Root $dir -TreeIsh $SourceSha -Visual $Visual
+        $testsObj = [ordered]@{ lint = 'NOT RUN'; unit = 'NOT RUN'; package = 'PASS'; host = 'NOT RUN' }
+        if ($Tests) { foreach ($k in $Tests.Keys) { $testsObj[$k] = [string]$Tests[$k] } }
+        # Allowlisted shared files are outside the fingerprint scope: record them by path and blob id
+        # at the source commit (null = removed by this release).
+        $sharedFiles = @(foreach ($sp in $sharedPaths) {
+            $se = Find-PbivizEntry -Entries $entries -Path $sp
+            [ordered]@{ path = $sp; blob = $(if ($se) { $se.Object } else { $null }) }
+        })
+        $manifest = [ordered]@{
+            schemaVersion = 1; visual = $Visual; guid = $id.Guid; version = $id.Version; origin = 'release'; validated = $true
+            sourceSha = $SourceSha; sourceFingerprint = $fp; sharedFiles = $sharedFiles; packageFile = (Split-Path $pkgFull -Leaf); sha256 = $res.Sha256; bytes = $res.Bytes
+            builtAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); toolsVersion = $ToolsVersion; nodeVersion = $NodeVersion
+            buildCommand = $BuildCommand; tests = $testsObj; level = $level
+        }
+        Write-PbivizTextFile -Path $manFull -Text (ConvertTo-PbivizJson $manifest)
+        $f = Write-PbivizPathspecFile -Paths $names; $files += $f
+        $add = Invoke-PbivizGit -WorkingDirectory $dir -Arguments @('add', "--pathspec-from-file=$f", '--pathspec-file-nul')
+        if ($add.ExitCode -ne 0) { $res.Reason = "staging the release pair failed: $(Get-PbivizGitError $add)"; return $res }
+        $res.PackagePath = $pkgFull; $res.ManifestPath = $manFull; $res.Staged = $names
+        if ($Worktree) {
+            $after = Test-PbivizCandidateState -Worktree $Worktree -AfterRelease
+            if ($after.Status -ne 'PASS') { $res.Reason = $after.Reason; return $res }
+        }
+        $res.Evidence.Add("release pair staged: $($names -join ', ') sha256=$($res.Sha256)")
+        $res.Status = 'PASS'
+    } catch { $res.Status = 'BLOCKED'; $res.Reason = $_.Exception.Message }
+    finally { foreach ($x in $files) { Remove-Item -LiteralPath $x -Force -ErrorAction SilentlyContinue } }
+    return $res
+}
+
+function Add-PbivizLegacyArchive {
+    param([string]$Root, [string]$Visual)
+    $res = [pscustomobject][ordered]@{ Status = 'BLOCKED'; Reason = ''; Archived = @(); Skipped = @(); Evidence = (New-Object System.Collections.Generic.List[string]) }
+    $files = @()
+    try {
+        if (-not (Test-PbivizIsRepoRoot $Root)) { $res.Reason = 'not the root of the PBIVIZ repository'; return $res }
+        $vi = Test-PbivizVisualInput -Root $Root -Name $Visual -RequireOnDisk
+        if ($vi.Status -ne 'PASS') { $res.Reason = $vi.Reason; return $res }
+        $st = Get-PbivizStatus -Directory $Root
+        if ($st.Staged.Count -gt 0) { $res.Reason = "unrelated staged changes: $($st.Staged -join ', ')"; return $res }
+        $dist = Join-Path $Root "$Visual\dist"
+        $legacyDir = Join-Path $Root "$Visual\releases\legacy"
+        $added = New-Object System.Collections.Generic.List[string]
+        foreach ($pkg in @(Get-ChildItem -LiteralPath $dist -File -Filter '*.pbiviz' -ErrorAction SilentlyContinue | Sort-Object Name)) {
+            $m = [regex]::Match($pkg.Name, '^(?<guid>[A-Za-z0-9_]{1,128})\.(?<ver>\d+(\.\d+){1,3})\.pbiviz$')
+            if (-not $m.Success) { $res.Skipped += "$($pkg.Name) (name is not <guid>.<version>.pbiviz)"; continue }
+            $target = Join-Path $legacyDir $pkg.Name
+            $manifestPath = Join-Path $legacyDir ($pkg.Name.Substring(0, $pkg.Name.Length - 7) + '.release.json')
+            if ((Test-Path -LiteralPath $target) -or (Test-Path -LiteralPath $manifestPath)) { $res.Skipped += "$($pkg.Name) (already archived)"; continue }
+            if (-not (Test-Path -LiteralPath $legacyDir)) { New-Item -ItemType Directory -Path $legacyDir -Force | Out-Null }
+            [IO.File]::Copy((ConvertTo-PbivizIoPath $pkg.FullName), (ConvertTo-PbivizIoPath $target), $false)
+            $bytes = [IO.File]::ReadAllBytes((ConvertTo-PbivizIoPath $target))
+            $manifest = [ordered]@{
+                schemaVersion = 1; visual = $Visual; guid = $m.Groups['guid'].Value; version = $m.Groups['ver'].Value; origin = 'legacy-archive'; validated = $false
+                sourceSha = $null; sourceFingerprint = $null; packageFile = $pkg.Name; sha256 = (Get-PbivizSha256Hex $bytes); bytes = $bytes.Length
+                importedFrom = "dist/$($pkg.Name)"; importedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+            }
+            Write-PbivizTextFile -Path $manifestPath -Text (ConvertTo-PbivizJson $manifest)
+            $added.Add("$Visual/releases/legacy/$($pkg.Name)")
+            $added.Add("$Visual/releases/legacy/" + (Split-Path $manifestPath -Leaf))
+        }
+        if ($added.Count -gt 0) {
+            $f = Write-PbivizPathspecFile -Paths $added.ToArray(); $files += $f
+            $add = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('add', "--pathspec-from-file=$f", '--pathspec-file-nul')
+            if ($add.ExitCode -ne 0) { $res.Reason = "staging failed: $(Get-PbivizGitError $add)"; return $res }
+        }
+        $res.Archived = $added.ToArray()
+        $res.Status = 'PASS'
+        $res.Evidence.Add("archived $($added.Count / 2) legacy package(s) as validated:false")
+    } catch { $res.Status = 'BLOCKED'; $res.Reason = $_.Exception.Message }
+    finally { foreach ($x in $files) { Remove-Item -LiteralPath $x -Force -ErrorAction SilentlyContinue } }
+    return $res
+}
+
+function Get-PbivizDependencyEscapes {
+    param([string]$Worktree, [string]$Visual, [string[]]$Allowlist)
+    $visualDir = (Join-Path $Worktree $Visual).TrimEnd('\')
+    $escapes = New-Object System.Collections.Generic.List[string]
+    $codeRx = '(?:import|export)\s[^;]*?from\s*[''"]([^''"]+)[''"]|require\(\s*[''"]([^''"]+)[''"]\s*\)|import\(\s*[''"]([^''"]+)[''"]\s*\)|@import\s+(?:\([^)]*\)\s*)?[''"]([^''"]+)[''"]'
+    $files = @(Get-ChildItem -LiteralPath $visualDir -Recurse -File -ErrorAction SilentlyContinue | Where-Object {
+        $rel = $_.FullName.Substring($visualDir.Length + 1)
+        $_.Extension -in @('.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.less', '.css', '.scss', '.json') -and
+        $rel -notmatch '^(node_modules|dist|\.tmp|releases)\\'
+    })
+    foreach ($file in $files) {
+        $text = [IO.File]::ReadAllText((ConvertTo-PbivizIoPath $file.FullName))
+        $specs = New-Object System.Collections.Generic.List[string]
+        if ($file.Extension -eq '.json') {
+            foreach ($m in [regex]::Matches($text, '"((?:file:)?\.\.?/[^"]+)"')) { $specs.Add(($m.Groups[1].Value -replace '^file:', '')) }
+        } else {
+            foreach ($m in [regex]::Matches($text, $codeRx)) { foreach ($g in 1..4) { if ($m.Groups[$g].Success) { $specs.Add($m.Groups[$g].Value) } } }
+        }
+        foreach ($s in $specs) {
+            if (-not $s.StartsWith('.')) { continue }
+            $target = [IO.Path]::GetFullPath((Join-Path $file.DirectoryName ($s -replace '/', '\')))
+            if ($target.StartsWith($visualDir + '\', [StringComparison]::OrdinalIgnoreCase) -or $target -eq $visualDir) { continue }
+            $rel = if ($target.StartsWith($Worktree.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { $target.Substring($Worktree.TrimEnd('\').Length + 1).Replace('\', '/') } else { $target }
+            $ok = $false
+            foreach ($a in $Allowlist) {
+                $ap = $a.Replace('\', '/')
+                if ($rel -eq $ap -or $ap.StartsWith("$rel.", [StringComparison]::Ordinal) -or $ap.StartsWith("$rel/", [StringComparison]::Ordinal) -or $rel.StartsWith("$ap/", [StringComparison]::Ordinal)) { $ok = $true }
+            }
+            if (-not $ok) { $escapes.Add("$($file.FullName.Substring($visualDir.Length + 1).Replace('\', '/')) -> $s") }
+        }
+    }
+    return $escapes.ToArray()
+}
+
+# G0-G6. The verdict never depends on pathspec matching: the complete staged diff is parsed once.
+function Test-PbivizPromotionGates {
+    param([string]$Worktree, [string]$Visual, [string]$TargetRef = $null, [string[]]$Allowlist = @(), [switch]$ArchiveOnly)
+    $res = [pscustomobject][ordered]@{ Status = 'BLOCKED'; Reason = ''; Gates = (New-Object System.Collections.Generic.List[object]); Changes = @() }
+    $add = { param($id, $pass, $detail) $res.Gates.Add([pscustomobject]@{ Gate = $id; Pass = [bool]$pass; Detail = [string]$detail }) }
+    try {
+        $syntax = Test-PbivizNameSyntax $Visual
+        $cs = if ($ArchiveOnly) { Test-PbivizCandidateState -Worktree $Worktree } else { Test-PbivizCandidateState -Worktree $Worktree -AfterRelease }
+        $rec = Read-PbivizCandidateRecord -Worktree $Worktree
+        $g0 = (-not $syntax) -and $cs.Status -eq 'PASS' -and $rec -and ($rec.visual -ceq $Visual)
+        $g0Detail = if ($syntax) { $syntax } elseif ($cs.Status -ne 'PASS') { $cs.Reason } elseif (-not $rec -or $rec.visual -cne $Visual) { 'candidate record does not match the visual' } else { 'inputs and candidate state valid' }
+        if ($g0 -and $TargetRef) {
+            $t = Resolve-PbivizCommit -Root $Worktree -Ref $TargetRef
+            if ($t -ne $rec.tgt) { $g0 = $false; $g0Detail = 'target ref does not match the candidate record' }
+        }
+        if ($g0 -and ($ArchiveOnly -ne ($rec.mode -eq 'archive-only'))) { $g0 = $false; $g0Detail = "candidate mode is $($rec.mode)" }
+        & $add 'G0' $g0 $g0Detail
+        # Without a record there is nothing to compare against; otherwise every gate is still
+        # evaluated so the evidence shows all failures, not only the first one.
+        if (-not $rec -or $syntax) { $res.Reason = "G0: $g0Detail"; return $res }
+        $tgt = $rec.tgt; $src = $rec.src
+        $visuals = @(Get-PbivizVisualNames -Root $Worktree -TreeIsh $tgt) + @(Get-PbivizVisualNames -Root $Worktree -TreeIsh $src) | Sort-Object -Unique
+        foreach ($a in $Allowlist) {
+            $chk = Test-PbivizRelativePath -Root $Worktree -Path $a -VisualNames $visuals
+            if ($chk.Status -ne 'PASS') { & $add 'G0' $false $chk.Reason; $res.Reason = "G0: $($chk.Reason)"; return $res }
+        }
+        $ch = Get-PbivizStagedChanges -Directory $Worktree -Base $tgt
+        if (-not $ch.Ok) { & $add 'G1' $false $ch.Reason; $res.Reason = "G1: $($ch.Reason)"; return $res }
+        $res.Changes = @($ch.Changes)
+        $releaseNames = Get-PbivizReleaseNames -Visual $Visual -Guid $rec.guid -Version $rec.version
+        $allowSet = @($Allowlist | ForEach-Object { $_.Replace('\', '/') })
+        $outside = New-Object System.Collections.Generic.List[string]
+        foreach ($c in $ch.Changes) {
+            $inScope = if ($ArchiveOnly) { $c.Path.StartsWith("$Visual/", [StringComparison]::Ordinal) -and (Test-PbivizArchivePath $c.Path) }
+                       else { (Test-PbivizSourceScope -Path $c.Path -Visual $Visual) -or ($allowSet -ccontains $c.Path) -or ($releaseNames -ccontains $c.Path) }
+            if (-not $inScope) { $outside.Add("$($c.Status) $($c.Path)") }
+        }
+        $wtree = (Invoke-PbivizGit -WorkingDirectory $Worktree -Arguments @('write-tree')).Out.Trim()
+        $fidelity = $true; $fidelityDetail = 'not applicable (archive-only)'
+        if (-not $ArchiveOnly) {
+            $fpSrc = Get-PbivizSourceFingerprint -Root $Worktree -TreeIsh $src -Visual $Visual
+            $fpIdx = Get-PbivizSourceFingerprint -Root $Worktree -TreeIsh $wtree -Visual $Visual
+            $fidelity = ($fpSrc -eq $fpIdx); $fidelityDetail = "source fingerprint $fpIdx $(if ($fidelity) { '=' } else { '!=' }) $fpSrc"
+        }
+        & $add 'G1' (($outside.Count -eq 0) -and $fidelity) ("$(@($ch.Changes).Count) change(s) in scope; $fidelityDetail")
+        & $add 'G2' ($outside.Count -eq 0) $(if ($outside.Count) { "outside the allowed set: $($outside -join ', ')" } else { 'nothing outside the allowed set differs from the target' })
+        $tgtTop = Get-PbivizTopEntries -Root $Worktree -TreeIsh $tgt
+        $idxTop = Get-PbivizTopEntries -Root $Worktree -TreeIsh $wtree
+        $g3bad = New-Object System.Collections.Generic.List[string]
+        foreach ($v in $visuals) {
+            if ($v -ceq $Visual) { continue }
+            $a = if ($tgtTop.Contains($v)) { $tgtTop[$v].Object } else { '(absent)' }
+            $b = if ($idxTop.Contains($v)) { $idxTop[$v].Object } else { '(absent)' }
+            if ($a -ne $b) { $g3bad.Add($v) }
+        }
+        & $add 'G3' ($g3bad.Count -eq 0) $(if ($g3bad.Count) { "other visuals changed: $($g3bad -join ', ')" } else { "$(@($visuals).Count - 1) other visual tree(s) identical to the target" })
+        if ($ArchiveOnly) { & $add 'G4' $true 'not applicable (archive-only)' }
+        else {
+            $esc = @(Get-PbivizDependencyEscapes -Worktree $Worktree -Visual $Visual -Allowlist $allowSet)
+            & $add 'G4' ($esc.Count -eq 0) $(if ($esc.Count) { "imports leave the visual folder: $($esc -join ', ')" } else { 'no imports leave the visual folder' })
+        }
+        if ($ArchiveOnly) { & $add 'G5' $true 'not applicable (archive-only)' }
+        else {
+            $g5 = $true; $g5d = @()
+            $idxEntries = @(Get-PbivizTreeEntries -Root $Worktree -TreeIsh $wtree)
+            $tgtEntries = @(Get-PbivizTreeEntries -Root $Worktree -TreeIsh $tgt)
+            $cur = Get-PbivizVisualIdentity -Root $Worktree -Entries $idxEntries -Visual $Visual
+            $prod = Get-PbivizVisualIdentity -Root $Worktree -Entries $tgtEntries -Visual $Visual
+            if (-not $cur) { $g5 = $false; $g5d += 'pbiviz.json missing in the candidate' }
+            else {
+                if ($cur.Guid -cne $rec.guid -or $cur.Version -ne $rec.version) { $g5 = $false; $g5d += 'candidate pbiviz.json differs from the record' }
+                if ($prod -and $prod.Guid -cne $cur.Guid) { $g5 = $false; $g5d += "GUID changed from $($prod.Guid)" }
+                $cv = ConvertTo-PbivizVersion $cur.Version
+                if ($prod) { $pv = ConvertTo-PbivizVersion $prod.Version; if ($pv -and $cv -le $pv) { $g5 = $false; $g5d += "version $($cur.Version) does not exceed Prod $($prod.Version)" } }
+                $maxArch = Get-PbivizMaxArchivedVersion (Get-PbivizReleaseLedger -Root $Worktree -Ref $tgt -Visual $Visual)
+                if ($maxArch -and $cv -le $maxArch) { $g5 = $false; $g5d += "version $($cur.Version) does not exceed archived $maxArch" }
+            }
+            & $add 'G5' $g5 $(if ($g5) { "GUID stable, version $($cur.Version) increases" } else { $g5d -join '; ' })
+        }
+        $archive = @($ch.Changes | Where-Object { Test-PbivizArchivePath $_.Path })
+        $g6 = $true; $g6d = New-Object System.Collections.Generic.List[string]
+        foreach ($c in $archive) { if ($c.Status -ne 'A') { $g6 = $false; $g6d.Add("$($c.Status) $($c.Path) (archive is append-only)") } }
+        if ($ArchiveOnly) {
+            if ($archive.Count -lt 1) { $g6 = $false; $g6d.Add('archive-only promotion adds nothing') }
+            if (@($ch.Changes).Count -ne $archive.Count) { $g6 = $false; $g6d.Add('archive-only promotion contains non-archive changes') }
+        } else {
+            $adds = @($archive | Where-Object { $_.Status -eq 'A' })
+            if ($adds.Count -ne 2 -or @($adds | Where-Object { $releaseNames -ccontains $_.Path }).Count -ne 2) { $g6 = $false; $g6d.Add("expected exactly the two new release files, found $($adds.Count) archive addition(s)") }
+        }
+        $idxList = Invoke-PbivizGit -WorkingDirectory $Worktree -Arguments @('ls-files', '-s', '-z')
+        $staged = @{}
+        foreach ($rec2 in @(Split-PbivizNul $idxList.Out)) { $tab = $rec2.IndexOf([char]9); if ($tab -gt 0) { $staged[$rec2.Substring($tab + 1)] = $rec2.Substring(0, $tab).Split(' ')[1] } }
+        $srcEntries = @(Get-PbivizTreeEntries -Root $Worktree -TreeIsh $src)
+        foreach ($c in @($archive | Where-Object { $_.Status -eq 'A' -and $_.Path.EndsWith('.release.json', [StringComparison]::Ordinal) })) {
+            $pkgPath = $c.Path.Substring(0, $c.Path.Length - '.release.json'.Length) + '.pbiviz'
+            if (-not $staged.ContainsKey($pkgPath)) { $g6 = $false; $g6d.Add("manifest without package: $($c.Path)"); continue }
+            try { $man = Read-PbivizJsonBlob -Root $Worktree -Object $staged[$c.Path] } catch { $g6 = $false; $g6d.Add("unreadable manifest: $($c.Path)"); continue }
+            $blob = Invoke-PbivizGit -WorkingDirectory $Worktree -Arguments @('cat-file', 'blob', $staged[$pkgPath]) -BinaryOutput
+            $hash = Get-PbivizSha256Hex $blob.Bytes
+            if ($hash -ne [string]$man.sha256) { $g6 = $false; $g6d.Add("SHA-256 mismatch for $pkgPath") }
+            if ($ArchiveOnly) {
+                foreach ($p in @($c.Path, $pkgPath)) {
+                    $se = Find-PbivizEntry -Entries $srcEntries -Path $p
+                    if ([string]$man.origin -ne 'legacy-archive' -and (-not $se -or $se.Object -ne $staged[$p])) { $g6 = $false; $g6d.Add("$p is neither a legacy archive nor identical to the source archive") }
+                }
+            }
+        }
+        foreach ($c in @($archive | Where-Object { $_.Status -eq 'A' -and $_.Path.EndsWith('.pbiviz', [StringComparison]::Ordinal) })) {
+            $manPath = $c.Path.Substring(0, $c.Path.Length - '.pbiviz'.Length) + '.release.json'
+            if (-not $staged.ContainsKey($manPath)) { $g6 = $false; $g6d.Add("package without manifest: $($c.Path)") }
+        }
+        & $add 'G6' $g6 $(if ($g6) { "archive changes are additions only ($($archive.Count)); hashes match" } else { $g6d -join '; ' })
+        $failed = @($res.Gates | Where-Object { -not $_.Pass })
+        if ($failed.Count -eq 0) { $res.Status = 'PASS'; $res.Reason = 'all gates passed' }
+        else { $res.Reason = (@($failed | ForEach-Object { "$($_.Gate): $($_.Detail)" }) -join ' | ') }
+    } catch { $res.Status = 'BLOCKED'; $res.Reason = $_.Exception.Message }
+    return $res
+}
+
+function Get-PbivizReleaseProvenance {
+    param([string]$Root, [string]$Visual, [string]$Version, [string]$ProdRef)
+    $res = [pscustomobject][ordered]@{ Status = 'NOT DERIVABLE'; Reason = ''; ProdCommit = $null; PackagePath = $null }
+    try {
+        $why = Test-PbivizNameSyntax $Visual
+        if ($why) { $res.Status = 'BLOCKED'; $res.Reason = "invalid input: $why"; return $res }
+        if (-not (ConvertTo-PbivizVersion $Version)) { $res.Status = 'BLOCKED'; $res.Reason = 'invalid input: version'; return $res }
+        $sh = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('rev-parse', '--is-shallow-repository')
+        if ($sh.Out.Trim() -eq 'true') { $res.Reason = 'NOT DERIVABLE (shallow clone) - fetch the full history first'; return $res }
+        $prod = Resolve-PbivizCommit -Root $Root -Ref $ProdRef
+        if (-not $prod) { $res.Status = 'BLOCKED'; $res.Reason = "invalid input: unknown ref '$ProdRef'"; return $res }
+        $hit = @(Get-PbivizReleaseLedger -Root $Root -Ref $prod -Visual $Visual | Where-Object { $_.Version -eq $Version -and $_.Origin -eq 'release' })
+        if ($hit.Count -ne 1) { $res.Reason = "no single release manifest for $Visual $Version at $ProdRef"; return $res }
+        $pkg = $hit[0].Path.Substring(0, $hit[0].Path.Length - '.release.json'.Length) + '.pbiviz'
+        $res.PackagePath = $pkg
+        $log = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('log', '--first-parent', '-m', '--diff-filter=A', '--format=%H', $prod, '--', $pkg)
+        if ($log.ExitCode -ne 0) { $res.Reason = "git log failed: $(Get-PbivizGitError $log)"; return $res }
+        $ids = @(($log.Out -split "`r?`n") | Where-Object { $_ -match '^[0-9a-f]{40}' } | Select-Object -Unique)
+        if ($ids.Count -lt 1) { $res.Reason = 'the package was not added on the first-parent history of Prod'; return $res }
+        $res.ProdCommit = $ids[-1]
+        $res.Status = 'DERIVED'; $res.Reason = "added to Prod by $($res.ProdCommit)"
+    } catch { $res.Status = 'NOT DERIVABLE'; $res.Reason = $_.Exception.Message }
+    return $res
+}
+
+function Test-PbivizReleaseIntegrity {
+    param([string]$Root, [string]$Visual, [string]$Version, [string]$Commit)
+    $res = New-PbivizResult
+    try {
+        $sha = Resolve-PbivizCommit -Root $Root -Ref $Commit
+        if (-not $sha) { $res.Status = 'BLOCKED'; $res.Reason = 'invalid input: commit'; return $res }
+        $hit = @(Get-PbivizReleaseLedger -Root $Root -Ref $sha -Visual $Visual | Where-Object { $_.Version -eq $Version -and $_.Origin -eq 'release' })
+        if ($hit.Count -ne 1) { $res.Status = 'FAILED'; $res.Reason = 'release manifest not found at the commit'; return $res }
+        $man = $hit[0].Manifest
+        $fp = Get-PbivizSourceFingerprint -Root $Root -TreeIsh $sha -Visual $Visual
+        if ($fp -ne [string]$man.sourceFingerprint) { $res.Status = 'FAILED'; $res.Reason = "source fingerprint at $($sha.Substring(0,12)) differs from the manifest"; return $res }
+        $entries = @(Get-PbivizTreeEntries -Root $Root -TreeIsh $sha)
+        $pkgPath = $hit[0].Path.Substring(0, $hit[0].Path.Length - '.release.json'.Length) + '.pbiviz'
+        $pe = Find-PbivizEntry -Entries $entries -Path $pkgPath
+        if (-not $pe) { $res.Status = 'FAILED'; $res.Reason = 'package missing at the commit'; return $res }
+        $blob = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('cat-file', 'blob', $pe.Object) -BinaryOutput
+        if ((Get-PbivizSha256Hex $blob.Bytes) -ne [string]$man.sha256) { $res.Status = 'FAILED'; $res.Reason = 'package SHA-256 differs from the manifest'; return $res }
+        $res.Evidence.Add("fingerprint and package hash match at $sha")
+    } catch { $res.Status = 'FAILED'; $res.Reason = $_.Exception.Message }
+    return $res
+}
+
+function Remove-PbivizPromotionWorktree {
+    param([string]$Root, [string]$WorktreeDir)
+    $res = New-PbivizResult
+    $why = Test-PbivizWorktreeDir -Dir $WorktreeDir
+    if ($why) { $res.Status = 'BLOCKED'; $res.Reason = "refused: $why"; return $res }
+    if (-not (@(Get-PbivizWorktreeList -Directory $Root) | Where-Object { Test-PbivizSamePath $_ $WorktreeDir })) { $res.Status = 'BLOCKED'; $res.Reason = 'refused: not a worktree of this repository'; return $res }
+    $r = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('worktree', 'remove', '--force', (ConvertTo-PbivizLongPath $WorktreeDir))
+    if ($r.ExitCode -ne 0) { $res.Status = 'FAILED'; $res.Reason = "worktree remove failed: $(Get-PbivizGitError $r)"; return $res }
+    $res.Evidence.Add('candidate worktree removed; the release branch is kept')
+    return $res
+}
+'@
+. ([scriptblock]::Create($pbivizAlmScript))
+
 $totalSteps = 9
 
 # =====================================================================
@@ -2546,6 +4231,84 @@ if ($wsCount -gt 0) {
     Write-Host "  Workspace folders to create:" -ForegroundColor White
     foreach ($name in $workspaceNames) {
         Write-Host "    -> $name (new)" -ForegroundColor Green
+    }
+}
+
+# -- Optional PBIVIZ (Power BI custom visual) development folder ---------
+# One folder for all .pbiviz projects; Step 8 makes it its own local Git repository (Level 1).
+# A rerun keeps the recorded decision: enabled -> kept silently, disabled -> asked again.
+$pbivizDefaultFolder = '0 - PBIVIZ Developing Environment'
+$pbivizMapPath = Join-Path $rootPath '.github\agent-docs\local\pbiviz-workspace.json'
+$pbivizExistingMap = $null
+$pbivizMapReadable = $true
+$pbivizEnabled = $false
+$pbivizRelativePath = $null
+$pbivizDecision = 'not-asked'
+$pbivizReserved = @('.github', '.vscode', '.git', 'scripts', 'skills-for-fabric', 'power-bi-agentic-development', 'source-control-repositories') + @($workspaceNames)
+if (Test-Path -LiteralPath $pbivizMapPath) {
+    $pbivizExistingMap = ConvertFrom-JsonLenient ([IO.File]::ReadAllText($pbivizMapPath))
+    if ($null -eq $pbivizExistingMap -or ($pbivizExistingMap.enabled -eq $true -and (Get-PbivizFolderNameProblem -Name ([string]$pbivizExistingMap.relativePath) -Reserved @('.github', '.vscode', '.git', 'scripts', 'skills-for-fabric', 'power-bi-agentic-development', 'source-control-repositories')))) {
+        $pbivizMapReadable = $false
+    }
+}
+$readPbivizName = {
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        $raw = (Read-Host "  Folder name (default: $pbivizDefaultFolder)")
+        $raw = if ($null -eq $raw) { '' } else { $raw.Trim().Trim('"').Trim("'") }
+        if ([string]::IsNullOrWhiteSpace($raw)) { $raw = $pbivizDefaultFolder }
+        $problem = Get-PbivizFolderNameProblem -Name $raw -Reserved $pbivizReserved
+        if (-not $problem) {
+            $candidatePath = Join-Path $rootPath $raw
+            if (Test-Path -LiteralPath $candidatePath -PathType Leaf) { $problem = "A file named '$raw' already exists here." }
+        }
+        if ($problem) { Write-Host "  $problem" -ForegroundColor Yellow; continue }
+        if (Test-Path -LiteralPath (Join-Path $rootPath $raw)) { Write-Host "  Folder exists; it will be reused and its contents left unchanged: $(Join-Path $rootPath $raw)" -ForegroundColor DarkGray }
+        else { Write-Host "  Will create: $(Join-Path $rootPath $raw)" -ForegroundColor Green }
+        return $raw
+    }
+    Write-Host '  No valid folder name given - PBIVIZ development is not configured this run.' -ForegroundColor Yellow
+    return $null
+}
+Write-Host ''
+Write-Host '  PBIVIZ DEVELOPMENT (OPTIONAL)' -ForegroundColor Cyan
+if (-not $pbivizMapReadable) {
+    Write-Host '  The existing pbiviz-workspace.json is unreadable or invalid; it is preserved and PBIVIZ setup is skipped this run.' -ForegroundColor Yellow
+    $pbivizDecision = 'unreadable'
+} elseif ($pbivizExistingMap -and $pbivizExistingMap.enabled -eq $true) {
+    $pbivizRelativePath = [string]$pbivizExistingMap.relativePath
+    if (Test-Path -LiteralPath (Join-Path $rootPath $pbivizRelativePath) -PathType Container) {
+        Write-Host "  PBIVIZ folder: $pbivizRelativePath (kept)" -ForegroundColor Green
+        $pbivizEnabled = $true; $pbivizDecision = 'kept'
+    } else {
+        Write-Host "  PBIVIZ folder '$pbivizRelativePath' not found." -ForegroundColor Yellow
+        $missingAns = (Read-Host '  [R]ecreate / [C]hoose another name / [D]isable (default: R)')
+        $missingAns = if ($null -eq $missingAns) { '' } else { $missingAns.Trim() }
+        if ($missingAns -match '^(d|disable)$') {
+            $pbivizDecision = 'disabled'; $pbivizRelativePath = $null
+            Write-Host '  PBIVIZ development disabled; your other files are untouched.' -ForegroundColor DarkGray
+        } elseif ($missingAns -match '^(c|choose)') {
+            $pbivizRelativePath = & $readPbivizName
+            if ($pbivizRelativePath) { $pbivizEnabled = $true; $pbivizDecision = 'renamed' } else { $pbivizDecision = 'disabled' }
+        } else {
+            Write-Host "  Will recreate: $(Join-Path $rootPath $pbivizRelativePath)" -ForegroundColor Green
+            $pbivizEnabled = $true; $pbivizDecision = 'recreate'
+        }
+    }
+} else {
+    Write-Host '  A dedicated folder for Power BI custom visual (.pbiviz) projects. Each visual becomes' -ForegroundColor DarkGray
+    Write-Host '  a sub-folder; the folder becomes its own local Git repository (history, checkpoints,' -ForegroundColor DarkGray
+    Write-Host '  restore). Nothing is generated now and existing visuals are never imported automatically.' -ForegroundColor DarkGray
+    if ($pbivizExistingMap -and $pbivizExistingMap.enabled -eq $false) {
+        Write-Host '  PBIVIZ folder: not configured.' -ForegroundColor White
+        $pbivizPrompt = '  Configure now? (y/N)'
+    } else { $pbivizPrompt = '  Create a dedicated folder for Power BI custom visual development? (y/N)' }
+    $pbivizAns = Read-Host $pbivizPrompt
+    if ($pbivizAns -match '^\s*(y|yes)\s*$') {
+        $pbivizRelativePath = & $readPbivizName
+        if ($pbivizRelativePath) { $pbivizEnabled = $true; $pbivizDecision = 'new' } else { $pbivizDecision = 'declined' }
+    } else {
+        $pbivizDecision = 'declined'
+        Write-Host '  No PBIVIZ folder. Re-run the installer to configure one later.' -ForegroundColor DarkGray
     }
 }
 
@@ -3017,6 +4780,46 @@ if ($adoFound) {
     }
 }
 
+Write-Host ""
+Write-Host "  Custom visual development (optional - nothing is installed here):" -ForegroundColor Cyan
+$pbivizNodeFloor = [version]'20.19.0'   # engines.node of powerbi-visuals-tools 7.x; each project's installed version may differ
+$nodeHit = Resolve-ToolCommand -Aliases @('node')
+$nodeVersion = if ($nodeHit) { Get-ToolVersion -Exe $(if ($nodeHit.path) { $nodeHit.path } else { 'node' }) } else { $null }
+$nodeParsed = $null
+if ($nodeVersion -match '(\d+)\.(\d+)\.(\d+)') { $nodeParsed = [version]"$($Matches[1]).$($Matches[2]).$($Matches[3])" }
+if (-not $nodeHit) {
+    Write-Host "  Node.js: not found -> https://nodejs.org (LTS); needed only to build custom visuals" -ForegroundColor Yellow
+    Set-ToolStatus -Key 'node' -Found $false -Category 'pbiviz-toolchain' -InstallMode 'detect' -Reason 'not installed (needed only for custom visual builds)' -AliasesChecked @('node')
+} else {
+    $nodeNote = if ($nodeParsed -and $nodeParsed -lt $pbivizNodeFloor) { " (older than $pbivizNodeFloor required by current powerbi-visuals-tools)" } else { '' }
+    Write-Host "  Node.js: found $nodeVersion$nodeNote" -ForegroundColor $(if ($nodeNote) { 'Yellow' } else { 'Green' })
+    Set-ToolStatus -Key 'node' -Found $true -Command 'node' -Path $nodeHit.path -Version $nodeVersion -Category 'pbiviz-toolchain' -InstallMode 'detect' -AliasesChecked @('node') -Extra @{ minimumForCurrentTools = $pbivizNodeFloor.ToString() }
+}
+$npmHit = Resolve-ToolCommand -Aliases @('npm')
+if ($npmHit) {
+    $npmVersion = Get-ToolVersion -Exe $(if ($npmHit.path) { $npmHit.path } else { 'npm' })
+    Write-Host "  npm: found $npmVersion" -ForegroundColor Green
+    Set-ToolStatus -Key 'npm' -Found $true -Command 'npm' -Path $npmHit.path -Version $npmVersion -Category 'pbiviz-toolchain' -InstallMode 'detect' -AliasesChecked @('npm')
+} else {
+    Write-Host "  npm: not found (installed together with Node.js)" -ForegroundColor Yellow
+    Set-ToolStatus -Key 'npm' -Found $false -Category 'pbiviz-toolchain' -InstallMode 'detect' -Reason 'not installed (comes with Node.js)' -AliasesChecked @('npm')
+}
+$pbivizHit = Resolve-ToolCommand -Aliases @('pbiviz')
+if ($pbivizHit) {
+    Write-Host "  pbiviz CLI (global): found - agents still prefer each project's local copy" -ForegroundColor Green
+    Set-ToolStatus -Key 'pbivizCli' -Found $true -Command 'pbiviz' -Path $pbivizHit.path -Category 'pbiviz-toolchain' -InstallMode 'detect' -AliasesChecked @('pbiviz') -Extra @{ preferred = 'project-local node_modules/.bin/pbiviz' }
+} else {
+    Write-Host "  pbiviz CLI (global): not on PATH - not required; each visual uses its project-local powerbi-visuals-tools" -ForegroundColor DarkGray
+    Set-ToolStatus -Key 'pbivizCli' -Found $false -Category 'pbiviz-toolchain' -InstallMode 'detect' -Reason 'not on PATH (not required: project-local CLI per visual)' -AliasesChecked @('pbiviz') -Extra @{ preferred = 'project-local node_modules/.bin/pbiviz' }
+}
+$gitIdName = ''; $gitIdMail = ''
+try { $gitIdName = [string](& git config --global user.name 2>$null); $gitIdMail = [string](& git config --global user.email 2>$null) } catch { }
+$gitIdentityOk = -not ([string]::IsNullOrWhiteSpace($gitIdName) -or [string]::IsNullOrWhiteSpace($gitIdMail))
+if ($gitIdentityOk) { Write-Host "  Git identity: configured (needed for PBIVIZ commits)" -ForegroundColor Green }
+else { Write-Host "  Git identity: user.name / user.email not set - PBIVIZ commits need it (git config --global user.name ""Your Name"")" -ForegroundColor Yellow }
+Set-ToolStatus -Key 'gitIdentity' -Found $gitIdentityOk -Category 'pbiviz-info' -InstallMode 'detect' -Reason $(if ($gitIdentityOk) { $null } else { 'git user.name / user.email not set' })
+Set-ToolStatus -Key 'pbivizMcp' -Found ([bool]$nodeHit) -Category 'pbiviz-info' -InstallMode 'detect' -Reason 'per project: run pbiviz mcp --init inside a visual folder and open that folder as a workspace root' -Extra @{ scope = 'project'; configured = $false; serverKey = 'pbiviz'; status = 'detected only - never callable until started for a specific visual' }
+
 Write-Host "  Tool inventory built (written to .github/agent-docs/tool-status.json in a later step)." -ForegroundColor DarkGray
 
 # -- Optional: check already-installed tools for newer versions ----------
@@ -3077,6 +4880,24 @@ if ($workspaceNames.Count -gt 0) {
         } else {
             Write-Host "  Workspace exists:  $name" -ForegroundColor Yellow
         }
+    }
+}
+
+# PBIVIZ folder: only the folder itself is created; its contents are never touched.
+# Whether it was empty BEFORE this step decides the optional baseline commit (Step 8).
+$pbivizRootPath = $null
+$pbivizFolderWasEmpty = $false
+$pbivizCreatedNow = $false
+if ($pbivizEnabled -and $pbivizRelativePath) {
+    $pbivizRootPath = Join-Path $rootPath $pbivizRelativePath
+    if (Test-Path -LiteralPath $pbivizRootPath -PathType Container) {
+        $pbivizFolderWasEmpty = (@(Get-ChildItem -LiteralPath $pbivizRootPath -Force -ErrorAction SilentlyContinue).Count -eq 0)
+        Write-Host "  PBIVIZ folder exists (contents untouched): $pbivizRelativePath" -ForegroundColor Yellow
+    } else {
+        New-Item -ItemType Directory -Path $pbivizRootPath -Force | Out-Null
+        $pbivizFolderWasEmpty = $true
+        $pbivizCreatedNow = $true
+        Write-Host "  Created PBIVIZ folder: $pbivizRelativePath" -ForegroundColor Green
     }
 }
 
@@ -4949,6 +6770,458 @@ cannot perform**. So:
 Write-ManagedFile $cliPolicySkillPath $cliPolicyContent
 Write-Host "  Written: .github/skills/fabric-cli-policy/SKILL.md" -ForegroundColor Green
 
+# ----- PBIVIZ house skills (custom visual development, 080 team) -------
+# Original house procedures; no vendor text. Vendor skills and Microsoft Learn own syntax.
+$pbivizSkills = [ordered]@{}
+$pbivizSkills['pbiviz-pbip-reconstruction'] = @'
+---
+name: pbiviz-pbip-reconstruction
+description: "Use when converting a native PBIP/PBIR Power BI visual (for example an IBCS-style chart built from DAX visual calculations and helper measures) into a custom .pbiviz visual: artifact inventory, business vs presentation classification, the semantic gate and the Planner mapping table. House workflow, not an API reference."
+---
+
+# PBIP-to-PBIVIZ Reconstruction -- House Skill
+
+Original house procedure from four in-house IBCS visuals; the original projects are an optional
+reference, never a dependency. Microsoft PBIR and visual API documentation own syntax.
+
+## Inventory (read-only; discover, do not assume)
+1. Locate the `.pbip`, the report definition and the semantic model. Typical PBIR paths are
+   examples only: `<Report>.Report/definition/pages/<page>/visuals/<id>/visual.json`,
+   `<Model>.SemanticModel/definition/tables/*.tmdl`. Formats vary between versions.
+2. Record the native visual type, field-well role assignments, measures, visual calculations,
+   visual/page/report filters, sort, formatting objects, hidden helper measures, theme
+   overrides, interactions and conditional colour logic; cross-reference the TMDL and DAX.
+3. Capture an observable behaviour specification: screenshots if provided, representative data,
+   states, tooltips, selection, colour semantics, accessibility, formatting persistence.
+
+## Classify every binding
+(a) authoritative business metric, (b) role/grain needed for cross-filtering, (c) formatting or
+display helper, (d) visual calculation / workaround, (e) uncertain. Presentation-only helpers
+MAY become TypeScript render rules; changing a model measure needs explicit semantic
+validation. Never delete model measures silently - removal is a proposal.
+
+## Semantic gate
+Row-wise recomputation is not equivalent to DAX evaluated in a new filter context. Never
+aggregate YTD, distinct counts, ratios, weighted averages, snapshots or arbitrary measures by
+summing lower-grain DataView rows. Example: monthly YTD values `10, 20, 30` must NOT become a
+quarter YTD of `60` (the correct quarter-end YTD is `30`). Classify each measure additive /
+semi-additive / non-additive / unknown and state which model query or additional bound measure
+provides higher-grain results. If exact semantics cannot be preserved: blocker, or an approved,
+disclosed limitation.
+
+## Performance is a hypothesis
+Do not promise a speed-up because logic moves from DAX to TypeScript. Benchmark like for like:
+query/DAX duration, render/update time, interaction latency, memory and large-data behaviour;
+report improvements and regressions separately.
+
+## Planner deliverable
+Mapping table: original role / expression / format / interaction -> PBIVIZ data role, render rule
+or formatting property -> preserved semantics -> acceptance case. Include kept DAX dependencies,
+removed presentation helpers, field-well simplification, backward-compatibility impact and the
+benchmark plan.
+
+## Minimum acceptance cases
+Null/blank; negative and zero; category changes; YTD and non-additive checks (the 10/20/30
+case); external slicer and filter; single and multi selection; visual-to-visual cross-filter;
+date hierarchy; field parameter if used; formatting persistence; identical filtered totals
+before and after conversion, proven by an EVALUATE query against the model compared with the
+values the new visual renders; Desktop verification (NOT RUN when no host was used).
+'@
+$pbivizSkills['pbiviz-source-conversion'] = @'
+---
+name: pbiviz-source-conversion
+description: "Use when migrating Deneb/Vega-Lite, Charticulator, DAX-generated HTML, SVG or D3/Canvas prototypes into a Power BI custom visual: analyse first, keep an explicit parity contract with licence provenance, list unsupported features. Migration discipline, not SDK documentation."
+---
+
+# Visual Source Conversion -- House Skill
+
+Original house procedure; references optional. Vendor skills and Microsoft Learn own syntax.
+
+## Analyse before coding
+Collect the exact sources (Vega-Lite spec, templates, JS/TS, HTML, CSS, DAX measures, assets,
+sample data) with their licences and origin. Extract: (a) data contract, (b) transformations and
+aggregations, (c) marks and layout, (d) format controls and defaults, (e) interactions and
+tooltips, (f) external services and assets, (g) responsiveness. Do not assume a source is legally
+or technically convertible until rights and dependencies allow it.
+
+## Mode-aware mapping
+- Deneb / Vega: read the spec with the vendor `deneb-visuals` skill (the reporting team's
+  domain), then translate encodings, transforms, scales, marks and params here. Vega `window`
+  and `joinaggregate` transforms have no DataView equivalent: they need a model measure or a
+  disclosed limitation.
+- Charticulator: map glyphs, scales and links to host render logic; keep layout assumptions.
+- HTML / DAX: extract data and templates; a DAX-generated HTML string may already embody an
+  aggregated result - do not re-derive business numbers by parsing it.
+- D3 / SVG / Canvas: wrap drawing in the current `IVisual` lifecycle with selection identities,
+  tooltips and the formatting model. Canvas is a valid strategy (custom hit testing may be
+  needed); do not force an SVG rewrite.
+
+## Parity contract
+| Source feature | Expected behaviour | PBIVIZ method | Test case | Licence / provenance | Known incompatibility |
+|---|---|---|---|---|---|
+
+Cover typography, layer visibility, sort, Top-N/pagination, filters, selection, keyboard,
+localisation, viewport and export where applicable. Final report label per feature:
+MATCHED / CHANGED BY AGREEMENT / UNSUPPORTED / NOT TESTED.
+
+## Security
+Treat imported code as untrusted; sanitise dynamic content; no unsafe HTML injection; replace
+remote/CDN dependencies with properly licensed local packages. Private sideloaded visuals and
+certified AppSource visuals have different constraints - read the current Microsoft rules when
+AppSource is in scope. Never claim packaging success without running it.
+'@
+$pbivizSkills['pbiviz-ibcs-semantic-contract'] = @'
+---
+name: pbiviz-ibcs-semantic-contract
+description: "Apply the in-house IBCS-inspired Actual vs Comparison Value semantics (delta and percentage rules, favourable/unfavourable colouring, temporal regrouping, layout) learned from four in-house PBIVIZ charts. Domain contract, not a Power BI Visuals API reference."
+---
+
+# IBCS Visual Semantics and Design Contract -- House Skill
+
+Domain decisions captured from the in-house visuals ibcsBarChart, ibcsColumnChart,
+ibcsVarianceColumnChart and varianceLineChart (provenance only; their source need not be
+available). Not a claim of formal IBCS certification. Realise these rules with the current
+Microsoft API.
+
+## Terms
+- Actual: the primary measure (not necessarily current-period revenue).
+- Comparison Value (CV): optional reference - PY/SPLY, Budget, Forecast or another metric.
+- `Delta = Actual - CV`; `%Delta = (Actual - CV) / CV` only where the ratio convention applies
+  and CV is non-zero. Zero or negative CV needs an explicit business rule; never silently show 0 %.
+- Names, signs and colours propagate consistently through labels, legend, sort UI, tooltips, docs.
+
+## Rules
+1. Actual is the dominant mark; CV optionally outlined; signed Delta / %Delta optional. No CV or
+   variance legend entries when the layer is absent or switched off.
+2. Format-pane properties control styling; business measures stay authoritative in the model.
+3. Field-parameter metric switching inherits the bound measure's format; a format override is
+   active only when a valid raw selector-order column is bound (grouping role when row-level
+   exactness is needed).
+4. Hiding a Month/Quarter level is a presentation decision; regrouping is an aggregation
+   decision. Regroup only additive inputs; non-additive measures need model-computed
+   higher-grain values or a disclosed restriction - otherwise STOP.
+5. Top-N / Last-N are user preferences: never rewrite the persisted value because the data is
+   shorter; render what exists and disclose DataView truncation.
+6. Complex responsive layouts use a separately testable pure layout function; optional
+   annotations hide before anything overlaps.
+7. Average / reference / trend lines state their scope: displayed sample, loaded data, or the
+   full model.
+
+## Favourable is not always positive
+A positive Delta can be bad (more failed settlements). Never equate green with positive by
+default: expose configurable directionality (favourable / unfavourable) and document the default.
+
+## Fixtures (expected values fixed before drawing)
+| Case | Actual | CV | Delta | %Delta |
+|---|---|---|---|---|
+| above | 120 | 100 | +20 | +20 % |
+| below | 80 | 100 | -20 | -20 % |
+| zero CV | 50 | 0 | +50 | undefined -> business rule, never 0 % |
+| negative Actual | -10 | 100 | -110 | -110 % |
+| missing CV | 70 | (blank) | not shown | not shown |
+
+Plus: monthly YTD `10, 20, 30` regrouped to quarter must give `30`, never `60`; percentage
+rates and distinct counts are never summed; quarter toggles; context filters; field parameter
+currency vs number; legend toggles; tiny non-zero deltas; reduced viewport.
+'@
+$pbivizSkills['pbiviz-interaction-regression'] = @'
+---
+name: pbiviz-interaction-regression
+description: "Use for PBIVIZ behaviour regression testing: selection and host synchronisation, scroll, geometry, format pane persistence, legend, data edge cases, accessibility, performance and MCP project-scope checks. Case catalogue from four in-house IBCS visuals."
+---
+
+# PBIVIZ Interaction Regression Catalogue -- House Skill
+
+Original house procedure; references optional. Microsoft host and SDK contracts outrank old
+implementation tricks. These cases preserve user-discovered failures, not universal patches:
+old snippets such as "ignore all non-empty selection callbacks", "always paddingOuter(0)",
+"epsilon rounding for every number" or "30k rows for every visual" are hypotheses to verify.
+
+## Result vocabulary
+Every case reports PASS (with evidence), FAIL (observed vs expected, reproduction) or
+NOT RUN (reason). Cases marked HOST need Power BI Desktop or Service - static inspection or a
+CLI build can never make them PASS.
+
+| ID | Scenario | Pass condition | Needs |
+|---|---|---|---|
+| SEL-01 | Click, Ctrl multi-click, plain click | only the intended selection remains | HOST |
+| SEL-02 | Clear via background, external filter, bookmark, host clear | highlights equal the host state after update | HOST |
+| SEL-03 | Grouped temporal mark selects contributing rows | filter scope matches underlying identities or the limitation is documented | HOST |
+| SCR-01 | Click a mark in a scrolled categorical visual | scroll position kept where appropriate | HOST |
+| GEO-01 | Resize; select edge categories | bands, highlights and labels do not shift | HOST |
+| GEO-02 | 200x200 and wide viewport | essential marks visible; optional layers hide without overlap | unit (layout) + HOST |
+| FMT-01 | Change format properties, save, reopen, refresh | value persisted and applied; capabilities, model and runtime consistent | HOST |
+| FMT-02 | Metric selector switches currency, count, percentage | bound-measure formats correct; selector metadata never summed | unit + HOST |
+| LNG-01 | Toggle CV, delta, percent, trend layers | legend lists exactly the rendered layers | HOST |
+| DAT-01 | Missing / blank / null / zero / negative data | no crash; explicit empty or undefined behaviour | unit |
+| DAT-02 | Month off on monthly YTD input | no naive sum (10/20/30 never becomes 60) | unit |
+| DAT-03 | Top-N/Last-N preference with a smaller dataset | preference kept; fewer items rendered | unit + HOST |
+| DAT-04 | DataView truncation / segmentation | result labelled complete or partial; no false full-data average | unit |
+| DAT-05 | pbiviz MCP started in the wrong folder | evidence rejected unless `list_visual_info` returns the project's GUID | static |
+| ACC-01 | Keyboard, high contrast, screen reader | essential interactions accessible or deficiency documented | HOST |
+| PERF-01 | Typical and maximum volume with selection and resize | measured frame/render times against declared targets, else NOT MEASURED | HOST |
+
+## Selection
+`ISelectionManager` offers `select(id, multiSelect)`, `clear()` and identity equality. Optimistic
+local state may help responsiveness but must reconcile with host-driven updates and bookmarks;
+never discard every non-empty host callback. Test async ordering and bookmark/clear first.
+
+## Rounding
+No magnitude-scaled epsilon on every value; keep raw business calculations and display rounding
+separate; use tested formatters for presentation.
+
+## Execution
+Automate pure transformations and layout as unit tests; keep a representative Desktop test
+report or a host smoke protocol. Separate static checks, CLI runs and host checks; never clean
+`dist/` or touch `releases/` while testing.
+'@
+$pbivizSkills['pbiviz-release-safety'] = @'
+---
+name: pbiviz-release-safety
+description: "Use when packaging, versioning, auditing or migrating PBIVIZ projects: preserve GUIDs, release packages and build evidence, keep the five quality labels separate, and respect Microsoft packaging and certification requirements. House workflow, not SDK documentation."
+---
+
+# PBIVIZ Release and Maintenance Safety -- House Skill
+
+Original house procedure from four in-house IBCS visuals; references optional. Microsoft Learn
+and the installed `powerbi-visuals-tools` own SDK, CLI and certification facts; vendor skills are
+read in place, never copied.
+
+## Identity
+- Never rotate `pbiviz.json` `visual.guid` of an existing visual without a separately approved
+  migration: the GUID binds every report that imported the visual.
+- `visual.version` is bumped by the writer named in the WORK ORDER (082 feature, 085
+  maintenance) only when a new distributable is intended; follow the visual's existing scheme
+  (legacy `0.0.0.N` -> increment the last part). No bumps during read-only audits.
+- A new version must exceed every archived version (validated and legacy) and, at Level 3,
+  Prod's `pbiviz.json`.
+
+## Packages
+- `pbiviz package` writes `dist/<guid>.<version>.pbiviz` (verify the produced path after every
+  build; CLI versions can differ). `dist/` is intermediate and ignored by Git.
+- Before packaging list `dist/` and `releases/`; if `<guid>.<version>.pbiviz` already exists,
+  STOP - never overwrite or delete a package.
+- Official releases are immutable pairs in `<Visual>/releases/`: `<guid>.<version>.pbiviz` +
+  `<guid>.<version>.release.json` (SHA-256, size, source commit, source fingerprint, tool and
+  Node versions, build command, test results). Added only by 086 through `Add-PbivizRelease`;
+  append-only for ever.
+
+| Storage | Level 1 | Level 2 | Level 3 | Use |
+|---|---|---|---|---|
+| `dist/` | ignored | ignored | ignored | intermediate builds |
+| `releases/` in Git | release commit on main | off-device once pushed | only via the release PR to Prod | every official release (~80 KB each) |
+| Git LFS | - | optional | optional | only if packages grow beyond ~5 MB or hundreds of releases |
+| GitHub Releases / Azure DevOps artifacts | - | optional | optional extra copy | never the only copy |
+| Organisational store / SharePoint | - | - | on explicit request | distribution; admin rights |
+
+## Evidence and quality labels
+Record Node, npm and `powerbi-visuals-tools` versions, lockfile state, Git commit, build command,
+exit code, output size and SHA-256. Five labels, never collapsed, each with its own evidence:
+CODE REVIEWED / BUILT / HOST TESTED / CERTIFICATION READY / MICROSOFT CERTIFIED.
+A passing `pbiviz package` is not a test pass, not a security audit, not host validation and
+never Microsoft certification.
+
+## Toolchain facts (verified against microsoft/PowerBI-visuals-tools)
+- The CLI works on the current directory (`rootPath = process.cwd()`): run every command FROM the
+  visual folder.
+- `pbiviz new` copies the template, generates a GUID and runs `npm install` automatically - it
+  downloads packages and needs `APPROVED:INSTALL:<visual>`.
+- Prefer the project-local CLI (`node_modules/.bin/pbiviz`, or `npx --no pbiviz`, which refuses
+  to download) and `npm ci` when a lockfile exists. No global installs, no `npx -y`.
+- Node minimum: read `engines.node` from the project's installed
+  `node_modules/powerbi-visuals-tools/package.json`; do not freeze an old Node version.
+- `pbiviz mcp --init` writes `.vscode/mcp.json` in the current folder (server key `pbiviz`,
+  `npx -y powerbi-visuals-tools mcp`) and refuses to overwrite an existing file. The server is in
+  preview and exposes exactly five tools: `get_best_practices`, `check_vulnerabilities`,
+  `prepare_certification`, `list_visual_info`, `get_available_apis`. It never builds or packages.
+  Its results describe the folder it was started in: trust them only after `list_visual_info`
+  returns the expected GUID; otherwise NOT VERIFIED.
+
+## Audit before migration (085)
+1. Capture Git state, deployed version, dependencies, persisted capability names, target hosts.
+2. Audit versions, deprecations and security; separate runtime findings from dev-only
+   transitive warnings; propose a minimal change set (no blind @latest, no `npm audit fix --force`).
+3. Apply only the approved change set with a rollback plan, scoped to the assigned visual.
+4. Build, hash, and hand off to independent testing and review.
+
+## Consumers
+File-imported visuals live inside each report and must be re-imported per report;
+organisational-store visuals update when an admin updates them; AppSource visuals update
+automatically. Never claim that a new version reached reports without confirmation.
+
+## Boundaries
+Vendor repositories stay read-only; legacy visuals are never copied into the installer
+repository; the PBIVIZ folder is user data and is never purged by installer reruns.
+'@
+$pbivizSkills['pbiviz-alm-release'] = @'
+---
+name: pbiviz-alm-release
+description: "Use for the PBIVIZ repository lifecycle: Level 1 local checkpoints and restores, Level 2 GitHub/Azure DevOps connect and sync, Level 3 PBVIZ_Team_Dev/Test/Prod with selective single-visual promotion, append-only .pbiviz release pairs, derived release provenance, approved distribution and rollback. House rules executed through .github/agent-docs/Pbiviz-Alm.ps1."
+---
+
+# PBIVIZ ALM and Release -- House Skill
+
+Original house procedure (field experience from four in-house IBCS visuals). Git syntax and
+provider APIs come from the official Git, GitHub and Azure DevOps documentation; nothing here is
+copied from vendor skills. The deterministic parts live in `.github/agent-docs/Pbiviz-Alm.ps1`:
+dot-source it in a script and call its functions - never re-implement its checks by hand.
+
+## Repository identity
+- ONE Git repository at the PBIVIZ folder root (`.github/agent-docs/local/pbiviz-workspace.json`
+  -> `relativePath`); each visual is a sub-folder with its own `pbiviz.json` identity. Not a
+  repository per visual; never the outer workspace repository, `source-control-repositories/*`
+  or the vendor skill clones.
+- The installer creates Level 1 (`git init -b main`, repo-local `core.longpaths`, `.gitignore`,
+  `.gitattributes`) and, only for a brand-new empty folder with a Git identity, one
+  configuration-only baseline commit (trailer `Fabric-Agentic-Installer: pbiviz-baseline`). It
+  never configures remotes, branches, pull requests, pipelines or destinations.
+- The level is DERIVED by `Get-PbivizRepoState`, never assumed:
+
+| Level | Repository state | Provides |
+|---|---|---|
+| 1 Local | `main`, no remote | history, diff, checkpoints, restore - not an off-device backup |
+| 2 Remote | `main` <-> `origin/<default branch>` | off-device backup, collaboration |
+| 3 Advanced | `PBVIZ_Team_Dev` / (`PBVIZ_Team_Test`) / `PBVIZ_Team_Prod` | PR gates, protected Prod, single-visual promotion |
+
+## Approval tokens
+`APPROVED:CHECKPOINT` (only if the user wants per-commit confirmation), `CONNECT:<url>`,
+`PUSH:<branch>`, `BRANCHES:<repo>`, `POLICY:<branch>`, `PR:<branch>`, `MERGE:<repo>#<pr>`,
+`TAG:<name>`, `DISTRIBUTE:<destination>`, `MERGE-LOCAL:<paths>`, `INSTALL:<visual>`.
+A request in plain words is not a token.
+
+## Input validation (before ANY Git command)
+- `Test-PbivizVisualInput`: one path segment `^[A-Za-z0-9][A-Za-z0-9 ._-]{0,99}$`; no trailing dot
+  or space; not `.`, `..`, `.git`, `node_modules`, `releases` or a Windows device name; an
+  exact-case tree entry containing `pbiviz.json`; on disk inside the root and not a junction.
+- `Test-PbivizRelativePath` for shared-file allowlists; `Resolve-PbivizCommit` for refs
+  (`--end-of-options`, values starting with `-` rejected, branch names via `check-ref-format`).
+- A rejection is `BLOCKED: invalid input <reason>` and nothing has changed.
+- Helper Git I/O is binary-safe: `-z` output read as UTF-8 through a .NET process,
+  NUL-separated pathspec files written as UTF-8 WITHOUT a BOM, `GIT_LITERAL_PATHSPECS=1`. User
+  paths never travel through glob pathspecs or PowerShell pipelines.
+
+## Level 1 -- local
+- Status, diff and log first. Checkpoint: stage ONE visual by path, show the staged list, verify
+  `user.name` / `user.email`, commit `<visual>: <summary> (v<version>)`; refuse when unrelated
+  visuals are staged.
+- Restore: `git restore --source=<sha> -- <paths>` into the working tree, or `git revert <sha>`.
+- Official release (Level 1 and 2): `Add-PbivizRelease -Root <root> -Visual <v> -SourceSha <HEAD>`
+  on a clean tree adds the new release pair; the release commit adds exactly those two files.
+
+## Level 2 -- connect without losing history
+Principle: no operation moves an existing local branch to a commit that does not contain its
+current tip. After `APPROVED:CONNECT`, `Connect-PbivizRemoteHistory -Fetch`:
+- fetches exactly one branch (`--no-tags --no-prune`, explicit refspec);
+- refuses to merge when tracked files are dirty, a merge or rebase is in progress, or a path the
+  remote tracks exists locally as an untracked OR ignored file (Git would silently overwrite an
+  ignored file and `merge --abort` would then delete it);
+- applies exactly one case:
+
+| Local | Remote | Action |
+|---|---|---|
+| >= 1 commit | empty | nothing locally; push `-u origin main` with `APPROVED:PUSH` |
+| >= 1 commit | related history | fast-forward only; otherwise stop and offer a merge |
+| >= 1 commit | unrelated history | backup ref, `merge --no-ff --no-commit --allow-unrelated-histories`; conflict -> abort and report the paths; otherwise commit (two root commits, nothing lost) |
+| unborn, no files | has history | tracking checkout of the remote branch |
+| unborn, files present | has history | NEEDS CHECKPOINT: commit the files first, then the unrelated-history row |
+| any | default branch is not `main` | ask which branch to track |
+
+- Asserted afterwards (`Assert-PbivizAdoptionOutcome`): the old local tip is an ancestor of the
+  new tip (backup and remote-tracking refs never count); after a failed merge HEAD, index,
+  tracked files and untracked/ignored file contents are exactly as before; the only ref changes
+  are the remote-tracking branch and one `refs/pbiviz-backup/connect-<utc>` ref.
+- Adoption conflicts (`.gitignore`, `.gitattributes`, `README.md`): propose a resolution (ignore
+  files: union of lines) and re-run only after `APPROVED:MERGE-LOCAL:<paths>`.
+- Daily: one-branch fetch -> collision pre-check -> `merge --ff-only`; divergence -> offer a merge
+  (or a rebase of unpublished local commits) with approval.
+
+## Level 2 -> Level 3
+Clean tree and up-to-date `main`. With `APPROVED:BRANCHES`: `PBVIZ_Team_Dev` at `origin/main`,
+`PBVIZ_Team_Prod` at the user-confirmed commit (or empty), `PBVIZ_Team_Test` on request; push;
+switch the local checkout to Dev. `main` stays untouched. Branch policies (required reviewers on
+Prod, build validation, no direct pushes) start as a checklist and are applied only with
+`APPROVED:POLICY` and provider permission. An empty Prod receives earlier releases through an
+archive-only promotion.
+
+## Level 3 -- selective single-visual promotion
+A plain Dev -> Prod pull request carries every pending difference; never use it to release one
+visual. Two scopes per visual: SOURCE = everything under `<Visual>/` except `<Visual>/releases/`;
+ARCHIVE = `<Visual>/releases/**` (Prod is authoritative; the Dev archive is never read).
+
+1. Pin SRC (Dev SHA) and TGT (Prod tip) as full SHAs and validate all inputs; the version must
+   exceed every archived version (validated and legacy) and Prod's `pbiviz.json`.
+2. `New-PbivizPromotionCandidate`: temp worktree on `release/pbiviz/<visual>/<version>` from TGT;
+   explicit `ls-tree -rz` file lists of the source scope restored from SRC; source files that
+   exist only in Prod removed; every path checked for Windows representability; candidate
+   record written.
+3. Build and test inside the worktree (state checked before and after the build), then
+   `Add-PbivizRelease -Worktree` stages exactly the new pair.
+4. `Test-PbivizPromotionGates` - every gate must PASS:
+   - G0 inputs validated; the worktree was created by the helper.
+   - G1 the complete staged diff (`diff-index --cached -z --name-status --no-renames <TGT>`, no
+     pathspec) stays inside the visual's source scope + allowlist + the two new release files;
+     the source fingerprint equals SRC.
+   - G2 nothing else differs from TGT. G3 every other visual tree is identical to TGT.
+   - G4 no import leaves the visual folder unless allowlisted. G5 GUID stable, version increases.
+   - G6 the archive is append-only across all visuals: archive entries are only `A`; exactly the
+     two new files for a release promotion; each manifest SHA-256 matches its package.
+5. Commit on the release branch (trailer `Pbiviz-Release: <visual>@<version>`); push and open the
+   pull request to Prod only with `APPROVED:PUSH` and `APPROVED:PR`. The pull request carries
+   everything Prod will ever hold for this release: source, package, manifest, gate evidence
+   and the rollback reference.
+6. Merge only with `APPROVED:MERGE` AND the provider reporting every required review and check
+   satisfied (GitHub `gh pr view --json reviewDecision,mergeStateStatus,statusCheckRollup`;
+   Azure DevOps `az repos pr policy list`). The agent never votes on its own pull request.
+7. After the merge nothing is written to Prod. `Get-PbivizReleaseProvenance` derives the Prod
+   commit (`git log --first-parent -m --diff-filter=A <prod> -- <package path>`, valid for
+   merge, squash and rebase); `Test-PbivizReleaseIntegrity` re-checks the source fingerprint
+   there. Optional annotated tag `pbiviz/<visual>/<version>` with `APPROVED:TAG` and provider
+   permission. `Remove-PbivizPromotionWorktree` cleans up.
+
+- Mixed Dev commits are safe: only the selected visual's files are restored.
+- A shared dependency outside the visual is BLOCKED unless allowlisted and approved.
+- Prod-only hotfixes are ported back to Dev with the same file-list procedure.
+
+## Candidate worktree state contract
+"Clean" differs by object. SRC is an immutable SHA (the user's checkout may be dirty and is never
+touched). The candidate worktree is EXPECTED to carry staged changes: it must match the recorded
+candidate tree exactly, with no unstaged edits and no untracked non-ignored files; after
+`Add-PbivizRelease` it differs by exactly the two new archive files. Anything else is BLOCKED.
+
+## Release archive and provenance
+- `<Visual>/releases/<guid>.<version>.pbiviz` + `<guid>.<version>.release.json` (schemaVersion,
+  visual, guid, version, origin release | legacy-archive, validated, sourceSha,
+  sourceFingerprint, sharedFiles (allowlisted path + blob id), packageFile, sha256, bytes, builtAt,
+  toolsVersion, nodeVersion, buildCommand, tests, level). No Prod commit, PR or tag inside the
+  file: those are derived or external.
+- Append-only: never modified, renamed or deleted. Rollback = release again with a higher
+  version built from the earlier validated source.
+- Legacy `dist/` packages may be archived once per visual on request (`releases/legacy/`,
+  `validated: false`); they count for version monotonicity, never as validated releases.
+- Four states, reported separately: code versioned, package released, code promoted,
+  distributed. Distribution only on explicit request; file-imported visuals must be re-imported
+  per report.
+
+## Never
+- `git switch -C`, `git checkout -B`, `git branch -f`, `git update-ref refs/heads/...`,
+  `git reset --hard`, `git clean -f` / `-fdx`, `git push --force` / `-f`.
+- `gh pr merge --admin`, `az repos pr update --bypass-policy`, approving or voting on your own
+  pull request.
+- Writing to Prod after a merge; modifying or deleting existing release pairs.
+- Plain Dev -> Prod pull requests for a single-visual release.
+- Glob pathspecs for user paths; editing visual source or `visual.version` (082/085 own them).
+
+## Official references
+- Git documentation: https://git-scm.com/docs
+- Azure Repos pull requests: https://learn.microsoft.com/azure/devops/repos/git/pull-requests
+- Azure Repos branch policies: https://learn.microsoft.com/azure/devops/repos/git/branch-policies
+- GitHub protected branches: https://docs.github.com/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches
+'@
+foreach ($pbivizSkillName in $pbivizSkills.Keys) {
+    Write-ManagedFile "$rootPath\.github\skills\$pbivizSkillName\SKILL.md" $pbivizSkills[$pbivizSkillName]
+    Write-Host "  Written: .github/skills/$pbivizSkillName/SKILL.md" -ForegroundColor Green
+}
+
 Read-Host "`n  Press Enter to continue..."
 
 # =====================================================================
@@ -5155,6 +7428,8 @@ if (Test-Path -LiteralPath $toolStatusPath) {
                 continue
             }
             if ($t.category -eq 'az-extension') { if ($t.found) { $present += $prop.Name }; continue }
+            # Informational PBIVIZ entries (Git identity, per-project pbiviz MCP) have no executable to re-check.
+            if ($t.category -eq 'pbiviz-info') { continue }
             $ok = $false
             if ($t.path -and (Test-Path -LiteralPath $t.path)) { $ok = $true }
             elseif ($t.command) {
@@ -5180,6 +7455,19 @@ if (Test-Path -LiteralPath $toolStatusPath) {
     if ($mcpMissing.Count -gt 0) { $mcpLine += " | not installed: $($mcpMissing -join ', ')" }
     $out.Add("MCP      $mcpLine | connected: none yet - the Master opens a Power BI modeling connection (ConnectFabric) in the main chat before dispatching live-model work; installed != callable")
 } else { $out.Add('TOOLS    tool-status.json not found -> re-run the installer') }
+
+# -- PBIVIZ custom visual repository (optional; read-only) --
+$pbivizMapFile = Join-Path $root '.github/agent-docs/local/pbiviz-workspace.json'
+if (Test-Path -LiteralPath $pbivizMapFile) {
+    try {
+        $pbivizMapObj = [IO.File]::ReadAllText($pbivizMapFile) | ConvertFrom-Json
+        if ($pbivizMapObj.enabled -eq $true -and $pbivizMapObj.relativePath) {
+            . (Join-Path $root '.github/agent-docs/Pbiviz-Alm.ps1')
+            $pbivizInitRecorded = if ($pbivizMapObj.git) { [string]$pbivizMapObj.git.initStatus } else { $null }
+            $out.Add("PBIVIZ   $(Get-PbivizStatusLine -Root (Join-Path $root ([string]$pbivizMapObj.relativePath)) -RelativePath ([string]$pbivizMapObj.relativePath) -InitStatus $pbivizInitRecorded)")
+        } else { $out.Add('PBIVIZ   not configured (re-run the installer to add a custom visual folder)') }
+    } catch { $out.Add("PBIVIZ   status unavailable: $($_.Exception.Message)") }
+}
 
 $out | ForEach-Object { Write-Output $_ }
 if ($out.Count -le 1) { Write-Output 'STATUS   script ran but collected nothing - check that .vscode/settings.json and .github/agent-docs exist under ROOT' }
@@ -5212,7 +7500,8 @@ Run exactly this, from the workspace root, in ONE terminal call:
 
   powershell -NoProfile -ExecutionPolicy Bypass -File .github/agent-docs/Get-SessionStatus.ps1
 
-It prints GENERATED / ROOT / SKILLS / CONFIG / MCP / IDENTITY / TOOLS lines and refreshes
+It prints GENERATED / ROOT / SKILLS / CONFIG / MCP / IDENTITY / TOOLS lines (plus a PBIVIZ
+line when a custom visual folder is configured) and refreshes
 `.github/agent-docs/tool-status.json` live (so the tool inventory is never a stale
 install-time snapshot). It also writes the same block to
 `.github/agent-docs/session-status.last.txt`. Relay it to the user as a compact block, for example:
@@ -5222,7 +7511,8 @@ install-time snapshot). It also writes the same block to
 - Identity: fab: user@contoso.com
 - Tools: fab, az, sqlcmd, pbir, gh available | tabularEditor, pbiTools missing (fallbacks apply)
 - MCP: Fabric MCP, Power BI modeling installed | connected: none (opened on first live task)
-- Nested dispatch: enabled"
+- Nested dispatch: enabled
+- PBIVIZ: 0 - PBIVIZ Developing Environment | 2 visual(s) | git: main, 5 commit(s), clean | Level 1 (only when configured)"
 
 Rules:
 - The status script resolves the workspace root from its own location, so run it
@@ -5307,7 +7597,7 @@ Lead makes ONE cheap read-only call (list workspaces) on first use and falls bac
   classify, dispatch the owning Team Lead(s) with a WORK ORDER, consolidate.
 - **GREETING**: after the status block ask one open question: "What would you like
   to work on? (semantic models, reports, data engineering & pipelines, administration,
-  DevOps/ALM, applications, or maintenance)". No numbered menu, no dropdown switching:
+  DevOps/ALM, applications, custom visuals (.pbiviz), or maintenance)". No numbered menu, no dropdown switching:
   you route everything through the teams yourself.
 
 The user never has to change agent in the dropdown for normal work. The only
@@ -5332,7 +7622,9 @@ All skill sources are registered in `chat.agentSkillsLocations`, so every agent
 sees the full skill list (name + description) without listing directories:
 
 - **Custom (house style, always wins on style/conventions):** `.github/skills/`
-  -> `fabric-tmdl`, `fabric-pipelines`, `fabric-cli-policy`.
+  -> `fabric-tmdl`, `fabric-pipelines`, `fabric-cli-policy`, and the PBIVIZ house skills
+  `pbiviz-pbip-reconstruction`, `pbiviz-source-conversion`, `pbiviz-ibcs-semantic-contract`,
+  `pbiviz-interaction-regression`, `pbiviz-release-safety`, `pbiviz-alm-release`.
 - **Microsoft skills-for-fabric (MIT):** `skills-for-fabric/skills/<skill>/SKILL.md`
   -> Spark, SQL Warehouse/DB, Eventhouse/KQL, Dataflows, pipelines migration,
   medallion, Power BI report authoring/design/management/planning, semantic-model
@@ -5390,6 +7682,7 @@ Routing map (topic -> Team Lead -> workers):
 - Python / SDK / REST / XMLA / ODBC integrations -> **060 - Applications & Integration Team Lead** -> 061-063
 - Documents, decks, briefings and exports built from Fabric data (Word/Excel/PowerPoint/PDF via Python or Office COM) -> **060 - Applications & Integration Team Lead** (061); the data comes from the owning data team first; **002 QA** reviews any document going to a human audience
 - Skills, agents, tools, installer health, failed installs, updates -> **070 - Capability Maintenance Team Lead** -> 071-076
+- Power BI custom visual SDK projects (.pbiviz: create from a description or screenshot, reverse-engineer a PBIP visual, convert Deneb/HTML/D3/Charticulator sources, debug, maintain, version, release) and the PBIVIZ repository (checkpoint, restore, connect to GitHub/Azure DevOps, push, promote one visual to PROD) -> **080 - PBIVIZ Development Team Lead** -> 081-086. Importing a released `.pbiviz` into a report -> **020** (022 import, 026 QA) via the Master; Deneb/SVG/Python/R visuals inside a report stay with **020** -> 024; organisation-level Azure DevOps/GitHub administration stays with **050**.
 
 Route by TOPIC, not by tool availability: if a tool is missing, the request still
 belongs to the same team, which reads `tool-status.json` and degrades gracefully.
@@ -5416,10 +7709,11 @@ changed: <files / live objects, or none>
 validation: <what was run and the outcome>
 risks: <or none>
 request: <exact approval token, question, design decision, or correct owner - only when status is not DONE>
-payload: <Architect: full PLAN block | QA: full VERDICT block | everyone else: omit>
+payload: <Architect: full PLAN block | QA: full VERDICT block | PBIVIZ Planner: PBIVIZ_PLAN | PBIVIZ Reviewer: REVIEW VERDICT | everyone else: omit>
 ```
 
-The Architect's PLAN and QA's VERDICT travel verbatim in `payload` - the wrapper
+The Architect's PLAN, QA's VERDICT, the PBIVIZ Planner's PBIVIZ_PLAN and the PBIVIZ
+Reviewer's REVIEW VERDICT travel verbatim in `payload` - the wrapper
 is mandatory, the specialist block inside it is never summarised away.
 
 Parents relay a child's `request` upward unchanged. Only the top-level agent asks
@@ -5433,6 +7727,28 @@ step, or end with `NEEDS INPUT` / `FAILED` stating exactly what remains. Parents
 handle an empty or block-less return by **re-dispatching the same agent once** with
 `context: your previous turn ended without a WORK RESULT; resume from where you
 stopped and end with the WORK RESULT block` - never by doing the work themselves.
+
+---
+
+## PBIVIZ custom visual projects (080 team)
+
+- The project parent is the folder recorded in `.github/agent-docs/local/pbiviz-workspace.json`
+  (`enabled: true`). It is its OWN Git repository, ignored by the outer workspace repository.
+  No folder configured -> 080 returns `NEEDS INPUT`; never invent a location.
+- Loop: 081 Planner (PBIVIZ_PLAN) -> 082 Developer (new/feature) or 085 Maintainer (existing;
+  audit first) -> 083 Tester and 084 Reviewer in parallel -> 086 ALM & Release for Git and
+  releases. One writer per visual; the version-bump owner (082 or 085) is named in the WORK ORDER.
+- Quality labels are never collapsed: CODE REVIEWED / BUILT / HOST TESTED / CERTIFICATION READY /
+  MICROSOFT CERTIFIED. Host checks are `NOT RUN` unless executed in Power BI Desktop or Service.
+- Repository levels are derived from Git by `.github/agent-docs/Pbiviz-Alm.ps1`
+  (`Get-PbivizRepoState`): Level 1 local `main`; Level 2 `main` <-> `origin/main`; Level 3
+  `PBVIZ_Team_Dev` / (`PBVIZ_Team_Test`) / `PBVIZ_Team_Prod` with single-visual promotion through
+  release branches. Every remote, branch, push, PR, merge, tag and distribution step needs its
+  own approval token.
+- Official releases live in `<Visual>/releases/` as immutable pairs (`<guid>.<version>.pbiviz` +
+  `.release.json`), append-only. `dist/` holds intermediate builds and is ignored.
+- A released visual reaches a report only through 020 (022 import, 026 QA). File-imported visuals
+  live inside each report and must be re-imported per report; never claim propagation.
 
 ---
 
@@ -5655,6 +7971,29 @@ foreach ($mcpAgentId in $fabricMcpAgents) {
     if ($mcpServersById.ContainsKey($mcpAgentId)) { $mcpServersById[$mcpAgentId] += 'Fabric MCP' }
     else { $mcpServersById[$mcpAgentId] = @('Fabric MCP') }
 }
+# 'microsoftDocs' is the Microsoft Learn MCP server the installer merges into the
+# workspace .vscode/mcp.json; 'pbiviz' is the key `pbiviz mcp --init` writes into a
+# visual's own .vscode/mcp.json (only callable where that folder is a workspace root).
+$microsoftDocsMcpAgents = @(
+    'fabric-workspace-master', 'fabric-solution-architect', 'integration-qa-change-controller',
+    'semantic-model-team-lead', 'reporting-team-lead', 'data-engineering-team-lead',
+    'fabric-administration-governance-team-lead', 'alm-devops-team-lead', 'applications-integration-team-lead',
+    'capability-maintenance-team-lead', 'pbiviz-development-team-lead',
+    'pbiviz-planner-agent', 'pbiviz-developer-agent', 'pbiviz-tester-agent', 'pbiviz-reviewer-agent',
+    'pbiviz-maintainer-agent', 'pbiviz-alm-release-agent'
+)
+$pbivizMcpAgents = @(
+    'pbiviz-development-team-lead', 'pbiviz-planner-agent', 'pbiviz-developer-agent', 'pbiviz-tester-agent',
+    'pbiviz-reviewer-agent', 'pbiviz-maintainer-agent', 'pbiviz-alm-release-agent'
+)
+foreach ($mcpAgentId in $microsoftDocsMcpAgents) {
+    if ($mcpServersById.ContainsKey($mcpAgentId)) { $mcpServersById[$mcpAgentId] += 'microsoftDocs' }
+    else { $mcpServersById[$mcpAgentId] = @('microsoftDocs') }
+}
+foreach ($mcpAgentId in $pbivizMcpAgents) {
+    if ($mcpServersById.ContainsKey($mcpAgentId)) { $mcpServersById[$mcpAgentId] += 'pbiviz' }
+    else { $mcpServersById[$mcpAgentId] = @('pbiviz') }
+}
 
 function ConvertTo-AgentYamlList {
     param([object[]]$Values)
@@ -5848,7 +8187,7 @@ $agentKnowledge = @{
             @{ ref = "$KP/reports/skills/pbi-report-design"; why = 'design principles' },
             @{ ref = "$MS/powerbi-report-cli"; why = 'Microsoft report lifecycle skill (modes: planning / design / authoring / management via REST) - read the mode reference it points to' }
         )
-        playbook = @('Decompose: requirements/pages/visual choice -> 021; visuals and pages -> 022; theme/format -> 023; Deneb/SVG/custom -> 024; paginated -> 025; verification -> 026.', 'Serialize ownership: 022 and 023 never edit the same visual concurrently - sequence them.', 'Tool precedence for report mutation is fixed: pbir CLI first (house standard); Microsoft''s powerbi-report-author CLI only when pbir is missing from tool-status AND the user agrees to install it; direct PBIR JSON editing is the last resort and must be disclosed in the WORK RESULT.', 'Require 026 verification (pbir validate + Desktop check when available) before returning success.')
+        playbook = @('Decompose: requirements/pages/visual choice -> 021; visuals and pages (including importing a released .pbiviz) -> 022; theme/format -> 023; Deneb/SVG/Python/R inside the report -> 024; paginated -> 025; verification -> 026. Custom visual SDK projects (.pbiviz source, build, release) belong to 080 - PBIVIZ Development Team Lead via the Master.', 'Serialize ownership: 022 and 023 never edit the same visual concurrently - sequence them.', 'Tool precedence for report mutation is fixed: pbir CLI first (house standard); Microsoft''s powerbi-report-author CLI only when pbir is missing from tool-status AND the user agrees to install it; direct PBIR JSON editing is the last resort and must be disclosed in the WORK RESULT.', 'Require 026 verification (pbir validate + Desktop check when available) before returning success.')
         validate = @('pbir validate passes on the report folder; no broken field bindings to the semantic model; no overlapping visuals.')
         tools = @('pbir CLI (check tool-status found/path); direct PBIR JSON edit only as a disclosed last resort; semantic dependencies go to 010 via the Master.')
         avoid = @('Inventing measures - request them from 010 through the Master.')
@@ -5871,10 +8210,10 @@ $agentKnowledge = @{
             @{ ref = "$MS/powerbi-report-cli"; why = 'Microsoft authoring mode (references/authoring.md) - PBIR semantics and validation; its powerbi-report-author CLI is an alternative to pbir, not an addition' },
             @{ ref = "$CS/fabric-cli-policy/SKILL.md"; why = 'CLI usage policy' }
         )
-        playbook = @('Check tool-status for pbir; read its current --help before use (commands change).', 'Inspect the report definition (pages, visuals, bindings) before mutating.', 'Apply changes with pbir commands one at a time; validate after EACH mutation.', 'If pbir has no command for a mutation, first check `pbir set` with the dotted property path; only if that cannot express it, edit the PBIR JSON directly, validate immediately after, and state in the WORK RESULT exactly which file you hand-edited and why.')
+        playbook = @('Check tool-status for pbir; read its current --help before use (commands change).', 'Inspect the report definition (pages, visuals, bindings) before mutating.', 'Apply changes with pbir commands one at a time; validate after EACH mutation.', 'If pbir has no command for a mutation, first check `pbir set` with the dotted property path; only if that cannot express it, edit the PBIR JSON directly, validate immediately after, and state in the WORK RESULT exactly which file you hand-edited and why.', 'Importing an already-packaged custom visual into a PBIR report belongs here: take the official package from `<PBIVIZ folder>/<Visual>/releases/` (never from dist/), register it in the report and record its GUID/version; the package itself is produced by 080 - PBIVIZ Development Team Lead.')
         validate = @('pbir validate clean after every mutation; field references exist in the semantic model; visual container positions inside page bounds.')
         tools = @('pbir CLI (primary); direct JSON edit (fallback); never Desktop automation - that is 026.')
-        avoid = @('Editing theme files (023) or Deneb specs (024).', 'Batch edits without intermediate validation.')
+        avoid = @('Editing theme files (023) or Deneb specs (024).', 'Batch edits without intermediate validation.', 'Building or changing .pbiviz projects - that is 080 via the Master.')
     }
     'theme-formatting-agent' = @{
         skills = @(
@@ -5892,13 +8231,12 @@ $agentKnowledge = @{
             @{ ref = "$KP/custom-visuals/skills/deneb-visuals"; why = 'Deneb / Vega-Lite specs' },
             @{ ref = "$KP/custom-visuals/skills/svg-visuals"; why = 'SVG measures' },
             @{ ref = "$KP/custom-visuals/skills/python-visuals"; why = 'Python visuals' },
-            @{ ref = "$KP/custom-visuals/skills/r-visuals"; why = 'R visuals' },
-            @{ ref = "$KP/custom-visuals/skills/powerbi-custom-visuals"; why = 'AppSource/custom visual configuration' }
+            @{ ref = "$KP/custom-visuals/skills/r-visuals"; why = 'R visuals' }
         )
-        playbook = @('Confirm with the design contract that a native visual cannot do the job.', 'Implement the spec/measure; keep data volumes small; document dependencies (custom visual id, Python/R packages).')
+        playbook = @('Confirm with the design contract that a native visual cannot do the job.', 'Implement the spec/measure; keep data volumes small; document dependencies (Python/R packages, the custom visual GUID a spec relies on).', 'A request for a Power BI custom visual SDK project (.pbiviz: TypeScript, capabilities.json, pbiviz package) is not yours: return OUT OF SCOPE naming 080 - PBIVIZ Development Team Lead (via the Master).')
         validate = @('Spec parses; bound fields exist; performance acceptable on the expected row count.')
         tools = @('read/edit files only.')
-        avoid = @('Using custom visuals for standard charts.')
+        avoid = @('Using custom visuals for standard charts.', 'Creating, building or packaging .pbiviz projects - route to 080 via the Master.')
     }
     'paginated-reports-agent' = @{
         skills = @(
@@ -6097,7 +8435,7 @@ $agentKnowledge = @{
         playbook = @('Identify the repository (source-control-repositories/<repo>), branch, remote and write policy from the local map before anything.', 'Decompose: GitHub -> 051; Azure DevOps -> 052; Fabric Git connect/commit/update -> 053; release sequencing/deployment pipelines -> 054; PBIX/PBIP tooling -> 055.', 'Never infer permission to push, merge, reset, or connect a workspace from the fact that a repo was cloned.')
         validate = @('git status clean or explained; branch matches the mapped environment; PR/commit references returned.')
         tools = @('git; gh (051); az devops (052); fab (053); Fabric MCP/* read for item state.')
-        avoid = @('Force-push, reset --hard, branch deletion without approval.')
+        avoid = @('Force-push, reset --hard, branch deletion without approval.', 'Day-to-day Git of the PBIVIZ repository (the folder in `.github/agent-docs/local/pbiviz-workspace.json`) - that belongs to 086 via 080; you keep Fabric repositories and organisation-level Azure DevOps/GitHub administration.')
     }
     'github-source-control-agent' = @{
         skills = @(
@@ -6264,6 +8602,195 @@ $agentKnowledge = @{
         tools = @('read/search/edit (approved amendments only).')
         avoid = @('Silently reverting user customisations.')
     }
+    # ---------------- PBIVIZ development ----------------
+    'pbiviz-development-team-lead' = @{
+        skills = @(
+            @{ ref = "$AD/local/pbiviz-workspace.json"; why = 'the configured PBIVIZ folder (the only automatic project parent) and the cached ALM level - read FIRST' },
+            @{ ref = "$CS/pbiviz-release-safety/SKILL.md"; why = 'identity, version and package evidence; the five quality labels' },
+            @{ ref = "$CS/pbiviz-alm-release/SKILL.md"; why = 'Level 1 / 2 / 3 repository lifecycle owned by 086' },
+            @{ ref = "$KP/custom-visuals/skills/powerbi-custom-visuals"; why = 'general custom-visual construction (community-maintained, not Microsoft-endorsed; Microsoft Learn wins on API, CLI and certification)' },
+            @{ ref = "$AD/working-flow-reference.md"; why = 'routing boundaries with 020 (024 Deneb/SVG, 022 import, 026 QA) and 050' }
+        )
+        playbook = @(
+            'Read `.github/agent-docs/local/pbiviz-workspace.json` first. `enabled: true` and the folder exists -> that folder is the ONLY automatic project parent. Otherwise return `NEEDS INPUT` with: "No custom-visual folder is configured. Re-run the installer and answer Y to PBIVIZ DEVELOPMENT, or give an explicit project path." Never create projects inside skills-for-fabric, power-bi-agentic-development, source-control-repositories or Fabric item folders.',
+            'Classify: CREATE (description / screenshot) | REVERSE-ENGINEER PBIP | CONVERT SOURCE | DEBUG | RELEASE | MAINTAIN | ALM (checkpoint, restore, connect, push, promote).',
+            'Planner (081) first, except bounded maintenance audits (085) and pure ALM requests (086). Require the PBIVIZ_PLAN in its payload (archetype, grain, roles, measure aggregation classes, interactions, acceptance cases) before implementation.',
+            'One writer per visual: 082 for new/feature work OR 085 for maintenance, never both on the same visual. Name the version-bump owner (082 or 085) in every implementation WORK ORDER; 086 verifies versions and never edits them.',
+            'After a build dispatch 083 (Tester) and 084 (Reviewer) in parallel - both are read-only on the project. Route failures back to the writer as a prioritised defect list; keep fix cycles bounded.',
+            'ALM work goes to 086 only, never concurrently with 082/085 on the same visual. 086 starts every task with `Get-PbivizRepoState` from `.github/agent-docs/Pbiviz-Alm.ps1`; Level 1 (local), Level 2 (remote) and Level 3 (DEV/TEST/PROD) are derived from the repository, not assumed.',
+            'Keep the quality labels separate - CODE REVIEWED / BUILT / HOST TESTED / CERTIFICATION READY / MICROSOFT CERTIFIED - each with its own evidence; host checks stay NOT RUN unless executed in Power BI Desktop or Service.',
+            'Report integration (importing a released `.pbiviz` into a PBIR report, report QA) is handed back to the Master for 020 (022 import, 026 QA); never call another team''s workers.',
+            'Return one WORK RESULT: project path, changed paths, toolchain provenance (node / npm / pbiviz versions), commands with exit codes, package SHA-256 if built, quality labels, the Git level and commit/remote state from 086, open approvals.'
+        )
+        validate = @(
+            'Results from 082/085 carry commands with exit codes; a build pass is never inferred from reading source.',
+            'GUID unchanged for existing visuals; version bumped only when a new distributable is intended; existing release pairs untouched.',
+            '083 separates PASS / FAIL / NOT RUN; 084 returns APPROVE / BLOCK / APPROVE WITH NONBLOCKING NOTES in its payload.',
+            'Any pbiviz MCP evidence carries a GUID matching the project (`list_visual_info`); otherwise it is NOT VERIFIED.',
+            'No AppSource or Microsoft certification claim without actual Microsoft certification.'
+        )
+        tools = @(
+            'agent (dispatch 081-086) is your primary tool; read/search to inspect projects; execute only for read-only checks such as `node --version`.',
+            'Toolchain status vocabulary: detected / project-local / configured / started / callable / project-root verified - never upgrade a status without evidence.',
+            'microsoftDocs/* (Microsoft Learn MCP) for API and certification facts; pbiviz/* only when a per-project pbiviz MCP server is running and its GUID matches the project.'
+        )
+        avoid = @(
+            'Writing visual source, Git state or release files yourself.',
+            'Importing, moving or modifying legacy visuals automatically - they stay where the user put them unless the user explicitly asks.',
+            'Deneb / SVG / Python / R visuals inside reports - those stay with 020 -> 024.',
+            'Treating the existence of a `.vscode/mcp.json` as proof that an MCP server is callable.'
+        )
+    }
+    'pbiviz-planner-agent' = @{
+        skills = @(
+            @{ ref = "$CS/pbiviz-pbip-reconstruction/SKILL.md"; why = 'mode A: native PBIP/PBIR visual -> PBIVIZ mapping and the semantic gate' },
+            @{ ref = "$CS/pbiviz-source-conversion/SKILL.md"; why = 'mode B: Deneb/Vega, Charticulator, HTML/DAX, D3/SVG/Canvas parity contracts' },
+            @{ ref = "$CS/pbiviz-ibcs-semantic-contract/SKILL.md"; why = 'IBCS Actual/CV/variance semantics and fixtures' },
+            @{ ref = "$KP/custom-visuals/skills/powerbi-custom-visuals"; why = 'general custom-visual construction (community-maintained; Microsoft Learn wins on API)' },
+            @{ ref = "$KP/pbip/skills/pbir-format"; why = 'reading PBIR visual.json in mode A' },
+            @{ ref = "$KP/semantic-models/skills/dax"; why = 'reading measure semantics before classifying aggregation' }
+        )
+        playbook = @(
+            'Inspect every supplied artifact before hypothesising. Choose the mode: A PBIP reconstruction / B source conversion / C text or mockup / D change to an existing visual.',
+            'Mode A: locate visual.json and the TMDL; trace roles, visual calculations, formatting overrides and hidden helper measures; separate business measures from presentation-only helpers (removing a helper is a proposal, never an instruction).',
+            'Mode B: describe data contract, transforms, marks, interactions, dependencies and licences; list unsupported features.',
+            'Mode C: choose the archetype, field wells, cardinalities, formatting cards, viewport behaviour and accessibility; ask only material unknowns.',
+            'Mode D: read identity (GUID / version from pbiviz.json), backward compatibility of persisted properties and data roles, migration risk.',
+            'For every measure record `aggregation_class` additive / semi-additive / non-additive / unknown. Never assume summing DataView rows reproduces a measure at a higher grain (YTD, ratios, distinct counts, snapshots).',
+            'Return the PBIVIZ_PLAN YAML verbatim in the WORK RESULT `payload`: mode, target_project (inside the configured PBIVIZ folder, or PROPOSED), visual_identity, archetype, input_artifacts, data_roles, measure_semantics, capabilities, format_contract, UX, acceptance, mcp_scope (verified | not-verified), risks_and_approvals.'
+        )
+        validate = @(
+            'Every data role has a grain and a maximum cardinality; every measure has an aggregation_class; every acceptance case has a validation method.',
+            'target_project lies inside the configured PBIVIZ folder or is marked PROPOSED.'
+        )
+        tools = @('read/search only - you specify, others implement.', 'microsoftDocs/* for DataView, selection and formatting-model facts.')
+        avoid = @('Editing files, installing tools, packaging or delegating.', 'Promising performance wins because logic moves from DAX to TypeScript.', 'Inventing API versions, GUIDs or certification eligibility.')
+    }
+    'pbiviz-developer-agent' = @{
+        skills = @(
+            @{ ref = "$KP/custom-visuals/skills/powerbi-custom-visuals"; why = 'general construction (community-maintained; Microsoft Learn wins on API and CLI)' },
+            @{ ref = "$KP/custom-visuals/skills/powerbi-custom-visuals/references/pbiviz-toolchain.md"; why = 'pbiviz CLI notes - verify against `pbiviz --help` of the installed version' },
+            @{ ref = "$KP/custom-visuals/skills/powerbi-custom-visuals/references/mcp-server.md"; why = 'pbiviz MCP notes - verify against the five tools actually listed' },
+            @{ ref = "$CS/pbiviz-release-safety/SKILL.md"; why = 'GUID, version and package safety' },
+            @{ ref = "$CS/pbiviz-ibcs-semantic-contract/SKILL.md"; why = 'IBCS semantics for IBCS visuals' },
+            @{ ref = "$CS/pbiviz-interaction-regression/SKILL.md"; why = 'regression cases your change must keep green' },
+            @{ ref = "$CS/pbiviz-pbip-reconstruction/SKILL.md"; why = 'implementing a mode A plan' },
+            @{ ref = "$CS/pbiviz-source-conversion/SKILL.md"; why = 'implementing a mode B plan' }
+        )
+        playbook = @(
+            'Work only in the project path from the WORK ORDER (inside the configured PBIVIZ folder). Read pbiviz.json, package.json, capabilities.json, src/visual.ts, the formatting model, styles and the lockfile before changing anything.',
+            'Toolchain: read tool-status keys node, npm and pbivizCli; run commands FROM the visual folder with the project-local CLI (`node_modules/.bin/pbiviz`, or `npx --no pbiviz` which refuses to download); check `node --version` and `pbiviz --help` before version-sensitive flags.',
+            'First-time `pbiviz new` (it runs `npm install` automatically) and any `npm install` / `npm ci` that downloads packages need `APPROVED:INSTALL:<visual>` in your WORK ORDER; without it return NEEDS APPROVAL.',
+            'Implement data roles, mappings, the IVisual update, the formatting model and styles consistently; treat an optional DataView as absent until checked and render an explicit empty state; no eval, innerHTML or unapproved network calls.',
+            'When the Lead names you the version-bump owner and a new distributable is intended, bump `visual.version` in pbiviz.json in this same WORK ORDER; never touch `visual.guid`.',
+            'Before `pbiviz package` list `dist/*.pbiviz` and `releases/`; if `<guid>.<version>.pbiviz` already exists anywhere, stop (never overwrite). Package writes `dist/<guid>.<version>.pbiviz`; record its SHA-256 and size.',
+            'Run lint, tests and package from the visual folder and capture commands with exit codes. Fix only defects the Lead prioritised. Never commit, push or write `releases/` - that is 086.',
+            'Per-project pbiviz MCP only on request: `pbiviz mcp --init` inside the visual writes `<visual>/.vscode/mcp.json` (server `pbiviz`, `npx -y powerbi-visuals-tools mcp`). It resolves the project-local package when installed; otherwise it would download, which needs APPROVED:INSTALL. Never edit the workspace `.vscode/mcp.json`.'
+        )
+        validate = @(
+            'Build/package exit codes recorded; package path, version and SHA-256 reported, or NOT BUILT.',
+            'GUID unchanged; version bumped only when you own the bump; no existing package overwritten.',
+            'capabilities.json, formatting model and runtime settings consistent; empty state rendered.'
+        )
+        tools = @(
+            'Project-local pbiviz CLI (`node_modules/.bin/pbiviz` or `npx --no pbiviz`) and node/npm from tool-status; edit only inside the assigned visual folder.',
+            'microsoftDocs/* for current SDK/API contracts; pbiviz/* advisory tools only after `list_visual_info` returns this project''s GUID, otherwise label the result NOT VERIFIED.'
+        )
+        avoid = @('Committing, pushing, branching or writing `releases/` (086).', '`npx -y`, global installs or any download without APPROVED:INSTALL.', 'Editing another visual''s folder or a visual 085 currently owns.', 'Rotating the GUID or deleting/overwriting existing .pbiviz files.')
+    }
+    'pbiviz-tester-agent' = @{
+        skills = @(
+            @{ ref = "$CS/pbiviz-interaction-regression/SKILL.md"; why = 'case catalogue SEL / SCR / GEO / FMT / LNG / DAT / ACC / PERF' },
+            @{ ref = "$CS/pbiviz-ibcs-semantic-contract/SKILL.md"; why = 'numerical fixtures for IBCS visuals' },
+            @{ ref = "$CS/pbiviz-release-safety/SKILL.md"; why = 'package safety checks' },
+            @{ ref = "$KP/custom-visuals/skills/powerbi-custom-visuals"; why = 'general testing practice (community-maintained)' }
+        )
+        playbook = @(
+            'T0 static: JSON validity, capabilities.json roles/mappings vs the formatting model, GUID/version, lockfile, forbidden patterns (eval, innerHTML, external fetch), licence notices.',
+            'T1 executable: project scripts, typecheck, lint, unit tests, `npm audit` (report, never fix); `pbiviz package` only when `<guid>.<version>.pbiviz` does not exist in dist/ or releases/, otherwise mark the package gate NOT RUN.',
+            'T2 semantic: fixtures for blank/null, negative/zero, percentages, currency, sort, Top-N/Last-N, date hierarchy, additive vs non-additive measures and filters; a re-aggregation must never turn monthly YTD into a sum.',
+            'T3 host: Power BI Desktop/Service smoke tests (selection, bookmarks, tooltip, context menu, resize, format persistence, high contrast) - PASS only when actually executed in a host, otherwise NOT RUN.',
+            'T4 performance: compare like for like (same report, query and data volume) or mark NOT MEASURED.',
+            'Report in validation: Executed (commands + exit codes), PASS, FAIL (case id, observed vs expected, repro, severity), NOT RUN (why), package safety; verdict PASS | FAIL | INCOMPLETE.'
+        )
+        validate = @('Every PASS has an executed command or a host observation; host-only cases without host evidence are NOT RUN.', 'Existing dist/ and releases/ files are unchanged by your run.')
+        tools = @('execute: project scripts and the project-local pbiviz CLI from the visual folder; read-only on source.', 'microsoftDocs/* for expected host behaviour; pbiviz/* advisory only with a matching GUID.')
+        avoid = @('Editing source or tests to make them pass.', 'Cleaning dist/ or touching releases/.', 'Inferring host behaviour from static inspection.')
+    }
+    'pbiviz-reviewer-agent' = @{
+        skills = @(
+            @{ ref = "$CS/pbiviz-release-safety/SKILL.md"; why = 'identity, version, package and certification boundaries' },
+            @{ ref = "$CS/pbiviz-ibcs-semantic-contract/SKILL.md"; why = 'semantic equivalence rules' },
+            @{ ref = "$CS/pbiviz-source-conversion/SKILL.md"; why = 'licence and provenance checks for imported code' },
+            @{ ref = "$KP/custom-visuals/skills/powerbi-custom-visuals/references/certification-publishing.md"; why = 'certification notes - verify against current Microsoft Learn' }
+        )
+        playbook = @(
+            'Read the PBIVIZ_PLAN, the changed files listed in the WORK ORDER, the Tester evidence and the relevant Microsoft docs.',
+            'Semantics: grain and aggregation (YTD, ratios, distinct counts, snapshots, date grouping) match the plan.',
+            'Compatibility: capabilities.json, formatting model and persisted property names / data roles unchanged or explicitly migrated.',
+            'Host API: selection identities, bookmarks, clear, cross-highlight, tooltips, keyboard and high contrast, responsiveness.',
+            'Security and licences: no unsanitised HTML, eval, unsafe dependencies or unapproved external calls; imported code and CDN dependencies have compatible licences.',
+            'Release evidence: GUID stable, version bump owned, lockfile preserved, existing release pairs untouched; every pbiviz MCP result cited carries a matching GUID, otherwise NOT VERIFIED.',
+            'Return REVIEW VERDICT: APPROVE | BLOCK | APPROVE WITH NONBLOCKING NOTES with blockers (path/line, impact, fix), non-blockers, evidence gaps and docs checked - verbatim in the WORK RESULT `payload`.'
+        )
+        validate = @('Each blocker has a path and a concrete impact; missing evidence is listed as a gap, never as a pass.')
+        tools = @('read/search only; microsoftDocs/* to check current API and certification requirements.')
+        avoid = @('Fixing code.', 'Claiming Microsoft certification from a local audit.', 'Conflating review with testing.')
+    }
+    'pbiviz-maintainer-agent' = @{
+        skills = @(
+            @{ ref = "$CS/pbiviz-release-safety/SKILL.md"; why = 'audit-before-migration, identity and package safety' },
+            @{ ref = "$CS/pbiviz-interaction-regression/SKILL.md"; why = 'regressions to re-run after a migration' },
+            @{ ref = "$KP/custom-visuals/skills/powerbi-custom-visuals/references/pbiviz-toolchain.md"; why = 'toolchain notes - verify against the installed CLI' },
+            @{ ref = "$KP/custom-visuals/skills/powerbi-custom-visuals/references/certification-publishing.md"; why = 'certification requirements - verify against current Microsoft Learn' }
+        )
+        playbook = @(
+            'Audit first, read-only: pbiviz.json, package.json, lockfile, capabilities, formatting model, source, tests, installed node/npm/pbiviz versions, current Microsoft API/SDK requirements and advisories (runtime vs dev-only).',
+            'Report the audit with a minimal proposed change set; an audit never authorises a migration.',
+            'With an approved scope migrate one concern at a time in the assigned visual only; preserve the GUID and persisted capabilities; bump the version when you are the named owner and a new distributable is intended.',
+            'Never `npm audit fix --force` or blind @latest upgrades; downloads need APPROVED:INSTALL:<visual>.',
+            'Package safely (never overwrite an existing `<guid>.<version>.pbiviz`), record SHA-256, hand off to 083/084 through the Lead.',
+            'Keep AUDITED, BUILT, HOST TESTED, CERTIFICATION READY and MICROSOFT CERTIFIED as separate states.'
+        )
+        validate = @('Audit lists versions found vs required with evidence; changed files limited to the approved set; build exit codes and package hash recorded.')
+        tools = @('Project-local pbiviz CLI from the visual folder; edit only within the approved change set.', 'microsoftDocs/* for SDK/API changes; pbiviz/* only with a matching GUID.')
+        avoid = @('Working on a visual 082 currently owns.', 'Committing, branching, stashing or resetting - Git belongs to 086.', 'Modifying vendor skill repositories or legacy reference visuals.')
+    }
+    'pbiviz-alm-release-agent' = @{
+        skills = @(
+            @{ ref = "$CS/pbiviz-alm-release/SKILL.md"; why = 'Level 1/2/3 procedures, adoption case table, two-scope promotion, gates G0-G6, append-only archive, derived provenance' },
+            @{ ref = "$AD/Pbiviz-Alm.ps1"; why = 'deterministic helper - the only way to run state, adoption, promotion, release and provenance operations' },
+            @{ ref = "$CS/pbiviz-release-safety/SKILL.md"; why = 'identity, version and package evidence' },
+            @{ ref = "$AD/local/pbiviz-workspace.json"; why = 'PBIVIZ folder and cached ALM level (a hint; the repository is the truth)' }
+        )
+        playbook = @(
+            'Dot-source `.github/agent-docs/Pbiviz-Alm.ps1` inside a script under scripts/ and start every task with `Get-PbivizRepoState -Root <PBIVIZ folder>`. The level is derived from the repository (L1 local, L2 remote, L3 PBVIZ_Team_* branches). Refuse the outer workspace repository, `source-control-repositories/*` and vendor clones.',
+            'Validate every visual name, path and ref with `Test-PbivizVisualInput`, `Test-PbivizRelativePath` and `Resolve-PbivizCommit` before any Git command; a rejection is final (BLOCKED).',
+            'Level 1: status, diff, history. Checkpoint = stage one visual by path, show the staged list, check Git identity, commit `<visual>: <summary> (v<version>)`; refuse when unrelated visuals are staged. Restore = `git restore --source=<sha> -- <paths>` or `git revert <sha>`.',
+            'Level 2 connect (`APPROVED:CONNECT:<url>`): `Test-PbivizRemoteUrl`, `git ls-remote --symref`, then `Connect-PbivizRemoteHistory -Fetch`; it applies the adoption case table (empty remote, related history, unrelated history merged with clean abort, unborn + empty, unborn + files = NEEDS CHECKPOINT) and asserts the outcome. Push only with `APPROVED:PUSH:<branch>`; daily sync = one-branch fetch + ff-only merge.',
+            'Level 3 migration (`APPROVED:BRANCHES:<repo>`): create PBVIZ_Team_Dev at origin/main and PBVIZ_Team_Prod at the user-confirmed commit (or empty), PBVIZ_Team_Test only on request; `main` untouched; branch policies as a checklist, applied only with `APPROVED:POLICY:<branch>` and provider permission.',
+            'Selective promotion: `New-PbivizPromotionCandidate` (temp worktree from Prod, source-scope file lists, never releases/), build and test in the worktree under the candidate state contract, `Add-PbivizRelease -Worktree`, `Test-PbivizPromotionGates` (G0-G6 must all PASS), commit on the release branch, then push / open the PR only with `APPROVED:PUSH` and `APPROVED:PR`.',
+            'Merge only with `APPROVED:MERGE:<repo>#<pr>` AND the provider reporting every required review and check satisfied (`gh pr view --json reviewDecision,mergeStateStatus,statusCheckRollup` or `az repos pr policy list`); never `--admin`, never `--bypass-policy`, never vote on your own PR.',
+            'After the merge write nothing to Prod: report the Prod commit from `Get-PbivizReleaseProvenance`, verify it with `Test-PbivizReleaseIntegrity`, tag only with `APPROVED:TAG` and provider permission, then `Remove-PbivizPromotionWorktree`.',
+            'Level 1/2 official release: `Add-PbivizRelease -Root` on a clean tree adds the new release pair. Legacy dist packages are archived only on request, per visual (`Add-PbivizLegacyArchive`, validated: false).',
+            'Report the four states separately - code versioned, package released, code promoted, distributed; distribution only on explicit request (`APPROVED:DISTRIBUTE:<destination>`).'
+        )
+        validate = @(
+            'Every history-changing helper call returned PASS with its postcondition evidence (no commit loss, accounted refs); backup refs created are reported.',
+            'Promotion evidence attached: name-status list, other-visual tree hashes, archive A-only list, package SHA-256, G0-G6 verdicts.',
+            'Exact SHAs, branch names and remote state reported; never claim a push, PR, merge, tag or distribution that did not happen.'
+        )
+        tools = @(
+            'execute: git (recorded path) and the helper functions in `.github/agent-docs/Pbiviz-Alm.ps1`; gh (GitHub) or az repos (Azure DevOps) for PRs and policies when tool-status has them; edit only the PBIVIZ root .gitignore/.gitattributes and your scripts.',
+            'microsoftDocs/* for Azure Repos and GitHub pull-request and branch-policy documentation.'
+        )
+        avoid = @(
+            'Moving an existing branch (`switch -C`, `checkout -B`, `branch -f`), `reset --hard`, `clean -fdx`, force-push, `--admin`, `--bypass-policy` or approving your own PR.',
+            'Writing to Prod after a merge, or modifying / deleting existing release pairs under releases/.',
+            'Editing visual source or `visual.version` (082/085 own them).',
+            'Plain DEV -> Prod pull requests; promotion always goes through a release branch.'
+        )
+    }
 }
 
 $bt = [string][char]96
@@ -6286,7 +8813,7 @@ $agentSkillKeywords = @{
     'report-planning-ux-agent'                  = @('report-planning', 'report-design', 'accessibility', 'wireframe')
     'pbir-authoring-agent'                      = @('pbir', 'report-authoring', 'create-pbi-report', 'report-design')
     'theme-formatting-agent'                    = @('theme', 'conditional formatting', 'report-design')
-    'advanced-custom-visuals-agent'             = @('deneb', 'svg', 'custom visual', 'python-visuals', 'r-visuals', 'vega')
+    'advanced-custom-visuals-agent'             = @('deneb', 'svg', 'python-visuals', 'r-visuals', 'vega')
     'paginated-reports-agent'                   = @('paginated', 'rdl')
     'report-qa-desktop-agent'                   = @('review-report', 'connect-pbid', 'pbir-cli', 'screenshot')
     'data-engineering-team-lead'                = @('spark', 'lakehouse', 'sqldw', 'pipeline', 'dataflows', 'medallion', 'eventhouse', 'mlv')
@@ -6315,6 +8842,12 @@ $agentSkillKeywords = @{
     'capability-maintenance-team-lead'          = @('check-updates', 'improve-my-agent-setup')
     'skill-inventory-mapping-agent'             = @('check-updates', 'improve-my-agent-setup')
     'environment-tooling-agent'                 = @('check-updates', 'te2-cli', 'pbir-cli', 'fabric-cli')
+    'pbiviz-development-team-lead'              = @('pbiviz', 'custom visual', 'powerbi-visuals', 'appsource')
+    'pbiviz-planner-agent'                      = @('pbiviz', 'custom visual', 'deneb', 'charticulator', 'pbir-format')
+    'pbiviz-developer-agent'                    = @('pbiviz', 'custom visual', 'powerbi-visuals', 'capabilities.json', 'formatting model')
+    'pbiviz-tester-agent'                       = @('pbiviz', 'custom visual', 'regression')
+    'pbiviz-reviewer-agent'                     = @('pbiviz', 'custom visual', 'certification', 'appsource')
+    'pbiviz-maintainer-agent'                   = @('pbiviz', 'custom visual', 'certification', 'powerbi-visuals')
 }
 
 # Index every upstream skill once (folder, name, description) for keyword matching.
@@ -6583,7 +9116,7 @@ On the first message of a session, read ``.github/copilot-instructions.md``, the
 
 ## Your role: coordinator, not implementer
 
-You are the account manager for this workspace. The user is your client and the seven Team Leads are your departments. Every request the user gives you is a *project* you deliver **through the specialist teams**, never by doing the specialist work yourself. Your job is to understand the request, route it across the organisation, keep ownership clear, and consolidate one result back to the client. Treat "you fix it", "you do it", or "handle it" as "make the right team fix it and own the outcome" — the client is authorising the *result*, not asking you personally to touch the artifact.
+You are the account manager for this workspace. The user is your client and the eight Team Leads are your departments. Every request the user gives you is a *project* you deliver **through the specialist teams**, never by doing the specialist work yourself. Your job is to understand the request, route it across the organisation, keep ownership clear, and consolidate one result back to the client. Treat "you fix it", "you do it", or "handle it" as "make the right team fix it and own the outcome" — the client is authorising the *result*, not asking you personally to touch the artifact.
 
 You do **not** implement domain work yourself. You must delegate, and you must never directly author, edit, refactor, mutate, deploy, publish, run, or refresh any Fabric or Power BI artifact or its live state — this includes semantic models/TMDL/DAX, reports/PBIR, dataflows, pipelines, notebooks, lakehouse/warehouse/SQL objects, workspace/capacity/governance settings, Git/release actions, and application/REST/XMLA/CLI integrations. The specialist **worker** that owns that artifact type performs the change because it holds the right skills; its **Team Lead** reviews and validates it. This holds even when the user tells you to do it directly and even when you already know the fix: knowing the answer is not a reason to bypass the team. The only things you do hands-on are orchestration, reading/searching just enough to classify and route, running the mandatory startup checks, and consolidating evidence.
 
@@ -6769,7 +9302,7 @@ changed: <files / live objects, or none>
 validation: <what was run and the outcome - never claim a check you did not run>
 risks: <or none>
 request: <exact approval token, question, design decision, or correct owner - only when status is not DONE>
-payload: <Architect: the full PLAN block | QA: the full VERDICT block | others: omit>
+payload: <Architect: the full PLAN block | QA: the full VERDICT block | PBIVIZ Planner: the PBIVIZ_PLAN | PBIVIZ Reviewer: the REVIEW VERDICT | others: omit>
 ``````
 "@
     }
@@ -6814,9 +9347,13 @@ and working flows. These files do NOT appear in the Copilot Chat dropdown:
   installer and by the Capability Maintenance team.
 - `local/repository-map.local.json`  -- Optional machine/company-specific GitHub/Azure DevOps
   clone, branch-topology and Fabric mapping inventory (gitignored). ALM agents read it before repository work.
+- `local/pbiviz-workspace.json`  -- Optional PBIVIZ folder mapping (gitignored): whether custom-visual
+  development is enabled, its folder, and the Git initialisation status. The 080 team reads it first.
+- `Pbiviz-Alm.ps1`  -- Deterministic helper for the PBIVIZ repository (state, adoption, promotion,
+  releases, provenance); used by the installer and by 086 - PBIVIZ ALM & Release Agent.
 
 The numbered dropdown remains intentionally compact. It exposes the Master, two
-cross-domain reviewers, and seven Team Leads; they delegate to 37 focused workers.
+cross-domain reviewers, and eight Team Leads; they delegate to 43 focused workers.
 Nested delegation (Master -> Lead -> Worker) requires the VS Code setting
 `chat.subagents.allowInvocationsFromSubagents: true`. It is window-scoped, so the
 installer offers to write it (plus workspace-relative skill locations) into your VS Code
@@ -6837,6 +9374,7 @@ user questions: approvals and open questions bubble up to the agent you selected
 - **050 - ALM & DevOps Team Lead** -- Git, GitHub, Azure DevOps, Fabric ALM
 - **060 - Applications & Integration Team Lead** -- Python, REST, XMLA, ODBC
 - **070 - Capability Maintenance Team Lead** -- skills, agents, installer and tool lifecycle
+- **080 - PBIVIZ Development Team Lead** -- Power BI custom visuals (.pbiviz) and their Git/release lifecycle
 
 ## Skills
 
@@ -6844,6 +9382,8 @@ user questions: approvals and open questions bubble up to the agent you selected
 - `.github/skills/fabric-tmdl/SKILL.md`  -- TMDL syntax, indentation, property ordering
 - `.github/skills/fabric-pipelines/SKILL.md`  -- Pipeline JSON structure, activity types
 - `.github/skills/fabric-cli-policy/SKILL.md`  -- CLI decision policy: prefer `fab`, `az` fallback
+- `.github/skills/pbiviz-*/SKILL.md`  -- six PBIVIZ house skills: PBIP reconstruction, source conversion,
+  IBCS semantic contract, interaction regression, release safety, ALM and release
 
 ## CLI policy
 
@@ -6947,8 +9487,9 @@ are delegated by their leads so the dropdown stays clear.
 | 050 | **ALM & DevOps Team Lead** | Git, GitHub, Azure DevOps, Fabric Git and releases |
 | 060 | **Applications & Integration Team Lead** | Python, SDK, REST, XMLA, ODBC and data access |
 | 070 | **Capability Maintenance Team Lead** | Skills, agents, tools, installer health and recovery |
+| 080 | **PBIVIZ Development Team Lead** | Power BI custom visuals (.pbiviz): plan, build, test, review, maintain, release |
 
-The seven Team Leads delegate to 37 numbered worker agents. Each worker owns a
+The eight Team Leads delegate to 43 numbered worker agents. Each worker owns a
 bounded artifact type or maintenance responsibility and reports evidence back to
 its lead. The Master keeps one writer per artifact and consolidates the result.
 
@@ -6965,6 +9506,8 @@ Reference docs in `.github/agent-docs/` do not appear in the dropdown.
   root/Source Control provider through `Fabric-Agentic-Workspace.code-workspace`.
 - Machine/company-specific repository and branch mappings are stored in the
   gitignored `.github/agent-docs/local/repository-map.local.json`.
+- The optional PBIVIZ folder (default `0 - PBIVIZ Developing Environment`) is its own Git
+  repository, ignored by the outer repository; 086 - PBIVIZ ALM & Release Agent owns its Git work.
 
 Before repository or ALM work, select **050 - ALM & DevOps Team Lead** and verify
 the mapped repository, active branch, status, remote, environment and write policy.
@@ -6975,7 +9518,7 @@ the mapped repository, active branch, status, remote, environment and write poli
 
 | Source | Location | Updated |
 |--------|----------|---------|
-| Custom (TMDL, Pipelines, CLI policy) | `.github/skills/` | Re-run installer |
+| Custom (TMDL, Pipelines, CLI policy, six PBIVIZ skills) | `.github/skills/` | Re-run installer |
 | Microsoft skills-for-fabric | `skills-for-fabric/` | Offered on session start / via Capability Maintenance |
 | Kurt/data-goblin plugins | `power-bi-agentic-development/` | Offered on session start / via Capability Maintenance |
 '@
@@ -7039,6 +9582,59 @@ if (-not (Test-Path $gitignorePath)) {
     Add-GitIgnoreRules -Path $gitignorePath -Heading 'Machine-specific integrity manifest' `
         -Rules @('.github/agent-docs/installed-manifest.json')
     Write-Host '  .gitignore: required installer safety rules confirmed' -ForegroundColor Green
+}
+
+# -- PBIVIZ helper, Microsoft Learn MCP and the PBIVIZ repository ---------
+Write-ManagedFile "$rootPath\.github\agent-docs\Pbiviz-Alm.ps1" $pbivizAlmScript
+Write-Host "  Written: .github/agent-docs/Pbiviz-Alm.ps1" -ForegroundColor Green
+$mcpMerge = Merge-McpJson -Path "$rootPath\.vscode\mcp.json"
+Write-Host "  .vscode/mcp.json: $($mcpMerge.Status)" -ForegroundColor $(if ($mcpMerge.Status -match 'malformed|unexpected') { 'Yellow' } else { 'Green' })
+
+$pbivizInitStatus = $null
+$pbivizInit = $null
+if (-not $EmitAgentsTo -and $pbivizMapReadable -and $pbivizDecision -ne 'not-asked') {
+    if ($pbivizEnabled -and $pbivizRelativePath) {
+        # The outer repository must ignore the PBIVIZ repository BEFORE Step 9 stages files.
+        Add-GitIgnoreRules -Path $gitignorePath -Heading 'PBIVIZ repository (its own Git repository; never committed by the outer workspace)' -Rules @("/$pbivizRelativePath/")
+        Write-Host ""
+        Write-Host "  PBIVIZ repository: $pbivizRelativePath" -ForegroundColor Cyan
+        $pbivizState = Get-PbivizRepoState -Root $pbivizRootPath -OuterRoot $rootPath
+        $allowSynced = $false
+        if (-not $pbivizState.isRepoRoot -and $pbivizState.syncedPath -and $pbivizState.gitVersionOk) {
+            Write-Host "  WARNING: this folder is inside a OneDrive-synced location." -ForegroundColor Yellow
+            Write-Host "  Sync clients rewrite and lock files inside .git and can corrupt the repository." -ForegroundColor Yellow
+            Write-Host "  Recommended: choose a non-synced folder (re-run the installer and pick another workspace path)." -ForegroundColor Yellow
+            $syncAns = Read-Host '  Initialize Git here anyway? (y/N)'
+            $allowSynced = ($syncAns -match '^\s*(y|yes)\s*$')
+        }
+        $pbivizInit = Initialize-PbivizRepository -Root $pbivizRootPath -FolderWasEmpty:$pbivizFolderWasEmpty -AllowSyncedPath:$allowSynced -OuterRoot $rootPath
+        $pbivizInitStatus = $pbivizInit.InitStatus
+        $initColor = switch ($pbivizInit.Status) { 'INITIALIZED' { 'Green' } 'REUSED' { 'Green' } default { 'Yellow' } }
+        Write-Host "  Git: $pbivizInitStatus" -ForegroundColor $initColor
+        foreach ($msg in $pbivizInit.Messages) { Write-Host "       $msg" -ForegroundColor DarkGray }
+        if ($pbivizInit.Status -in @('STOPPED', 'FAILED')) { Write-Host "       Ask '080 - PBIVIZ Development Team Lead' to resolve it; nothing in the folder was changed." -ForegroundColor DarkGray }
+        if ($pbivizInit.Status -eq 'SKIPPED' -and $pbivizInitStatus -match 'synced') { Write-Host '       local Git NOT initialized - PBIVIZ work is not versioned until you initialise it.' -ForegroundColor Yellow }
+    }
+    # Machine-specific mapping (gitignored). Unknown keys - e.g. 086's alm block - are preserved.
+    $pbivizMap = [ordered]@{}
+    if ($pbivizExistingMap) { foreach ($prop in $pbivizExistingMap.PSObject.Properties) { $pbivizMap[$prop.Name] = $prop.Value } }
+    $pbivizMap['schemaVersion'] = 1
+    $pbivizMap['enabled'] = [bool]$pbivizEnabled
+    $pbivizMap['relativePath'] = if ($pbivizEnabled) { $pbivizRelativePath } elseif ($pbivizExistingMap -and $pbivizExistingMap.relativePath) { [string]$pbivizExistingMap.relativePath } else { $null }
+    if ($pbivizCreatedNow) { $pbivizMap['createdByInstaller'] = $true } elseif (-not $pbivizMap.Contains('createdByInstaller')) { $pbivizMap['createdByInstaller'] = $false }
+    $pbivizMap['updatedAt'] = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    if ($pbivizEnabled) {
+        $headState = Get-PbivizRepoState -Root $pbivizRootPath
+        $pbivizMap['git'] = [ordered]@{
+            initStatus = $pbivizInitStatus
+            branch = $headState.branch
+            commits = $headState.commitCount
+            baselineCommit = if ($pbivizInit -and $pbivizInit.BaselineCommit) { $pbivizInit.BaselineCommit } elseif ($pbivizExistingMap -and $pbivizExistingMap.git) { $pbivizExistingMap.git.baselineCommit } else { $null }
+            checkedAt = $pbivizMap['updatedAt']
+        }
+    }
+    Write-ManagedFile -Path $pbivizMapPath -Content ($pbivizMap | ConvertTo-Json -Depth 10)
+    Write-Host "  Written: .github/agent-docs/local/pbiviz-workspace.json (enabled: $([bool]$pbivizEnabled))" -ForegroundColor Green
 }
 
 # -- .vscode/tasks.json ------------------------------------------------
@@ -7358,7 +9954,8 @@ if ($previousManifestPaths.Count -gt 0) {
         '.github/agent-docs/session-status.last.txt',
         '.github/agent-docs/guardrail-status.json',
         '.github/agent-docs/installed-manifest.json',
-        '.github/agent-docs/local/repository-map.local.json'
+        '.github/agent-docs/local/repository-map.local.json',
+        '.github/agent-docs/local/pbiviz-workspace.json'
     )
     $purged = 0
     $rootCanonical = [IO.Path]::GetFullPath($rootPath).TrimEnd('\') + '\'
@@ -7494,6 +10091,9 @@ Write-Host ""
 Write-Host "=============================================" -ForegroundColor Green
 Write-Host "  Setup complete! v$productVersion" -ForegroundColor Green
 Write-Host "  Workspace: $rootPath" -ForegroundColor Green
+if ($pbivizEnabled -and $pbivizRelativePath) {
+    try { Write-Host "  PBIVIZ:    $(Get-PbivizStatusLine -Root $pbivizRootPath -RelativePath $pbivizRelativePath -InitStatus $pbivizInitStatus)" -ForegroundColor Green } catch { }
+}
 Write-Host "=============================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  VS Code will now open your workspace." -ForegroundColor White

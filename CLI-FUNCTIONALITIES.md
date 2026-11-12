@@ -95,6 +95,8 @@ before any CLI/REST task. This file is the human-readable companion to that skil
 - [25. `sqlcmd` — T-SQL over the Fabric SQL endpoint](#25-sqlcmd--t-sql-over-the-fabric-sql-endpoint)
 - [26. `gh` — GitHub CLI](#26-gh--github-cli)
 - [27. `az devops` — Azure DevOps CLI](#27-az-devops--azure-devops-cli)
+- [28. `pbiviz` — Power BI custom visual tools](#28-pbiviz--power-bi-custom-visual-tools)
+- [29. Git for the PBIVIZ repository — `Pbiviz-Alm.ps1`](#29-git-for-the-pbiviz-repository--pbiviz-almps1)
 
 ---
 
@@ -474,6 +476,9 @@ agent reads `<key>.found` first, optionally does one live `--version`/`Get-Comma
 re-check, then falls back gracefully when the tool is absent. **None of these is
 required for the core local-editing workflow.**
 
+> Exceptions: the custom visual toolchain (§28) is **detected only** — the installer never
+> installs Node.js, npm or `pbiviz` — and §29 is a script the installer ships, not a CLI.
+
 > The newer/niche tools (`pbir`, the Tabular Editor CLI, `pbi-tools`) move quickly and
 > some are in preview. The tables below are an accurate **working set** taken from each
 > provider's own docs — always confirm exact flags with the tool's `--help`/`-?` and the
@@ -691,6 +696,73 @@ pipelines (build/release), boards work items, and artifacts.
 - **Caveats** — `az devops` is an **extension on top of `az`**: if the `az` key is missing this
   tool cannot exist (that's why its `tool-status.json` `reason` reads "az missing"). Auth via
   `az login` or a PAT in `AZURE_DEVOPS_EXT_PAT`.
+
+---
+
+## 28. `pbiviz` — Power BI custom visual tools
+
+**Purpose** — Create, run, package and inspect Power BI custom visual SDK projects
+(`powerbi-visuals-tools`). Used only inside the optional PBIVIZ folder.
+
+| | |
+|---|---|
+| **Owned by** | **080 PBIVIZ Development Team Lead** (082 Developer, 083 Tester, 085 Maintainer run it) |
+| **tool-status.json keys** | `node`, `npm`, `pbivizCli` (category `pbiviz-toolchain`, detect only) |
+| **Provider** | https://learn.microsoft.com/power-bi/developer/visuals/ |
+| **When to use** | For `.pbiviz` SDK projects. In-report Deneb, SVG, Python and R visuals are 024's and need no CLI. |
+
+| What | Example |
+|------|---------|
+| Prefer the project-local CLI | `npx pbiviz --help` (inside the visual folder, after `npm install`) |
+| New visual (the agent asks first; also runs `npm install`) | `npx -y powerbi-visuals-tools new <VisualName>` (run in the PBIVIZ folder) |
+| Run against the developer visual | `npx pbiviz start` |
+| Package `dist/<guid>.<version>.pbiviz` | `npx pbiviz package` |
+| Version and certificate info | `npx pbiviz info` |
+| Per-project MCP server | `npx pbiviz mcp --init` → writes `<visual>/.vscode/mcp.json` (key `pbiviz`); refuses to overwrite an existing file |
+
+- **Fallback when absent** — Node.js is required to build; without it agents can still plan,
+  review and edit source, and report every build/test step as `NOT RUN`.
+- **Caveats** — Node.js 20.19.0+ for current `powerbi-visuals-tools` (each project's
+  installed version decides). A global `pbiviz` is not required and agents prefer the
+  project-local copy. The `pbiviz` MCP server is callable only when that visual folder is
+  opened as a workspace root; it is never configured by the installer. Packages are
+  imported into reports only from `<Visual>/releases/`.
+
+---
+
+## 29. Git for the PBIVIZ repository — `Pbiviz-Alm.ps1`
+
+**Purpose** — Deterministic Git operations for the PBIVIZ repository across the three
+levels (local, remote, team). Shipped as `.github/agent-docs/Pbiviz-Alm.ps1`; every
+Git call goes through one function with literal pathspecs, UTF-8 output and no prompts.
+
+| | |
+|---|---|
+| **Owned by** | **086 PBIVIZ ALM & Release Agent** (via 080). **050** keeps Fabric repositories and organisation-level GitHub/Azure DevOps administration. |
+| **Requires** | Git 2.28+; a Git identity for commits |
+| **Load** | `. .\.github\agent-docs\Pbiviz-Alm.ps1` |
+
+| What | Function |
+|------|----------|
+| State and level of the folder | `Get-PbivizRepoState -Root <folder>` · `Get-PbivizStatusLine -Root <folder> -RelativePath <name>` |
+| Level 1 initialisation (installer) | `Initialize-PbivizRepository -Root <folder> -FolderWasEmpty` |
+| Level 2: adopt a remote, keeping both histories | `Connect-PbivizRemoteHistory -Root <folder> -Remote origin -Branch main -Fetch` |
+| Level 3: candidate for one visual | `New-PbivizPromotionCandidate -Root <folder> -Visual <Name> -SourceRef PBVIZ_Team_Dev -TargetRef PBVIZ_Team_Prod [-Allowlist <paths>]` |
+| Level 3: gates G0-G6 | `Test-PbivizPromotionGates -Worktree <candidate> -Visual <Name>` |
+| Release pair (`.pbiviz` + `.release.json`) | `Add-PbivizRelease -Worktree <candidate> -Visual <Name> -SourceSha <dev commit> -PackagePath <dist pkg>` |
+| One-time legacy archive of `dist/` packages | `Add-PbivizLegacyArchive -Root <folder> -Visual <Name>` |
+| After your PR is merged | `Get-PbivizReleaseProvenance -Root <folder> -Visual <Name> -Version <v> -ProdRef PBVIZ_Team_Prod` · `Test-PbivizReleaseIntegrity -Root <folder> -Visual <Name> -Version <v> -Commit <prod commit>` |
+| Clean up a helper worktree | `Remove-PbivizPromotionWorktree -Root <folder> -WorktreeDir <candidate>` |
+
+- **Never (helper or agent)** — force (`switch -C`, `checkout -B`, `branch -f`,
+  `push --force`), `reset --hard`, `clean -f`, admin/policy bypass, writing to Prod after a
+  merge, or editing a file under any `releases/` folder.
+- **Approval-gated (agent only)** — push, pull request and merge are separate agent actions,
+  each gated by an explicit approval token (`APPROVED:PUSH`, `APPROVED:PR`, `APPROVED:MERGE`
+  with every required review and check satisfied); the helper performs none of them.
+- **Results** — every function returns a status (`PASS`, `BLOCKED`, `NEEDS INPUT`,
+  `NEEDS CHECKPOINT`, `CONFLICT`, `FAILED`; provenance: `DERIVED` / `NOT DERIVABLE`) with a
+  reason and evidence; agents report it verbatim.
 
 ---
 
