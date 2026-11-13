@@ -142,22 +142,78 @@ BeforeAll {
         return $d
     }
     function New-TReleasePair {
-        param([string]$Repo, [string]$Visual, [string]$Guid, [string]$Version, [string]$Origin = 'release', [int]$Seed = 7, [string]$Sub = '')
+        param([string]$Repo, [string]$Visual, [string]$Guid, [string]$Version, [string]$Origin = 'release', [int]$Seed = 7, [string]$Sub = '', [switch]$Validated)
         $dir = if ($Sub) { "$Visual/releases/$Sub" } else { "$Visual/releases" }
         $pkg = Join-Path $Repo (($dir -replace '/', '\') + "\$Guid.$Version.pbiviz")
         Write-TPackage -Path $pkg -Guid $Guid -Version $Version -Seed $Seed
         $bytes = [IO.File]::ReadAllBytes($pkg)
-        # Evidence-consistent fixture: no test, review or toolchain evidence, so validated:false.
+        $pk = Get-PbivizPackageIdentity -Bytes $bytes
+        $sha = Get-PbivizSha256Hex $bytes
+        # Evidence-consistent fixture: without -Validated there is no test, review, build or toolchain
+        # evidence, so validated:false; with it, every claim matches the bytes and the source commit.
         $man = [ordered]@{ schemaVersion = 1; visual = $Visual; guid = $Guid; version = $Version; origin = $Origin; validated = $false }
         if ($Origin -eq 'release') {
             $src = TGit $Repo rev-parse HEAD
-            $v = Get-PbivizValidationVerdict -Tests $null -Review $null -SourceSha $src -PackageVerified $true
-            $man.validationGaps = @($v.Gaps); $man.quality = $v.Quality
-            $man.sourceSha = $src; $man.sourceFingerprint = Get-PbivizSourceFingerprint -Root $Repo -TreeIsh $src -Visual $Visual; $man.sharedFiles = @()
-            $man.tests = [ordered]@{ lint = 'NOT RUN'; unit = 'NOT RUN'; host = 'NOT RUN'; certification = 'NOT RUN' }; $man.review = $null
+            $fp = Get-PbivizSourceFingerprint -Root $Repo -TreeIsh $src -Visual $Visual
+            $tests = [ordered]@{ lint = 'NOT RUN'; unit = 'NOT RUN'; host = 'NOT RUN'; certification = 'NOT RUN' }
+            $review = $null; $build = $null; $tv = $null; $nv = $null
+            if ($Validated) {
+                $tests.lint = 'PASS'; $tests.unit = 'PASS'; $tv = '7.2.2'; $nv = 'v24.2.0'
+                $review = [ordered]@{ reviewer = '084 PBIVIZ Reviewer'; verdict = 'APPROVE'; sourceSha = $src; reviewedAt = ''; reference = 'fixture' }
+                $build = [ordered]@{ evidence = 'helper build record'; visual = $Visual; sourceSha = $src; sourceFingerprint = $fp; location = 'checkout'; command = $script:PbivizBuildCommand
+                    toolsVersion = $tv; nodeVersion = $nv; exitCode = 0; startedAt = ''; finishedAt = ''; logSha256 = ('0' * 64)
+                    package = [ordered]@{ file = "$Guid.$Version.pbiviz"; sha256 = $sha; bytes = $bytes.Length; guid = $pk.Guid; version = $pk.Version; resource = $pk.Resource; entries = $pk.Entries } }
+            }
+            $v = Get-PbivizValidationVerdict -Tests $tests -Review $review -SourceSha $src -ToolsVersion $tv -NodeVersion $nv -PackageVerified $true -BuildVerified ([bool]$Validated)
+            $man.validated = $v.Validated; $man.validationGaps = @($v.Gaps); $man.quality = $v.Quality
+            $man.sourceSha = $src; $man.sourceFingerprint = $fp; $man.sharedFiles = @()
+            $man.packageSource = 'build output'; $man.externalApproval = $null; $man.build = $build; $man.toolsVersion = $tv; $man.nodeVersion = $nv
+            $man.tests = $tests; $man.review = $review; $man.level = 'local'
         } else { $man.sourceSha = $null; $man.sourceFingerprint = $null }
-        $man.packageFile = "$Guid.$Version.pbiviz"; $man.sha256 = Get-PbivizSha256Hex $bytes; $man.bytes = $bytes.Length
+        $man.packageFile = "$Guid.$Version.pbiviz"; $man.sha256 = $sha; $man.bytes = $bytes.Length
+        $man.package = [ordered]@{ identity = 'VERIFIED'; guid = $pk.Guid; version = $pk.Version; resource = $pk.Resource; entries = $pk.Entries }
         Write-TFile $Repo "$dir/$Guid.$Version.release.json" (ConvertTo-PbivizJson $man)
+    }
+    # A stand-in for the visual's project-local powerbi-visuals-tools: `pbiviz.js package` copies a
+    # prepared .pbiviz (identity from the current pbiviz.json) to dist/. fake-mode.txt selects
+    # ok | fail (exit 1) | touch (rewrites a tracked file) | none (exit 0, no package) | hang (never ends).
+    $script:FakePbivizJs = @'
+const fs = require('fs'), path = require('path');
+const here = path.join(__dirname, '..');
+const modeFile = path.join(here, 'fake-mode.txt');
+const mode = fs.existsSync(modeFile) ? fs.readFileSync(modeFile, 'utf8').trim() : 'ok';
+if (process.argv[2] !== 'package') { console.error('fake pbiviz: only package'); process.exit(2); }
+if (mode === 'hang') { setTimeout(() => process.exit(0), 600000); return; }
+if (mode === 'fail') { console.error('error: fake build failure'); process.exit(1); }
+const cfg = JSON.parse(fs.readFileSync('pbiviz.json', 'utf8'));
+if (mode === 'touch') { fs.writeFileSync(path.join('src', 'visual.ts'), 'rewritten by the build\n'); }
+if (mode !== 'none') {
+  fs.mkdirSync('dist', { recursive: true });
+  fs.copyFileSync(path.join(here, 'fixture.pbiviz'), path.join('dist', cfg.visual.guid + '.' + cfg.visual.version + '.pbiviz'));
+}
+console.log('fake pbiviz package done');
+'@
+    function Install-TFakeTools {
+        param([string]$Dir, [string]$Visual = 'Bar', [string]$Mode = 'ok', [int]$Seed = 11, [string]$ToolsVersion = '7.2.2')
+        $tools = "$Visual/node_modules/powerbi-visuals-tools"
+        Write-TFile $Dir "$tools/package.json" "{ ""name"": ""powerbi-visuals-tools"", ""version"": ""$ToolsVersion"" }"
+        Write-TFile $Dir "$tools/bin/pbiviz.js" $script:FakePbivizJs
+        Write-TFile $Dir "$tools/fake-mode.txt" $Mode
+        $pj = [IO.File]::ReadAllText((Join-Path $Dir "$Visual\pbiviz.json")) | ConvertFrom-Json
+        Write-TPackage -Path (Join-Path $Dir (($tools -replace '/', '\') + '\fixture.pbiviz')) -Guid $pj.visual.guid -Version $pj.visual.version -Seed $Seed
+    }
+    function Invoke-TBuild {
+        param([string]$Dir, [string]$Visual = 'Bar', [switch]$Worktree, [string]$Mode = 'ok', [int]$Seed = 11)
+        Install-TFakeTools -Dir $Dir -Visual $Visual -Mode $Mode -Seed $Seed
+        if ($Worktree) { return (Invoke-PbivizBuild -Worktree $Dir -Visual $Visual) }
+        return (Invoke-PbivizBuild -Root $Dir -Visual $Visual)
+    }
+    # Complete release evidence for a source commit: 083's lint/unit results and 084's approving review.
+    function Get-TEvidence {
+        param([string]$Sha, [string]$Visual = 'Bar', [string]$Unit = 'PASS', [switch]$NoReview)
+        $ev = @{ Tests = @{ lint = 'PASS'; unit = $Unit } }
+        if (-not $NoReview) { $ev.Review = @{ reviewer = '084 PBIVIZ Reviewer'; verdict = 'APPROVE'; sourceSha = $Sha; visual = $Visual; reference = 'REVIEW VERDICT' } }
+        return $ev
     }
     # Level 3 fixture: Bar and Column on main; Prod and Dev branch from it; checkout on Dev.
     function New-TL3 {
@@ -176,13 +232,15 @@ BeforeAll {
         TGit $r switch -q -c PBVIZ_Team_Dev | Out-Null
         return $r
     }
+    # Level 3 release with complete evidence: the build runs inside the candidate worktree with the
+    # (fake) project-local CLI, then the pair is staged with 083's results and 084's review.
     function Invoke-TPromotion {
         param([string]$Repo, [string]$Visual = 'Bar', [string[]]$Allowlist = @(), [switch]$SkipRelease, [int]$Seed = 11)
         $cand = New-PbivizPromotionCandidate -Root $Repo -Visual $Visual -SourceRef PBVIZ_Team_Dev -TargetRef PBVIZ_Team_Prod -Allowlist $Allowlist
-        $out = [pscustomobject]@{ Candidate = $cand; Release = $null; Gates = $null }
+        $out = [pscustomobject]@{ Candidate = $cand; Build = $null; Release = $null; Gates = $null }
         if ($cand.Status -ne 'PASS') { return $out }
-        Write-TPackage -Path (Join-Path $cand.Worktree "$Visual\dist\$($cand.Guid).$($cand.Version).pbiviz") -Guid $cand.Guid -Version $cand.Version -Seed $Seed
-        if (-not $SkipRelease) { $out.Release = Add-PbivizRelease -Worktree $cand.Worktree -Visual $Visual -SourceSha $cand.Source }
+        $out.Build = Invoke-TBuild -Dir $cand.Worktree -Visual $Visual -Worktree -Seed $Seed
+        if (-not $SkipRelease) { $ev = Get-TEvidence -Sha $cand.Source -Visual $Visual; $out.Release = Add-PbivizRelease -Worktree $cand.Worktree -Visual $Visual -SourceSha $cand.Source @ev }
         $out.Gates = Test-PbivizPromotionGates -Worktree $cand.Worktree -Visual $Visual -TargetRef PBVIZ_Team_Prod -Allowlist $Allowlist
         return $out
     }
@@ -657,9 +715,9 @@ Describe 'Promotion never touches the release archive (defect 2)' {
         $c.Reason | Should -Match 'does not exceed'
     }
 
-    It 'archive-only promotion adds earlier releases to an empty-history Prod and nothing else' {
+    It 'archive-only promotion adds earlier validated releases to an empty-history Prod and nothing else' {
         $r = New-TL3
-        New-TReleasePair $r 'Bar' 'barGuid0001' '1.0.0.1'
+        New-TReleasePair $r 'Bar' 'barGuid0001' '1.0.0.1' -Validated
         Save-TAll $r 'release on dev' | Out-Null
         $c = New-PbivizPromotionCandidate -Root $r -Visual 'Bar' -SourceRef PBVIZ_Team_Dev -TargetRef PBVIZ_Team_Prod -ArchiveOnly
         $c.Status | Should -Be 'PASS' -Because $c.Reason
@@ -858,7 +916,8 @@ Describe 'Candidate worktree state contract (S3)' {
             Save-TAll $r 'bar v2' | Out-Null
             $c = New-PbivizPromotionCandidate -Root $r -Visual 'Bar' -SourceRef PBVIZ_Team_Dev -TargetRef PBVIZ_Team_Prod
             $c.Status | Should -Be 'PASS' -Because $c.Reason
-            Write-TPackage -Path (Join-Path $c.Worktree "Bar\dist\$($c.Guid).$($c.Version).pbiviz") -Guid $c.Guid -Version $c.Version -Seed 3
+            $b = Invoke-TBuild -Dir $c.Worktree -Worktree -Seed 3
+            $b.Status | Should -Be 'PASS' -Because $b.Reason
             return @($r, $c)
         }
     }
@@ -868,7 +927,9 @@ Describe 'Candidate worktree state contract (S3)' {
         Write-TFile $x[1].Worktree 'Bar/node_modules/pkg/index.js' 'x'
         Write-TFile $x[1].Worktree 'Bar/.tmp/cache.txt' 'x'
         (Test-PbivizCandidateState -Worktree $x[1].Worktree).Status | Should -Be 'PASS'
-        (Add-PbivizRelease -Worktree $x[1].Worktree -Visual 'Bar' -SourceSha $x[1].Source).Status | Should -Be 'PASS'
+        $ev = Get-TEvidence -Sha $x[1].Source
+        $res = Add-PbivizRelease -Worktree $x[1].Worktree -Visual 'Bar' -SourceSha $x[1].Source @ev
+        $res.Status | Should -Be 'PASS' -Because $res.Reason
     }
 
     It 'BLOCKS <Case>' -TestCases @(
@@ -888,7 +949,8 @@ Describe 'Candidate worktree state contract (S3)' {
             'a mismatched candidate record' { $rp = Get-PbivizCandidateRecordPath -Worktree $wt; $j = [IO.File]::ReadAllText($rp) | ConvertFrom-Json; $j.candidateTree = '0' * 40; [IO.File]::WriteAllText($rp, ($j | ConvertTo-Json)) }
         }
         (Test-PbivizCandidateState -Worktree $wt).Status | Should -Be 'BLOCKED'
-        (Add-PbivizRelease -Worktree $wt -Visual 'Bar' -SourceSha $x[1].Source).Status | Should -Be 'BLOCKED'
+        $ev = Get-TEvidence -Sha $x[1].Source
+        (Add-PbivizRelease -Worktree $wt -Visual 'Bar' -SourceSha $x[1].Source @ev).Status | Should -Be 'BLOCKED'
     }
 
     It 'BLOCKS a worktree the helper did not create' {
@@ -942,7 +1004,10 @@ Describe 'Provenance is derived; Prod is never written after merge (defect 3)' {
         $prov = Get-PbivizReleaseProvenance -Root $r -Visual 'Bar' -Version '1.0.0.2' -ProdRef PBVIZ_Team_Prod
         $prov.Status | Should -Be 'DERIVED' -Because $prov.Reason
         $prov.ProdCommit | Should -Be $prodTip
-        (Test-PbivizReleaseIntegrity -Root $r -Visual 'Bar' -Version '1.0.0.2' -Commit $prov.ProdCommit).Status | Should -Be 'PASS'
+        $i = Test-PbivizReleaseIntegrity -Root $r -Visual 'Bar' -Version '1.0.0.2' -Commit $prov.ProdCommit
+        $i.Status | Should -Be 'PASS' -Because $i.Reason
+        $i.Verification | Should -Be 'COMPLETE'
+        $i.ReleaseClass | Should -Be 'OFFICIAL RELEASE'
         (TGit $r rev-parse PBVIZ_Team_Prod) | Should -Be $prodTip -Because 'the helper writes nothing to Prod after the merge'
     }
 
@@ -1152,44 +1217,58 @@ Describe 'Release validation is evidence-based and reads the package content (re
         $res = Add-PbivizRelease -Root $x.Repo -Visual 'Bar' -SourceSha $x.Head
         $res.Status | Should -Be 'PASS' -Because $res.Reason
         $res.Validated | Should -BeFalse
+        $res.ReleaseClass | Should -Be 'DEVELOPMENT/TEST CANDIDATE'
+        $res.BuildEvidence | Should -Be 'NONE'
         $m = [IO.File]::ReadAllText($res.ManifestPath) | ConvertFrom-Json
         $m.validated | Should -BeFalse
-        foreach ($g in 'lint NOT RUN', 'unit NOT RUN', 'powerbi-visuals-tools version not recorded', 'Node.js version not recorded', 'no approving review recorded for this source revision') { @($m.validationGaps) | Should -Contain $g }
+        foreach ($g in 'no build evidence for these package bytes at the source revision', 'lint NOT RUN', 'unit NOT RUN', 'powerbi-visuals-tools version not recorded', 'Node.js version not recorded', 'no approving review recorded for this source revision') { @($m.validationGaps) | Should -Contain $g }
         @($m.tests.PSObject.Properties.Name) | Should -Not -Contain 'package' -Because 'the package result is never asserted by a caller'
         $m.tests.host | Should -Be 'NOT RUN'
         $m.package.identity | Should -Be 'VERIFIED'
         $m.package.resource | Should -Be 'resources/barGuid0001.pbiviz.json'
+        $m.packageSource | Should -Be 'build output'
+        $m.build | Should -BeNullOrEmpty
+        @($m.PSObject.Properties.Name) | Should -Not -Contain 'buildCommand' -Because 'a build command is recorded only as build evidence'
+        @($m.PSObject.Properties.Name) | Should -Not -Contain 'builtAt'
         $m.quality.codeReviewed | Should -Be 'NO EVIDENCE'
-        $m.quality.built | Should -Be 'YES'
+        $m.quality.built | Should -Be 'NO EVIDENCE' -Because 'a verified package identity (ZIP metadata) is not evidence of a build'
         $m.quality.hostTested | Should -Be 'NOT RUN'
         $m.quality.certificationReady | Should -Be 'NOT ASSESSED'
         $m.quality.microsoftCertified | Should -Be 'NOT CLAIMED'
     }
 
     It 'keeps validated:false while a required gate is incomplete (<Missing>)' -TestCases @(
-        @{ Missing = 'unit tests'; Lint = 'PASS'; Unit = 'NOT RUN'; Tools = '7.2.2'; Reviewed = $true; Gap = 'unit NOT RUN' },
-        @{ Missing = 'toolchain'; Lint = 'PASS'; Unit = 'PASS'; Tools = $null; Reviewed = $true; Gap = 'powerbi-visuals-tools version not recorded' },
-        @{ Missing = 'review'; Lint = 'PASS'; Unit = 'PASS'; Tools = '7.2.2'; Reviewed = $false; Gap = 'no approving review recorded' }
+        @{ Missing = 'unit tests'; Build = $true; Unit = 'NOT RUN'; Reviewed = $true; Tools = $null; Gap = 'unit NOT RUN' },
+        @{ Missing = 'review'; Build = $true; Unit = 'PASS'; Reviewed = $false; Tools = $null; Gap = 'no approving review recorded' },
+        @{ Missing = 'build evidence'; Build = $false; Unit = 'PASS'; Reviewed = $true; Tools = '7.2.2'; Gap = 'no build evidence for these package bytes' },
+        @{ Missing = 'toolchain'; Build = $false; Unit = 'PASS'; Reviewed = $true; Tools = $null; Gap = 'powerbi-visuals-tools version not recorded' }
     ) {
         $x = New-TL1
-        Write-TPackage -Path $x.Pkg -Guid 'barGuid0001' -Version '1.0.0.1'
+        if ($Build) { (Invoke-TBuild -Dir $x.Repo).Status | Should -Be 'PASS' } else { Write-TPackage -Path $x.Pkg -Guid 'barGuid0001' -Version '1.0.0.1' }
         $review = if ($Reviewed) { @{ reviewer = '084 PBIVIZ Reviewer'; verdict = 'APPROVE'; sourceSha = $x.Head; reference = 'REVIEW VERDICT 1' } } else { $null }
-        $res = Add-PbivizRelease -Root $x.Repo -Visual 'Bar' -SourceSha $x.Head -Tests @{ lint = $Lint; unit = $Unit } -ToolsVersion $Tools -NodeVersion 'v24.2.0' -Review $review
+        $node = if ($Build) { $null } else { 'v24.2.0' }
+        $res = Add-PbivizRelease -Root $x.Repo -Visual 'Bar' -SourceSha $x.Head -Tests @{ lint = 'PASS'; unit = $Unit } -ToolsVersion $Tools -NodeVersion $node -Review $review
         $res.Status | Should -Be 'PASS' -Because $res.Reason
         $res.Validated | Should -BeFalse
         ($res.ValidationGaps -join ' | ') | Should -Match ([regex]::Escape($Gap))
+        if ($Build) { @($res.ValidationGaps).Count | Should -Be 1 -Because 'only the listed item is missing' }
     }
 
     It 'marks validated:true only with complete source-bound evidence; host, certification and Microsoft labels stay separate' {
         $x = New-TL1
-        Write-TFile $x.Repo 'Bar/node_modules/powerbi-visuals-tools/package.json' '{ "name": "powerbi-visuals-tools", "version": "7.2.2" }'
-        Write-TPackage -Path $x.Pkg -Guid 'barGuid0001' -Version '1.0.0.1'
+        $b = Invoke-TBuild -Dir $x.Repo
+        $b.Status | Should -Be 'PASS' -Because $b.Reason
         $review = @{ reviewer = '084 PBIVIZ Reviewer'; verdict = 'APPROVE WITH NONBLOCKING NOTES'; sourceSha = $x.Head; visual = 'Bar'; reviewedAt = '2026-11-12T10:00:00Z'; reference = 'REVIEW VERDICT 2' }
-        $res = Add-PbivizRelease -Root $x.Repo -Visual 'Bar' -SourceSha $x.Head -Tests @{ lint = 'PASS'; unit = 'PASS' } -NodeVersion 'v24.2.0' -Review $review
+        $res = Add-PbivizRelease -Root $x.Repo -Visual 'Bar' -SourceSha $x.Head -Tests @{ lint = 'PASS'; unit = 'PASS' } -Review $review
         $res.Status | Should -Be 'PASS' -Because $res.Reason
         $res.Validated | Should -BeTrue -Because ($res.ValidationGaps -join '; ')
+        $res.ReleaseClass | Should -Be 'OFFICIAL RELEASE'
+        $res.BuildEvidence | Should -Be 'VERIFIED'
         $m = [IO.File]::ReadAllText($res.ManifestPath) | ConvertFrom-Json
-        $m.toolsVersion | Should -Be '7.2.2' -Because 'the project-local powerbi-visuals-tools is recorded when no version is supplied'
+        $m.toolsVersion | Should -Be '7.2.2' -Because 'the toolchain comes from the build evidence'
+        $m.nodeVersion | Should -Be $b.NodeVersion
+        $m.build.sourceSha | Should -Be $x.Head
+        $m.build.package.sha256 | Should -Be $res.Sha256
         $m.review.sourceSha | Should -Be $x.Head
         $m.quality.codeReviewed | Should -Be 'YES'
         $m.quality.built | Should -Be 'YES'
@@ -1271,15 +1350,17 @@ Describe 'Archived pairs are verified against their content, the candidate and t
         $i.SourceRevision | Should -Be 'VERIFIED'
     }
 
-    It 'reports a source revision missing from the clone as NOT AVAILABLE, never as verified' {
+    It 'reports a source revision missing from the clone as PARTIAL / COMMIT ONLY, never as PASS' {
         $x = New-TShared -Commit
         $clone = New-TDir 'cl'
         Remove-Item -LiteralPath $clone
         TGit $script:Root clone -q --no-tags --single-branch --branch $x.Branch ('file:///' + ($x.Repo -replace '\\', '/')) $clone | Out-Null
         $i = Test-PbivizReleaseIntegrity -Root $clone -Visual 'Bar' -Version '1.0.0.2' -Commit HEAD
-        $i.Status | Should -Be 'PASS' -Because $i.Reason
+        $i.Status | Should -Be 'PARTIAL' -Because 'commit evidence alone is not a fully verified release'
+        $i.Verification | Should -Be 'COMMIT ONLY'
         $i.CommitEvidence | Should -Be 'VERIFIED'
         $i.SourceRevision | Should -Be 'NOT AVAILABLE'
+        $i.Reason | Should -Match 'NOT fully verified'
     }
 
     It 'FAILS integrity for a manipulated committed manifest (<Field>)' -TestCases @(
@@ -1288,9 +1369,20 @@ Describe 'Archived pairs are verified against their content, the candidate and t
         @{ Field = 'sha256'; Edit = { param($j) $j.sha256 = ('0' * 64) }; Match = 'SHA-256 differs' },
         @{ Field = 'sourceFingerprint'; Edit = { param($j) $j.sourceFingerprint = ('a' * 64) }; Match = 'differs from the manifest fingerprint' },
         @{ Field = 'sharedFiles blob'; Edit = { param($j) $j.sharedFiles[0].blob = ('1' * 40) }; Match = "shared file 'shared/fmt.ts'" },
-        @{ Field = 'sourceSha'; Edit = { param($j, $x) $j.sourceSha = (TGit $x.Repo rev-parse PBVIZ_Team_Prod) }; Match = 'does not yield the manifest fingerprint' },
-        @{ Field = 'validated'; Edit = { param($j) $j.validated = $true }; Match = 'not supported by the recorded evidence' },
-        @{ Field = 'quality.hostTested'; Edit = { param($j) $j.quality.hostTested = 'YES' }; Match = 'quality\.hostTested' }
+        @{ Field = 'sourceSha'; Edit = { param($j, $x) $s = (TGit $x.Repo rev-parse PBVIZ_Team_Prod); $j.sourceSha = $s; $j.review.sourceSha = $s; $j.build.sourceSha = $s }; Match = 'does not yield the manifest fingerprint' },
+        @{ Field = 'validated'; Edit = { param($j) $j.validated = $false }; Match = 'not supported by the recorded evidence' },
+        @{ Field = 'quality.hostTested'; Edit = { param($j) $j.quality.hostTested = 'YES' }; Match = 'quality\.hostTested' },
+        @{ Field = 'package.version'; Edit = { param($j) $j.package.version = '9.9.9.9' }; Match = 'package\.guid/version \(barGuid0001 9\.9\.9\.9\) differ from the package content' },
+        @{ Field = 'package.resource'; Edit = { param($j) $j.package.resource = 'resources/other.pbiviz.json' }; Match = 'package\.resource' },
+        @{ Field = 'package.entries'; Edit = { param($j) $j.package.entries = 99 }; Match = 'package\.entries 99' },
+        @{ Field = 'build.package.sha256'; Edit = { param($j) $j.build.package.sha256 = ('b' * 64) }; Match = 'build evidence describes other package bytes' },
+        @{ Field = 'build.sourceSha'; Edit = { param($j, $x) $j.build.sourceSha = (TGit $x.Repo rev-parse PBVIZ_Team_Prod) }; Match = 'build evidence built from [0-9a-f]{40}, not the release source' },
+        @{ Field = 'toolsVersion'; Edit = { param($j) $j.toolsVersion = '1.0.0' }; Match = 'toolchain differs' },
+        @{ Field = 'quality.built without build evidence'; Edit = { param($j) $j.build = $null }; Match = 'quality\.built=YES is not supported' },
+        @{ Field = 'packageSource'; Edit = { param($j) $j.packageSource = 'external (approved)' }; Match = 'no approval for these exact bytes' },
+        @{ Field = 'validationGaps'; Edit = { param($j) $j.validationGaps = @('host NOT RUN') }; Match = 'validationGaps differ from the gaps re-derived' },
+        @{ Field = 'validated type'; Edit = { param($j) $j.validated = 'true' }; Match = "validated 'true' is not a JSON boolean" },
+        @{ Field = 'tests vocabulary'; Edit = { param($j) $j.tests.host = 'GREEN' }; Match = "tests\.host='GREEN' is outside the evidence vocabulary" }
     ) {
         $x = New-TShared -Commit
         Set-TManifest $x $Edit
@@ -1321,8 +1413,10 @@ Describe 'Archived pairs are verified against their content, the candidate and t
         @{ Field = 'sourceSha'; Edit = { param($j, $x) $j.sourceSha = (TGit $x.Repo rev-parse PBVIZ_Team_Prod) }; Match = 'is not the candidate source' },
         @{ Field = 'sharedFiles blob'; Edit = { param($j) $j.sharedFiles[0].blob = ('1' * 40) }; Match = "sharedFiles 'shared/fmt.ts' blob" },
         @{ Field = 'sharedFiles list'; Edit = { param($j) $j.sharedFiles = @() }; Match = 'sharedFiles paths differ' },
-        @{ Field = 'validated claim'; Edit = { param($j) $j.validated = $true }; Match = 'not supported by the recorded evidence' },
-        @{ Field = 'swapped package'; Edit = $null; Match = 'package content identifies barGuid0001 1\.0\.0\.1' }
+        @{ Field = 'validated claim'; Edit = { param($j) $j.validated = $false }; Match = 'not supported by the recorded evidence' },
+        @{ Field = 'swapped package'; Edit = $null; Match = 'package content identifies barGuid0001 1\.0\.0\.1' },
+        @{ Field = 'build log digest'; Edit = { param($j) $j.build.logSha256 = ('c' * 64) }; Match = 'build\.logSha256 differs from the local build record' },
+        @{ Field = 'level'; Edit = { param($j) $j.level = 'local' }; Match = "level 'local' is not promotion" }
     ) {
         $x = New-TShared
         if ($Edit) { Set-TManifest $x $Edit } else { Set-TSwappedPackage $x '1.0.0.1' 79 }
@@ -1400,5 +1494,301 @@ Describe 'G4 dependency scan prunes while walking and fails closed (review findi
             (Get-TGate $g 'G4').Pass | Should -BeFalse
             (Get-TGate $g 'G4').Detail | Should -Match 'analysis incomplete \(fail closed\)'
         } finally { [IO.Directory]::Delete($link) }
+    }
+}
+
+Describe 'Level 3 promotes only validated releases; unvalidated packages stay development/test candidates (final review 1)' {
+
+    It 'Add-PbivizRelease -Worktree BLOCKS an unvalidated release (missing <Missing>) and writes nothing' -TestCases @(
+        @{ Missing = 'build evidence'; Build = $false; Unit = 'PASS'; NoReview = $false; Gap = 'no build evidence for these package bytes' },
+        @{ Missing = 'unit tests'; Build = $true; Unit = 'NOT RUN'; NoReview = $false; Gap = 'unit NOT RUN' },
+        @{ Missing = 'review'; Build = $true; Unit = 'PASS'; NoReview = $true; Gap = 'no approving review recorded' }
+    ) {
+        $r = New-TL3
+        Set-TVersion $r 'Bar' 'barGuid0001' '1.0.0.2'
+        Save-TAll $r 'bar v2' | Out-Null
+        $c = New-PbivizPromotionCandidate -Root $r -Visual 'Bar' -SourceRef PBVIZ_Team_Dev -TargetRef PBVIZ_Team_Prod
+        $c.Status | Should -Be 'PASS' -Because $c.Reason
+        if ($Build) { (Invoke-TBuild -Dir $c.Worktree -Worktree).Status | Should -Be 'PASS' }
+        else { Write-TPackage -Path (Join-Path $c.Worktree "Bar\dist\$($c.Guid).$($c.Version).pbiviz") -Guid $c.Guid -Version $c.Version -Seed 4 }
+        $ev = Get-TEvidence -Sha $c.Source -Unit $Unit -NoReview:$NoReview
+        $res = Add-PbivizRelease -Worktree $c.Worktree -Visual 'Bar' -SourceSha $c.Source @ev
+        $res.Status | Should -Be 'BLOCKED'
+        $res.Reason | Should -Match 'Level 3 promotes only validated releases'
+        $res.Reason | Should -Match ([regex]::Escape($Gap))
+        $res.ReleaseClass | Should -Be 'DEVELOPMENT/TEST CANDIDATE'
+        Test-Path -LiteralPath (Join-Path $c.Worktree 'Bar\releases') | Should -BeFalse
+        (Test-PbivizCandidateState -Worktree $c.Worktree).Status | Should -Be 'PASS' -Because 'the candidate is unchanged'
+    }
+
+    It 'G6 BLOCKS an internally consistent unvalidated pair that bypassed Add-PbivizRelease' {
+        $r = New-TL3
+        Set-TVersion $r 'Bar' 'barGuid0001' '1.0.0.2'
+        Save-TAll $r 'bar v2' | Out-Null
+        $p = Invoke-TPromotion -Repo $r
+        $p.Gates.Status | Should -Be 'PASS' -Because $p.Gates.Reason
+        $wt = $p.Candidate.Worktree
+        $rel = 'Bar/releases/barGuid0001.1.0.0.2.release.json'
+        $mp = Join-Path $wt ($rel -replace '/', '\')
+        $j = [IO.File]::ReadAllText($mp) | ConvertFrom-Json
+        $j.review = $null
+        $v = Get-PbivizValidationVerdict -Tests $j.tests -Review $null -SourceSha $j.sourceSha -ToolsVersion $j.toolsVersion -NodeVersion $j.nodeVersion -PackageVerified $true -BuildVerified $true
+        $j.validated = $v.Validated; $j.validationGaps = @($v.Gaps); $j.quality = $v.Quality
+        [IO.File]::WriteAllText($mp, ($j | ConvertTo-Json -Depth 8))
+        TGit $wt add -- $rel | Out-Null
+        $pkg = [IO.File]::ReadAllBytes((Join-Path $wt 'Bar\releases\barGuid0001.1.0.0.2.pbiviz'))
+        @(Get-PbivizReleasePairProblems -Manifest ([IO.File]::ReadAllText($mp) | ConvertFrom-Json) -ManifestPath $rel -PackageBytes $pkg).Count | Should -Be 0 -Because 'the forged pair is internally consistent'
+        $g = Test-PbivizPromotionGates -Worktree $wt -Visual 'Bar' -TargetRef PBVIZ_Team_Prod
+        $g.Status | Should -Be 'BLOCKED'
+        (Get-TGate $g 'G6').Pass | Should -BeFalse
+        (Get-TGate $g 'G6').Detail | Should -Match 'validated is false - Level 3 promotes only validated releases'
+    }
+
+    It 'archive-only promotion BLOCKS an unvalidated Dev release; labelled legacy history is admitted' {
+        $r = New-TL3
+        New-TReleasePair $r 'Bar' 'barGuid0001' '1.0.0.1'
+        New-TReleasePair $r 'Bar' 'barGuid0001' '0.5.0.0' -Origin 'legacy-archive' -Sub 'legacy' -Seed 9
+        Save-TAll $r 'dev archive' | Out-Null
+        $c = New-PbivizPromotionCandidate -Root $r -Visual 'Bar' -SourceRef PBVIZ_Team_Dev -TargetRef PBVIZ_Team_Prod -ArchiveOnly
+        $c.Status | Should -Be 'PASS' -Because $c.Reason
+        $g = Test-PbivizPromotionGates -Worktree $c.Worktree -Visual 'Bar' -TargetRef PBVIZ_Team_Prod -ArchiveOnly
+        $g.Status | Should -Be 'BLOCKED'
+        $d = (Get-TGate $g 'G6').Detail
+        $d | Should -Match 'barGuid0001\.1\.0\.0\.1\.release\.json: validated is false - a DEVELOPMENT/TEST CANDIDATE never enters Prod'
+        $d | Should -Not -Match 'legacy/barGuid0001\.0\.5\.0\.0\.release\.json'
+        $r2 = New-TL3
+        New-TReleasePair $r2 'Bar' 'barGuid0001' '0.5.0.0' -Origin 'legacy-archive' -Sub 'legacy' -Seed 9
+        Save-TAll $r2 'legacy only' | Out-Null
+        $c2 = New-PbivizPromotionCandidate -Root $r2 -Visual 'Bar' -SourceRef PBVIZ_Team_Dev -TargetRef PBVIZ_Team_Prod -ArchiveOnly
+        $g2 = Test-PbivizPromotionGates -Worktree $c2.Worktree -Visual 'Bar' -TargetRef PBVIZ_Team_Prod -ArchiveOnly
+        $g2.Status | Should -Be 'PASS' -Because $g2.Reason
+    }
+
+    It 'Level 1 keeps an unvalidated release as a DEVELOPMENT/TEST CANDIDATE and integrity reports the class' {
+        $r = New-TRepo
+        New-TVisual $r 'Bar' 'barGuid0001' '1.0.0.1'
+        $head = Save-TAll $r 'base'
+        Write-TPackage -Path (Join-Path $r 'Bar\dist\barGuid0001.1.0.0.1.pbiviz') -Guid 'barGuid0001' -Version '1.0.0.1'
+        $res = Add-PbivizRelease -Root $r -Visual 'Bar' -SourceSha $head
+        $res.Status | Should -Be 'PASS' -Because $res.Reason
+        $res.ReleaseClass | Should -Be 'DEVELOPMENT/TEST CANDIDATE'
+        ($res.Evidence -join ' ') | Should -Match 'never presented or distributed as an official release'
+        TGit $r commit -q -m 'release candidate 1.0.0.1' | Out-Null
+        $i = Test-PbivizReleaseIntegrity -Root $r -Visual 'Bar' -Version '1.0.0.1' -Commit HEAD
+        $i.Status | Should -Be 'PASS' -Because $i.Reason
+        $i.Verification | Should -Be 'COMPLETE'
+        $i.Validated | Should -BeFalse
+        $i.ReleaseClass | Should -Be 'DEVELOPMENT/TEST CANDIDATE'
+        ($i.Evidence -join ' ') | Should -Match 'never presented or distributed as an official production release'
+    }
+}
+
+Describe 'Integrity separates complete verification from commit-only evidence (final review 2)' {
+
+    It 'reports PASS only for COMPLETE verification of an official release; a failure carries no class' {
+        $r = New-TL3
+        Set-TVersion $r 'Bar' 'barGuid0001' '1.0.0.2'
+        Save-TAll $r 'bar v2' | Out-Null
+        $p = Invoke-TPromotion -Repo $r
+        $p.Gates.Status | Should -Be 'PASS' -Because $p.Gates.Reason
+        $wt = $p.Candidate.Worktree
+        TGit $wt commit -q -m 'release Bar 1.0.0.2' | Out-Null
+        $i = Test-PbivizReleaseIntegrity -Root $r -Visual 'Bar' -Version '1.0.0.2' -Commit (TGit $wt rev-parse HEAD)
+        $i.Status | Should -Be 'PASS' -Because $i.Reason
+        $i.Verification | Should -Be 'COMPLETE'
+        $i.SourceRevision | Should -Be 'VERIFIED'
+        $i.Validated | Should -BeTrue
+        $i.ReleaseClass | Should -Be 'OFFICIAL RELEASE'
+        $mp = Join-Path $wt 'Bar\releases\barGuid0001.1.0.0.2.release.json'
+        $j = [IO.File]::ReadAllText($mp) | ConvertFrom-Json
+        $j.bytes = 1
+        [IO.File]::WriteAllText($mp, ($j | ConvertTo-Json -Depth 8))
+        TGit $wt add -- 'Bar/releases/barGuid0001.1.0.0.2.release.json' | Out-Null
+        TGit $wt commit -q -m 'tamper size' | Out-Null
+        $f = Test-PbivizReleaseIntegrity -Root $r -Visual 'Bar' -Version '1.0.0.2' -Commit (TGit $wt rev-parse HEAD)
+        $f.Status | Should -Be 'FAILED'
+        $f.Verification | Should -Be 'NONE'
+        $f.ReleaseClass | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Release packages carry build evidence bound to the source revision (final review 3)' {
+
+    BeforeAll {
+        function New-TB1 {
+            $r = New-TRepo
+            New-TVisual $r 'Bar' 'barGuid0001' '1.0.0.1'
+            $head = Save-TAll $r 'base'
+            return [pscustomobject]@{ Repo = $r; Head = $head; Pkg = (Join-Path $r 'Bar\dist\barGuid0001.1.0.0.1.pbiviz'); Records = (Join-Path $r '.git\pbiviz-builds') }
+        }
+    }
+
+    It 'Invoke-PbivizBuild runs the project-local CLI on a clean checkout and records the evidence' {
+        $x = New-TB1
+        $b = Invoke-TBuild -Dir $x.Repo
+        $b.Status | Should -Be 'PASS' -Because $b.Reason
+        $b.SourceSha | Should -Be $x.Head
+        $b.PackagePath | Should -Be $x.Pkg
+        $b.Sha256 | Should -Be (Get-PbivizFileSha256 $x.Pkg)
+        $b.RecordPath | Should -Be (Join-Path $x.Records "$($b.Sha256).json")
+        $text = [IO.File]::ReadAllText($b.RecordPath)
+        $rec = $text | ConvertFrom-Json
+        $rec.sourceSha | Should -Be $x.Head
+        $rec.sourceFingerprint | Should -Be (Get-PbivizSourceFingerprint -Root $x.Repo -TreeIsh $x.Head -Visual 'Bar')
+        $rec.toolsVersion | Should -Be '7.2.2'
+        $rec.nodeVersion | Should -Be ((& node --version) | Out-String).Trim()
+        $rec.exitCode | Should -Be 0
+        $rec.command | Should -BeExactly 'node node_modules/powerbi-visuals-tools/bin/pbiviz.js package'
+        $rec.package.sha256 | Should -Be $b.Sha256
+        $rec.package.guid | Should -Be 'barGuid0001'
+        $text | Should -Not -Match ([regex]::Escape($x.Repo.Replace('\', '\\'))) -Because 'no local absolute path is recorded (the evidence is archived and pushed)'
+        Test-Path -LiteralPath (Join-Path $x.Records "$($b.Sha256).log") | Should -BeTrue
+    }
+
+    It 'refuses to build <Case>; nothing is run or recorded' -TestCases @(
+        @{ Case = 'without the project-local CLI (never downloads)'; Match = 'not installed in Bar/node_modules - the helper never downloads.*APPROVED:INSTALL:Bar' },
+        @{ Case = 'with an uncommitted tracked change'; Match = 'clean checkout.*uncommitted' },
+        @{ Case = 'with an untracked file in the visual'; Match = 'clean checkout.*untracked' },
+        @{ Case = 'with an ignored source file in the visual'; Match = 'ignored files inside the visual.*Bar/src/secret\.ts' },
+        @{ Case = 'with an assume-unchanged entry'; Match = 'assume-unchanged or skip-worktree.*Bar/src/visual\.ts' },
+        @{ Case = 'over an existing dist package (never overwritten)'; Match = 'already exists - a package is never overwritten' }
+    ) {
+        $x = New-TB1
+        if ($Case -notmatch 'project-local') { Install-TFakeTools -Dir $x.Repo }
+        switch -Wildcard ($Case) {
+            '*uncommitted*'      { Write-TFile $x.Repo 'Bar/capabilities.json' '{ "edited": true }' }
+            '*untracked*'        { Write-TFile $x.Repo 'Bar/notes.ts' 'x' }
+            '*ignored source*'   { [IO.File]::AppendAllText((Join-Path $x.Repo '.git\info\exclude'), "Bar/src/secret.ts`n"); Write-TFile $x.Repo 'Bar/src/secret.ts' 'export const s = 1;' }
+            '*assume-unchanged*' { TGit $x.Repo update-index --assume-unchanged -- 'Bar/src/visual.ts' | Out-Null; Write-TFile $x.Repo 'Bar/src/visual.ts' 'hidden edit' }
+            '*existing dist*'    { Write-TPackage -Path $x.Pkg -Guid 'barGuid0001' -Version '1.0.0.1' -Seed 2 }
+        }
+        $before = if (Test-Path -LiteralPath $x.Pkg) { Get-PbivizFileSha256 $x.Pkg } else { 'absent' }
+        $b = Invoke-PbivizBuild -Root $x.Repo -Visual 'Bar'
+        $b.Status | Should -Be 'BLOCKED'
+        $b.Reason | Should -Match $Match
+        Test-Path -LiteralPath $x.Records | Should -BeFalse
+        $(if (Test-Path -LiteralPath $x.Pkg) { Get-PbivizFileSha256 $x.Pkg } else { 'absent' }) | Should -Be $before
+    }
+
+    It 'records no evidence when the build <Case>' -TestCases @(
+        @{ Case = 'fails'; Mode = 'fail'; Match = 'pbiviz package failed \(exit 1\): error: fake build failure' },
+        @{ Case = 'rewrites a tracked source file'; Mode = 'touch'; Match = 'the build changed the repository state' },
+        @{ Case = 'produces no package'; Mode = 'none'; Match = 'did not produce dist/barGuid0001\.1\.0\.0\.1\.pbiviz' }
+    ) {
+        $x = New-TB1
+        $b = Invoke-TBuild -Dir $x.Repo -Mode $Mode
+        $b.Status | Should -Be 'FAILED'
+        $b.Reason | Should -Match $Match
+        Test-Path -LiteralPath $x.Records | Should -BeFalse
+    }
+
+    It 'stops a build that exceeds the timeout and records no evidence' {
+        $x = New-TB1
+        Install-TFakeTools -Dir $x.Repo -Mode 'hang'
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        $b = Invoke-PbivizBuild -Root $x.Repo -Visual 'Bar' -TimeoutSeconds 3
+        $sw.Stop()
+        $b.Status | Should -Be 'FAILED'
+        $b.Reason | Should -Match 'pbiviz package timed out after 3 s - no build evidence recorded'
+        $b.ExitCode | Should -Be -2
+        $sw.Elapsed.TotalSeconds | Should -BeLessThan 120 -Because 'the hung CLI is stopped at the timeout, not awaited'
+        Test-Path -LiteralPath $x.Records | Should -BeFalse
+        Test-Path -LiteralPath $x.Pkg | Should -BeFalse
+    }
+
+    It 'builds inside a release candidate only in its authorised state' {
+        $r = New-TL3
+        Set-TVersion $r 'Bar' 'barGuid0001' '1.0.0.2'
+        Save-TAll $r 'bar v2' | Out-Null
+        $c = New-PbivizPromotionCandidate -Root $r -Visual 'Bar' -SourceRef PBVIZ_Team_Dev -TargetRef PBVIZ_Team_Prod
+        $c.Status | Should -Be 'PASS' -Because $c.Reason
+        Write-TFile $c.Worktree 'Bar/src/visual.ts' 'edited after the snapshot'
+        $b = Invoke-TBuild -Dir $c.Worktree -Worktree
+        $b.Status | Should -Be 'BLOCKED'
+        $b.Reason | Should -Match 'candidate state'
+        Test-Path -LiteralPath (Join-Path $c.Worktree "Bar\dist\$($c.Guid).$($c.Version).pbiviz") | Should -BeFalse
+    }
+
+    It 'accepts a package outside the visual dist folder only with approval for its exact bytes' {
+        $x = New-TB1
+        (Invoke-TBuild -Dir $x.Repo).Status | Should -Be 'PASS'
+        $ext = Join-Path (New-TDir 'ext') 'barGuid0001.1.0.0.1.pbiviz'
+        Copy-Item -LiteralPath $x.Pkg -Destination $ext
+        $sha = Get-PbivizFileSha256 $ext
+        $before = Get-TState $x.Repo
+        $no = Add-PbivizRelease -Root $x.Repo -Visual 'Bar' -SourceSha $x.Head -PackagePath $ext
+        $no.Status | Should -Be 'BLOCKED'
+        $no.Reason | Should -Match ('external package: .* -ExternalPackageApproval ''APPROVED:EXTERNAL-PACKAGE:Bar:' + $sha + '''')
+        $wrong = Add-PbivizRelease -Root $x.Repo -Visual 'Bar' -SourceSha $x.Head -PackagePath $ext -ExternalPackageApproval ('APPROVED:EXTERNAL-PACKAGE:Bar:' + ('0' * 64))
+        $wrong.Status | Should -Be 'BLOCKED'
+        Test-Path -LiteralPath (Join-Path $x.Repo 'Bar\releases') | Should -BeFalse
+        @(Compare-PbivizWorkingState -Before $before -After (Get-TState $x.Repo)).Count | Should -Be 0
+        $ev = Get-TEvidence -Sha $x.Head
+        $ok = Add-PbivizRelease -Root $x.Repo -Visual 'Bar' -SourceSha $x.Head -PackagePath $ext -ExternalPackageApproval "APPROVED:EXTERNAL-PACKAGE:Bar:$sha" @ev
+        $ok.Status | Should -Be 'PASS' -Because $ok.Reason
+        $ok.PackageSource | Should -Be 'external (approved)'
+        $ok.BuildEvidence | Should -Be 'VERIFIED' -Because 'the build evidence follows the exact bytes, wherever the file sits'
+        $m = [IO.File]::ReadAllText($ok.ManifestPath) | ConvertFrom-Json
+        $m.packageSource | Should -Be 'external (approved)'
+        $m.externalApproval | Should -Be "APPROVED:EXTERNAL-PACKAGE:Bar:$sha"
+        @(Get-PbivizReleasePairProblems -Manifest $m -ManifestPath 'Bar/releases/barGuid0001.1.0.0.1.release.json' -PackageBytes ([IO.File]::ReadAllBytes($ok.PackagePath))).Count | Should -Be 0
+    }
+
+    It 'treats <Case> as an external package' -TestCases @(@{ Case = 'another file name in dist' }, @{ Case = 'a dist folder that is a junction' }) {
+        $x = New-TB1
+        (Invoke-TBuild -Dir $x.Repo).Status | Should -Be 'PASS'
+        $link = $null
+        if ($Case -like 'another*') { $path = Join-Path $x.Repo 'Bar\dist\copy.pbiviz'; Copy-Item -LiteralPath $x.Pkg -Destination $path }
+        else {
+            $real = New-TDir 'realdist'
+            Copy-Item -LiteralPath $x.Pkg -Destination (Join-Path $real 'barGuid0001.1.0.0.1.pbiviz')
+            Remove-Item -LiteralPath (Join-Path $x.Repo 'Bar\dist') -Recurse -Force
+            $link = Join-Path $x.Repo 'Bar\dist'
+            & cmd.exe /c "mklink /J `"$link`" `"$real`"" | Out-Null
+            $path = $x.Pkg
+        }
+        try {
+            $res = Add-PbivizRelease -Root $x.Repo -Visual 'Bar' -SourceSha $x.Head -PackagePath $path
+            $res.Status | Should -Be 'BLOCKED'
+            $res.Reason | Should -Match 'external package'
+        } finally { if ($link) { [IO.Directory]::Delete($link) } }
+    }
+
+    It 'BLOCKS <Label>' -TestCases @(
+        @{ Label = 'a package whose build evidence names another source revision'; Kind = 'other-source'; Match = 'built from source revision [0-9a-f]{40}, not the release source' },
+        @{ Label = 'a build record edited to name the release source'; Kind = 'edited-record'; Match = 'fingerprint differs from the release source' },
+        @{ Label = 'a toolchain claim that contradicts the build evidence'; Kind = 'tools-claim'; Match = 'contradicts the build evidence' }
+    ) {
+        $x = New-TB1
+        $b = Invoke-TBuild -Dir $x.Repo
+        $b.Status | Should -Be 'PASS' -Because $b.Reason
+        $src = $x.Head; $tools = $null
+        if ($Kind -ne 'tools-claim') {
+            Write-TFile $x.Repo 'Bar/src/visual.ts' 'export class Visual { changed = true }'
+            $src = Save-TAll $x.Repo 'source changed, same version'
+        } else { $tools = '6.0.0' }
+        if ($Kind -eq 'edited-record') {
+            $rec = [IO.File]::ReadAllText($b.RecordPath) | ConvertFrom-Json
+            $rec.sourceSha = $src
+            [IO.File]::WriteAllText($b.RecordPath, ($rec | ConvertTo-Json -Depth 8))
+        }
+        $before = Get-TState $x.Repo
+        $res = Add-PbivizRelease -Root $x.Repo -Visual 'Bar' -SourceSha $src -ToolsVersion $tools
+        $res.Status | Should -Be 'BLOCKED'
+        $res.Reason | Should -Match $Match
+        Test-Path -LiteralPath (Join-Path $x.Repo 'Bar\releases') | Should -BeFalse
+        @(Compare-PbivizWorkingState -Before $before -After (Get-TState $x.Repo)).Count | Should -Be 0
+    }
+
+    It 'G6 BLOCKS a staged pair whose build evidence has no local build record' {
+        $r = New-TL3
+        Set-TVersion $r 'Bar' 'barGuid0001' '1.0.0.2'
+        Save-TAll $r 'bar v2' | Out-Null
+        $p = Invoke-TPromotion -Repo $r
+        $p.Gates.Status | Should -Be 'PASS' -Because $p.Gates.Reason
+        Remove-Item -LiteralPath (Join-Path (Get-PbivizBuildRecordDir -Directory $r) "$($p.Release.Sha256).json")
+        $g = Test-PbivizPromotionGates -Worktree $p.Candidate.Worktree -Visual 'Bar' -TargetRef PBVIZ_Team_Prod
+        $g.Status | Should -Be 'BLOCKED'
+        (Get-TGate $g 'G6').Detail | Should -Match 'no local build record for these package bytes'
     }
 }

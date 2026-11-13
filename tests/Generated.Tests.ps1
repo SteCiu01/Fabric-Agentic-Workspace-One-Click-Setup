@@ -563,3 +563,40 @@ Describe 'Package downloads are prohibitions or approval-gated, never instructio
         }
     }
 }
+
+Describe 'Release-correctness rules reach the agents that report releases (final review)' {
+
+    BeforeAll {
+        $repo = Split-Path $PSScriptRoot -Parent
+        $script:RcDocs = [ordered]@{}
+        foreach ($n in 'pbiviz-alm-release', 'pbiviz-release-safety') { $script:RcDocs[$n] = [IO.File]::ReadAllText((Join-Path $script:EmitDir ".github\skills\$n\SKILL.md")) }
+        foreach ($k in @{ '086' = 'pbiviz-alm-release*'; '080' = 'pbiviz-development-team-lead*' }.GetEnumerator()) {
+            $slug = @($script:GenBySlug.Keys | Where-Object { $_ -like $k.Value })[0]
+            $script:RcDocs[$k.Key] = [IO.File]::ReadAllText($script:GenBySlug[$slug].Path)
+        }
+        foreach ($d in 'CLI-FUNCTIONALITIES.md', 'README.md') { $script:RcDocs[$d] = [IO.File]::ReadAllText((Join-Path $repo $d)) }
+    }
+
+    It 'states that Level 3 promotes only validated releases and that the rest are development/test candidates (<_>)' -ForEach @('pbiviz-alm-release', 'pbiviz-release-safety', '086', '080', 'CLI-FUNCTIONALITIES.md') {
+        $script:RcDocs[$_] | Should -Match 'DEVELOPMENT/TEST CANDIDATE'
+        $script:RcDocs[$_] | Should -Match 'validated: true'
+    }
+
+    It 'never lets commit-only integrity pass as a verified release (<_>)' -ForEach @('pbiviz-alm-release', '086', 'CLI-FUNCTIONALITIES.md') {
+        $script:RcDocs[$_] | Should -Match 'PARTIAL'
+        $script:RcDocs[$_] | Should -Match 'COMMIT ONLY'
+        $script:RcDocs[$_] | Should -Match 'OFFICIAL RELEASE'
+    }
+
+    It 'builds release packages through Invoke-PbivizBuild and gates external packages on their bytes (<_>)' -ForEach @('pbiviz-alm-release', 'pbiviz-release-safety', '086', 'CLI-FUNCTIONALITIES.md') {
+        $script:RcDocs[$_] | Should -Match 'Invoke-PbivizBuild'
+        $script:RcDocs[$_] | Should -Match 'EXTERNAL-PACKAGE:<visual>:<sha256>|EXTERNAL-PACKAGE:<Name>:<sha256>'
+    }
+
+    It 'the helper the agents dot-source exposes the build, the class and the verification fields' {
+        $helper = [IO.File]::ReadAllText((Join-Path $script:EmitDir '.github\agent-docs\Pbiviz-Alm.ps1'))
+        $helper | Should -Match 'function Invoke-PbivizBuild'
+        foreach ($t in 'OFFICIAL RELEASE', 'DEVELOPMENT/TEST CANDIDATE', "'COMMIT ONLY'", "'PARTIAL'", 'APPROVED:EXTERNAL-PACKAGE:') { $helper | Should -Match ([regex]::Escape($t)) }
+        $helper | Should -Not -MatchExactly 'buildCommand|builtAt' -Because 'unverified build claims are no longer written'
+    }
+}
