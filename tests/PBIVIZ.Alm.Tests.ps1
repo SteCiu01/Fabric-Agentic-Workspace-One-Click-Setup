@@ -176,7 +176,9 @@ BeforeAll {
     }
     # A stand-in for the visual's project-local powerbi-visuals-tools: `pbiviz.js package` copies a
     # prepared .pbiviz (identity from the current pbiviz.json) to dist/. fake-mode.txt selects
-    # ok | fail (exit 1) | touch (rewrites a tracked file) | none (exit 0, no package) | hang (never ends).
+    # ok | fail (exit 1) | touch (rewrites a tracked file) | none (exit 0, no package) | hang (never ends)
+    # | spawn-hang / spawn-exit (starts a DETACHED node child that inherits stdout/stderr and writes the
+    # package plus late-write.txt after 6 s; the CLI then hangs or exits 0 at once; child.pid names it).
     $script:FakePbivizJs = @'
 const fs = require('fs'), path = require('path');
 const here = path.join(__dirname, '..');
@@ -184,6 +186,16 @@ const modeFile = path.join(here, 'fake-mode.txt');
 const mode = fs.existsSync(modeFile) ? fs.readFileSync(modeFile, 'utf8').trim() : 'ok';
 if (process.argv[2] !== 'package') { console.error('fake pbiviz: only package'); process.exit(2); }
 if (mode === 'hang') { setTimeout(() => process.exit(0), 600000); return; }
+if (mode === 'spawn-hang' || mode === 'spawn-exit') {
+  const cfg0 = JSON.parse(fs.readFileSync('pbiviz.json', 'utf8'));
+  const late = path.resolve('dist', cfg0.visual.guid + '.' + cfg0.visual.version + '.pbiviz');
+  const code = "const fs = require('fs'), path = require('path'); setTimeout(() => { fs.mkdirSync(path.dirname(process.argv[1]), { recursive: true }); fs.copyFileSync(process.argv[2], process.argv[1]); fs.writeFileSync(process.argv[3], 'late'); console.log('late write'); }, 6000);";
+  const child = require('child_process').spawn(process.execPath, ['-e', code, late, path.join(here, 'fixture.pbiviz'), path.join(here, 'late-write.txt')], { detached: true, stdio: 'inherit' });
+  fs.writeFileSync(path.join(here, 'child.pid'), String(child.pid));
+  console.log('fake pbiviz: detached child ' + child.pid + ' inherits stdout/stderr');
+  if (mode === 'spawn-exit') { process.exit(0); }
+  setTimeout(() => process.exit(0), 600000); return;
+}
 if (mode === 'fail') { console.error('error: fake build failure'); process.exit(1); }
 const cfg = JSON.parse(fs.readFileSync('pbiviz.json', 'utf8'));
 if (mode === 'touch') { fs.writeFileSync(path.join('src', 'visual.ts'), 'rewritten by the build\n'); }
@@ -1696,6 +1708,30 @@ Describe 'Release packages carry build evidence bound to the source revision (fi
         Test-Path -LiteralPath $x.Pkg | Should -BeFalse
     }
 
+    It 'stops the whole process tree when the CLI <Case>: no orphan, no late package write, no evidence (final hardening 3)' -TestCases @(
+        @{ Case = 'hangs past the timeout while a detached child holds its output handles'; Mode = 'spawn-hang'; Match = 'pbiviz package timed out after 3 s - no build evidence recorded; its whole process tree was stopped \(including 1 descendant process'; Limit = 25 },
+        @{ Case = 'exits at once but leaves a detached child running on its output handles'; Mode = 'spawn-exit'; Match = 'pbiviz package exited but left 1 process\(es\) of its tree running; they were stopped .* no build evidence recorded'; Limit = 20 }
+    ) {
+        $x = New-TB1
+        Install-TFakeTools -Dir $x.Repo -Mode $Mode
+        $tools = Join-Path $x.Repo 'Bar\node_modules\powerbi-visuals-tools'
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        $b = Invoke-PbivizBuild -Root $x.Repo -Visual 'Bar' -TimeoutSeconds 3
+        $returned = $sw.Elapsed.TotalSeconds
+        $b.Status | Should -Be 'FAILED'
+        $b.Reason | Should -Match $Match
+        $returned | Should -BeLessThan $Limit -Because 'inherited output handles never hold the call past its timeout'
+        $childPid = [int]([IO.File]::ReadAllText((Join-Path $tools 'child.pid')).Trim())
+        $childPid | Should -BeGreaterThan 0
+        Get-Process -Id $childPid -ErrorAction SilentlyContinue | Should -BeNullOrEmpty -Because 'the detached descendant was terminated with the tree'
+        # The child would have written the package 6 s after it started; wait well past that.
+        $wait = 10 - $sw.Elapsed.TotalSeconds
+        if ($wait -gt 0) { Start-Sleep -Milliseconds ([int]($wait * 1000)) }
+        Test-Path -LiteralPath (Join-Path $tools 'late-write.txt') | Should -BeFalse -Because 'no process of the build survived to write late'
+        Test-Path -LiteralPath $x.Pkg | Should -BeFalse
+        Test-Path -LiteralPath $x.Records | Should -BeFalse
+    }
+
     It 'builds inside a release candidate only in its authorised state' {
         $r = New-TL3
         Set-TVersion $r 'Bar' 'barGuid0001' '1.0.0.2'
@@ -1790,5 +1826,250 @@ Describe 'Release packages carry build evidence bound to the source revision (fi
         $g = Test-PbivizPromotionGates -Worktree $p.Candidate.Worktree -Visual 'Bar' -TargetRef PBVIZ_Team_Prod
         $g.Status | Should -Be 'BLOCKED'
         (Get-TGate $g 'G6').Detail | Should -Match 'no local build record for these package bytes'
+    }
+}
+
+Describe 'G4 classifies every dependency form the PBIVIZ toolchain resolves and fails closed (final hardening 2)' {
+
+    BeforeAll {
+        # A visual folder Bar inside a scratch worktree root, plus the given files (repository-relative).
+        function New-TG4 {
+            param([hashtable]$Files)
+            $w = New-TDir 'g4f'
+            Write-TFile $w 'Bar/pbiviz.json' '{ "visual": { "name": "Bar", "guid": "barGuid0001", "version": "1.0.0.1" }, "style": "style/visual.less", "capabilities": "capabilities.json" }'
+            Write-TFile $w 'Bar/src/visual.ts' 'export class Visual {}'
+            foreach ($k in $Files.Keys) { Write-TFile $w $k $Files[$k] }
+            return $w
+        }
+    }
+
+    It 'an unapproved dependency outside the visual never passes silently: <Case>' -TestCases @(
+        @{ Case = 'side-effect import'; File = 'Bar/src/a.ts'; Text = "import '../../shared/side';"; Escape = 'src/a.ts -> ../../shared/side' },
+        @{ Case = 'template-literal dynamic import'; File = 'Bar/src/a.ts'; Text = 'export const load = (n: string) => import(`../../shared/${n}.js`);'; Escape = 'src/a.ts -> ../../shared/<computed> (a folder' },
+        @{ Case = 'string-concatenated require'; File = 'Bar/src/a.ts'; Text = "const m = require('../../shared/' + n);"; Escape = 'src/a.ts -> ../../shared/<computed> (a folder' },
+        @{ Case = 'require.context'; File = 'Bar/src/a.ts'; Text = "const c = require.context('../../shared', true, /\.ts$/);"; Escape = 'src/a.ts -> ../../shared (a folder' },
+        @{ Case = 'import.meta.webpackContext'; File = 'Bar/src/a.ts'; Text = "const c = import.meta.webpackContext('../../shared');"; Escape = 'src/a.ts -> ../../shared (a folder' },
+        @{ Case = 'new URL asset'; File = 'Bar/src/a.ts'; Text = "const u = new URL('../../shared/worker.js', import.meta.url);"; Escape = 'src/a.ts -> ../../shared/worker.js' },
+        @{ Case = 'require.resolve'; File = 'Bar/src/a.js'; Text = "const p = require.resolve('../../shared/x');"; Escape = 'src/a.js -> ../../shared/x' },
+        @{ Case = 'absolute path import'; File = 'Bar/src/a.ts'; Text = "import x from 'C:/shared/x';"; Escape = 'src/a.ts -> C:/shared/x' },
+        @{ Case = 'triple-slash reference'; File = 'Bar/src/a.ts'; Text = '/// <reference path="../../shared/types.d.ts" />'; Escape = 'src/a.ts -> ../../shared/types.d.ts' },
+        @{ Case = 'import written in a comment (raw safety net)'; File = 'Bar/src/a.ts'; Text = "// import x from '../../shared/x';"; Escape = 'src/a.ts -> ../../shared/x' },
+        @{ Case = 'LESS @import with options'; File = 'Bar/style/b.less'; Text = "@import (reference) '../../shared/x.less';"; Escape = 'style/b.less -> ../../shared/x.less' },
+        @{ Case = 'CSS url()'; File = 'Bar/style/b.css'; Text = '.a { background: url(../../shared/i.png); }'; Escape = 'style/b.css -> ../../shared/i.png' },
+        @{ Case = 'tsconfig extends'; File = 'Bar/tsconfig.json'; Text = '{ "extends": "../tsconfig.base.json" }'; Escape = 'tsconfig.json -> ../tsconfig.base.json' },
+        @{ Case = 'tsconfig baseUrl above the visual'; File = 'Bar/tsconfig.json'; Text = '{ "compilerOptions": { "baseUrl": ".." } }'; Escape = 'tsconfig.json -> ..' },
+        @{ Case = 'tsconfig paths alias'; File = 'Bar/tsconfig.json'; Text = '{ "compilerOptions": { "paths": { "@shared/*": ["../shared/*"] } } }'; Escape = 'tsconfig.json -> ../shared/*' },
+        @{ Case = 'package.json file: dependency'; File = 'Bar/package.json'; Text = '{ "dependencies": { "s": "file:../shared" } }'; Escape = 'package.json -> ../shared' },
+        @{ Case = 'absolute path in pbiviz.json'; File = 'Bar/pbiviz.json'; Text = '{ "visual": {}, "assets": { "icon": "/icons/x.png" } }'; Escape = 'pbiviz.json -> /icons/x.png' },
+        @{ Case = 'npm workspaces at the repository root'; File = 'package.json'; Text = '{ "workspaces": ["*"] }'; Escape = 'package.json -> npm workspaces at the repository root' }
+    ) {
+        $w = New-TG4 @{ $File = $Text }
+        $s = Get-PbivizDependencyEscapes -Worktree $w -Visual 'Bar'
+        (@($s.Escapes) -join ' || ') | Should -Match ([regex]::Escape($Escape))
+    }
+
+    It 'reports a request it cannot classify as incomplete, so G4 fails closed: <Case>' -TestCases @(
+        @{ Case = 'computed dynamic import'; File = 'Bar/src/a.ts'; Text = 'const m = import(base + n);'; Match = 'src/a\.ts:1: import\(\) with a computed request' },
+        @{ Case = 'require of a variable'; File = 'Bar/src/a.js'; Text = "const n = 'x';`nconst m = require(n);"; Match = 'src/a\.js:2: require\(\) with a computed request' },
+        @{ Case = 'require.ensure'; File = 'Bar/src/a.js'; Text = 'require.ensure([], () => {});'; Match = 'require\.ensure\(\) with a computed request' },
+        @{ Case = 'package not declared by the visual'; File = 'Bar/src/a.ts'; Text = "import x from 'lodash';"; Match = "package 'lodash' is neither declared in its package\.json nor locked in its package-lock\.json" },
+        @{ Case = 'inline loader syntax'; File = 'Bar/src/a.ts'; Text = "import x from 'raw-loader!./x.txt';"; Match = 'inline loader syntax' },
+        @{ Case = 'package.json subpath import'; File = 'Bar/src/a.ts'; Text = "import x from '#shared';"; Match = "subpath import '#shared'" },
+        @{ Case = 'package request climbing out of its folder'; File = 'Bar/src/a.ts'; Text = "import x from 'd3/../../shared/x';"; Match = 'climbs out of a package folder' },
+        @{ Case = 'LESS ~package not declared'; File = 'Bar/style/b.less'; Text = "@import '~somepkg/x.less';"; Match = "package 'somepkg'" },
+        @{ Case = 'LESS interpolated import'; File = 'Bar/style/b.less'; Text = "@import '@{root}/x.less';"; Match = '@import with a computed request' },
+        @{ Case = 'executable pbiviz.mjs'; File = 'Bar/pbiviz.mjs'; Text = 'export default {}'; Match = 'pbiviz\.mjs: powerbi-visuals-tools runs it as JavaScript' },
+        @{ Case = 'node_modules at the repository root'; File = 'node_modules/x/index.js'; Text = 'x'; Match = 'node_modules/ exists at the repository root' }
+    ) {
+        $w = New-TG4 @{ $File = $Text }
+        $s = Get-PbivizDependencyEscapes -Worktree $w -Visual 'Bar'
+        $s.Complete | Should -BeFalse
+        (@($s.Uncertain) -join ' || ') | Should -Match $Match
+    }
+
+    It 'passes a template-style visual: declared and lockfile-transitive packages, an internal context, strings and regex literals that only look like requests' {
+        $w = New-TG4 @{
+            'Bar/package.json'        = '{ "dependencies": { "d3": "7.9.0", "powerbi-visuals-utils-formattingmodel": "6.1.1" }, "devDependencies": { "powerbi-visuals-tools": "7.0.3", "eslint-plugin-powerbi-visuals": "1.1.0" } }'
+            'Bar/package-lock.json'   = '{ "lockfileVersion": 3, "packages": { "": { "name": "bar" }, "node_modules/d3": { "version": "7.9.0" }, "node_modules/d3-array": { "version": "3.2.4" }, "node_modules/@types/d3": { "version": "7.4.3" } } }'
+            'Bar/tsconfig.json'       = '{ "compilerOptions": { "target": "es2022", "outDir": "./.tmp/build/", "lib": ["es2022", "dom"] }, "files": ["./src/visual.ts"] }'
+            'Bar/eslint.config.mjs'   = "import powerbiVisualsConfigs from `"eslint-plugin-powerbi-visuals`";`nexport default [powerbiVisualsConfigs.configs.recommended];"
+            'Bar/src/visual.ts'       = @'
+"use strict";
+import "./../style/visual.less";
+import powerbi from "powerbi-visuals-api";
+import { formattingSettings, FormattingSettingsService } from "powerbi-visuals-utils-formattingmodel";
+import * as d3 from "d3";
+import { max } from "d3-array";
+import * as fs from "node:fs";
+import FormattingSettingsCard = formattingSettings.SimpleCard;
+import { VisualFormattingSettingsModel } from "./settings";
+/// <reference types="d3" />
+const looksLikeCode = 'require(name) and import(base + n)';
+const re = /import\(x\)|require\(y\)/g;
+const half = (a: number) => a / 2 / 1;
+export async function locale(l: string) { return import(`./locales/${l}.json`); }
+export class Visual {}
+'@
+            'Bar/src/settings.ts'     = 'export class VisualFormattingSettingsModel {}'
+            'Bar/src/locales/en.json' = '{ "hello": "Hello" }'
+            'Bar/style/visual.less'   = "@import (reference) `"./vars`";`n// @import '../../shared/commented.less';`n.a { color: @c; background: url(`"data:image/png;base64,AAAA`"); }"
+            'Bar/style/vars.less'     = '@c: red;'
+            'Bar/capabilities.json'   = '{ "dataRoles": [] }'
+        }
+        $s = Get-PbivizDependencyEscapes -Worktree $w -Visual 'Bar'
+        $s.Complete | Should -BeTrue -Because ($s.Uncertain -join '; ')
+        @($s.Escapes).Count | Should -Be 0 -Because ($s.Escapes -join '; ')
+        $s.References | Should -BeGreaterThan 9
+    }
+
+    It 'allowlists only files a static request resolves to - never a folder request' {
+        $w = New-TG4 @{ 'shared/a.js' = 'x'; 'Bar/src/a.ts' = "import x from '../../shared/a';" }
+        @((Get-PbivizDependencyEscapes -Worktree $w -Visual 'Bar' -Allowlist @('shared/a.js')).Escapes).Count | Should -Be 0 -Because 'the request resolves to the allowlisted file'
+        @((Get-PbivizDependencyEscapes -Worktree $w -Visual 'Bar' -Allowlist @('shared/b.js')).Escapes) | Should -Be @('src/a.ts -> ../../shared/a')
+        $w2 = New-TG4 @{ 'shared/a.js' = 'x'; 'Bar/src/a.ts' = "const c = require.context('../../shared');" }
+        @((Get-PbivizDependencyEscapes -Worktree $w2 -Visual 'Bar' -Allowlist @('shared/a.js')).Escapes) | Should -Be @('src/a.ts -> ../../shared (a folder: every file below it can be bundled, so it can never be allowlisted)')
+    }
+
+    It 'G4 BLOCKS a Level 3 candidate that loads shared code through a template-literal import, even with a shared file allowlisted' {
+        $r = New-TL3
+        Write-TFile $r 'shared/fmt.ts' 'export const f = 1;'
+        Save-TAll $r 'shared' | Out-Null
+        TGit $r branch -f PBVIZ_Team_Prod HEAD | Out-Null
+        Write-TFile $r 'shared/fmt.ts' 'export const f = 2;'
+        Write-TFile $r 'Bar/src/visual.ts' ('export const load = (n: string) => import(`../../shared/${n}`);' + "`nexport class Visual {}")
+        Set-TVersion $r 'Bar' 'barGuid0001' '1.0.0.2'
+        Save-TAll $r 'bar loads shared code dynamically' | Out-Null
+        $p = Invoke-TPromotion -Repo $r -Allowlist @('shared/fmt.ts')
+        $p.Gates.Status | Should -Be 'BLOCKED'
+        $g4 = Get-TGate $p.Gates 'G4'
+        $g4.Pass | Should -BeFalse
+        $g4.Detail | Should -Match 'dependencies resolve outside the visual folder and are not allowlisted: src/visual\.ts -> \.\./\.\./shared/<computed>'
+    }
+}
+
+Describe 'Archiving is transactional: a failed release leaves nothing half-created (final hardening 4)' {
+
+    BeforeAll {
+        # Level 1: a clean checkout with a verified build of HEAD; -Existing adds a committed user file
+        # to Bar/releases so the folder pre-exists.
+        function New-TR1 {
+            param([switch]$Existing)
+            $r = New-TRepo
+            New-TVisual $r 'Bar' 'barGuid0001' '1.0.0.1'
+            if ($Existing) { Write-TFile $r 'Bar/releases/README.md' 'release notes written by the user' }
+            $head = Save-TAll $r 'base'
+            $b = Invoke-TBuild -Dir $r
+            $b.Status | Should -Be 'PASS' -Because $b.Reason
+            return [pscustomobject]@{ Repo = $r; Head = $head; Releases = (Join-Path $r 'Bar\releases'); Pkg = (Join-Path $r 'Bar\releases\barGuid0001.1.0.0.1.pbiviz'); Man = (Join-Path $r 'Bar\releases\barGuid0001.1.0.0.1.release.json') }
+        }
+        function Get-TTempWrites { param([string]$Dir) return @(Get-ChildItem -LiteralPath $Dir -Force -Filter '.pbiviz-write-*' -ErrorAction SilentlyContinue) }
+    }
+    AfterEach { $script:PbivizFaults.Clear() }
+
+    It 'rolls back a Level 1 release that fails <Case>, keeping what existed before; a retry then succeeds' -TestCases @(
+        @{ Case = 'after the package was written (new releases folder)'; Fault = 'release:package-written'; Existing = $false },
+        @{ Case = 'after the manifest was written (existing releases folder)'; Fault = 'release:manifest-written'; Existing = $true },
+        @{ Case = 'after the pair was staged'; Fault = 'release:staged'; Existing = $true },
+        @{ Case = 'after the post-staging checks'; Fault = 'release:verified'; Existing = $false }
+    ) {
+        $x = New-TR1 -Existing:$Existing
+        $before = Get-TState $x.Repo
+        $ev = Get-TEvidence -Sha $x.Head
+        $script:PbivizFaults[$Fault] = $true
+        $res = Add-PbivizRelease -Root $x.Repo -Visual 'Bar' -SourceSha $x.Head @ev
+        $script:PbivizFaults.Clear()
+        $res.Status | Should -Be 'BLOCKED' -Because $res.Reason
+        $res.Reason | Should -Match "injected fault at $Fault - rolled back: nothing this call wrote or staged was left behind"
+        $res.PackagePath | Should -BeNullOrEmpty
+        @($res.Staged).Count | Should -Be 0
+        Test-Path -LiteralPath $x.Pkg | Should -BeFalse
+        Test-Path -LiteralPath $x.Man | Should -BeFalse
+        Test-Path -LiteralPath $x.Releases | Should -Be ([bool]$Existing) -Because 'a folder the call created is removed; an existing one stays'
+        if ($Existing) { [IO.File]::ReadAllText((Join-Path $x.Releases 'README.md')) | Should -Be 'release notes written by the user'; @(Get-TTempWrites $x.Releases).Count | Should -Be 0 }
+        @(Compare-PbivizWorkingState -Before $before -After (Get-TState $x.Repo)).Count | Should -Be 0 -Because 'index and working tree are exactly as before'
+        $ok = Add-PbivizRelease -Root $x.Repo -Visual 'Bar' -SourceSha $x.Head @ev
+        $ok.Status | Should -Be 'PASS' -Because $ok.Reason
+        @($ok.Staged) | Should -Be @('Bar/releases/barGuid0001.1.0.0.1.pbiviz', 'Bar/releases/barGuid0001.1.0.0.1.release.json')
+    }
+
+    It 'rolls back when Git cannot stage the pair (index locked), then succeeds once the lock is gone' {
+        $x = New-TR1
+        $before = Get-TState $x.Repo
+        $ev = Get-TEvidence -Sha $x.Head
+        $lock = Join-Path $x.Repo '.git\index.lock'
+        [IO.File]::WriteAllText($lock, '')
+        try { $res = Add-PbivizRelease -Root $x.Repo -Visual 'Bar' -SourceSha $x.Head @ev }
+        finally { Remove-Item -LiteralPath $lock -Force }
+        $res.Status | Should -Be 'BLOCKED' -Because $res.Reason
+        $res.Reason | Should -Match 'staging the release pair failed: .*index\.lock.* - rolled back: nothing this call wrote or staged was left behind'
+        Test-Path -LiteralPath $x.Releases | Should -BeFalse
+        @(Compare-PbivizWorkingState -Before $before -After (Get-TState $x.Repo)).Count | Should -Be 0
+        (Add-PbivizRelease -Root $x.Repo -Visual 'Bar' -SourceSha $x.Head @ev).Status | Should -Be 'PASS'
+    }
+
+    It 'rolls back a Level 3 release that fails after staging; the candidate keeps its authorised state and the release can be retried' {
+        $r = New-TL3
+        Set-TVersion $r 'Bar' 'barGuid0001' '1.0.0.2'
+        Save-TAll $r 'bar v2' | Out-Null
+        $p = Invoke-TPromotion -Repo $r -SkipRelease
+        $p.Build.Status | Should -Be 'PASS' -Because $p.Build.Reason
+        $wt = $p.Candidate.Worktree
+        $ev = Get-TEvidence -Sha $p.Candidate.Source
+        $script:PbivizFaults['release:staged'] = $true
+        $res = Add-PbivizRelease -Worktree $wt -Visual 'Bar' -SourceSha $p.Candidate.Source @ev
+        $script:PbivizFaults.Clear()
+        $res.Status | Should -Be 'BLOCKED' -Because $res.Reason
+        $res.Reason | Should -Match 'injected fault at release:staged - rolled back: nothing this call wrote or staged was left behind'
+        (Test-PbivizCandidateState -Worktree $wt).Status | Should -Be 'PASS' -Because 'the index is the authorised candidate snapshot again'
+        Test-Path -LiteralPath (Join-Path $wt 'Bar\releases') | Should -BeFalse
+        $ok = Add-PbivizRelease -Worktree $wt -Visual 'Bar' -SourceSha $p.Candidate.Source @ev
+        $ok.Status | Should -Be 'PASS' -Because $ok.Reason
+        (Test-PbivizPromotionGates -Worktree $wt -Visual 'Bar' -TargetRef PBVIZ_Team_Prod).Status | Should -Be 'PASS'
+    }
+
+    It 'never deletes a file it wrote once that file changed; the run FAILS with ROLLBACK INCOMPLETE naming it' {
+        $x = New-TR1
+        $ev = Get-TEvidence -Sha $x.Head
+        $script:PbivizFaults['release:manifest-written'] = { param($path) [IO.File]::AppendAllText($path, 'edited meanwhile') }
+        $res = Add-PbivizRelease -Root $x.Repo -Visual 'Bar' -SourceSha $x.Head @ev
+        $script:PbivizFaults.Clear()
+        $res.Status | Should -Be 'FAILED'
+        $res.Reason | Should -Match 'ROLLBACK INCOMPLETE, review by hand before archiving again: .*barGuid0001\.1\.0\.0\.1\.release\.json changed after this call wrote it - left in place'
+        [IO.File]::ReadAllText($x.Man) | Should -Match 'edited meanwhile$'
+        Test-Path -LiteralPath $x.Pkg | Should -BeFalse -Because 'the unchanged package the call wrote is still removed'
+    }
+
+    It 'explains an untracked (ignored) leftover release file and never deletes it' {
+        $x = New-TR1
+        [IO.File]::AppendAllText((Join-Path $x.Repo '.git\info\exclude'), "Bar/releases/`n")
+        Write-TPackage -Path $x.Pkg -Guid 'barGuid0001' -Version '1.0.0.1' -Seed 99
+        $sha = Get-PbivizFileSha256 $x.Pkg
+        $res = Add-PbivizRelease -Root $x.Repo -Visual 'Bar' -SourceSha $x.Head
+        $res.Status | Should -Be 'BLOCKED'
+        $res.Reason | Should -Match 'already exists - releases are never overwritten\. barGuid0001\.1\.0\.0\.1\.pbiviz is not tracked by Git: possibly left by an interrupted run .* The helper never deletes it'
+        Get-PbivizFileSha256 $x.Pkg | Should -Be $sha
+        Test-Path -LiteralPath $x.Man | Should -BeFalse
+    }
+
+    It 'rolls back a legacy archive that fails after writing, leaving dist untouched' {
+        $r = New-TRepo
+        New-TVisual $r 'Bar' 'barGuid0001' '1.0.0.3'
+        Save-TAll $r 'base' | Out-Null
+        $dist = Join-Path $r 'Bar\dist\barGuid0001.1.0.0.1.pbiviz'
+        Write-TPackage -Path $dist -Guid 'barGuid0001' -Version '1.0.0.1' -Seed 5
+        $sha = Get-PbivizFileSha256 $dist
+        $before = Get-TState $r
+        $script:PbivizFaults['legacy:written'] = $true
+        $res = Add-PbivizLegacyArchive -Root $r -Visual 'Bar'
+        $script:PbivizFaults.Clear()
+        $res.Status | Should -Be 'BLOCKED' -Because $res.Reason
+        $res.Reason | Should -Match 'injected fault at legacy:written - rolled back'
+        @($res.Archived).Count | Should -Be 0
+        Test-Path -LiteralPath (Join-Path $r 'Bar\releases') | Should -BeFalse
+        Get-PbivizFileSha256 $dist | Should -Be $sha
+        @(Compare-PbivizWorkingState -Before $before -After (Get-TState $r)).Count | Should -Be 0
+        $ok = Add-PbivizLegacyArchive -Root $r -Visual 'Bar'
+        $ok.Status | Should -Be 'PASS' -Because $ok.Reason
+        @($ok.Archived).Count | Should -Be 2
     }
 }

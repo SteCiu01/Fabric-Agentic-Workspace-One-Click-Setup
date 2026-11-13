@@ -768,22 +768,153 @@ Git call goes through one function with literal pathspecs, UTF-8 output and no p
 | Level 1 initialisation (installer) | `Initialize-PbivizRepository -Root <folder> -FolderWasEmpty` |
 | Level 2: adopt a remote, keeping both histories | `Connect-PbivizRemoteHistory -Root <folder> -Remote origin -Branch main -Fetch` |
 | Level 3: candidate for one visual | `New-PbivizPromotionCandidate -Root <folder> -Visual <Name> -SourceRef PBVIZ_Team_Dev -TargetRef PBVIZ_Team_Prod [-Allowlist <paths>]` |
-| Level 3: gates G0-G6 | `Test-PbivizPromotionGates -Worktree <candidate> -Visual <Name>` |
-| Release pair (`.pbiviz` + `.release.json`) | `Add-PbivizRelease -Worktree <candidate> -Visual <Name> -SourceSha <dev commit> [-PackagePath <dist pkg>] [-Tests @{ lint='PASS'; unit='PASS'; host='NOT RUN' }] [-ToolsVersion <x.y.z>] [-NodeVersion <vX.Y.Z>] [-Review @{ reviewer=...; verdict='APPROVE'; sourceSha=<dev commit> }]` (Level 1/2: `-Root <folder>` instead of `-Worktree`) |
+| Level 3: gates G0-G6 | `Test-PbivizPromotionGates -Worktree <candidate> -Visual <Name> -TargetRef PBVIZ_Team_Prod [-Allowlist <the candidate's paths>]` |
+| Release build with build evidence | Level 1/2: `Invoke-PbivizBuild -Root <folder> -Visual <Name>` (clean checkout whose HEAD is the source commit) · Level 3: `Invoke-PbivizBuild -Worktree <candidate> -Visual <Name>` · optional `-TimeoutSeconds` (default 900) |
+| Release pair (`.pbiviz` + `.release.json`) | Level 1/2: `Add-PbivizRelease -Root <folder> -Visual <Name> -SourceSha <HEAD>` · Level 3: `Add-PbivizRelease -Worktree <candidate> -Visual <Name> -SourceSha <candidate source>` · optional `-Tests @{ lint='PASS'; unit='PASS'; host='NOT RUN'; certification='NOT RUN' }`, `-Review @{ reviewer=...; verdict='APPROVE'; sourceSha=<source commit> }`, `-PackagePath <path>`, `-ExternalPackageApproval 'APPROVED:EXTERNAL-PACKAGE:<Name>:<sha256>'`; `-ToolsVersion` / `-NodeVersion` only cross-check the build evidence |
 | One-time legacy archive of `dist/` packages | `Add-PbivizLegacyArchive -Root <folder> -Visual <Name>` |
 | After your PR is merged | `Get-PbivizReleaseProvenance -Root <folder> -Visual <Name> -Version <v> -ProdRef PBVIZ_Team_Prod` · `Test-PbivizReleaseIntegrity -Root <folder> -Visual <Name> -Version <v> -Commit <prod commit>` |
 | Clean up a helper worktree | `Remove-PbivizPromotionWorktree -Root <folder> -WorktreeDir <candidate>` (a committed candidate, without force) · an uncommitted candidate only with `-DiscardApproval 'APPROVED:DISCARD-CANDIDATE:<branch>'` |
 
-- **Package and validation evidence** — the package identity is read from the `.pbiviz`
-  content (`package.json` and `resources/<guid>.pbiviz.json`), never from its file name.
-  `validated` is `true` only when lint and unit tests PASS, the toolchain versions are
-  recorded and an approving review names the exact source commit; otherwise it is `false`
-  with the gaps listed. A FAIL, an invented `package` result or a review of another commit is
-  BLOCKED. Host, certification and Microsoft certification stay separate labels.
-- **Integrity** — `Test-PbivizReleaseIntegrity` reports commit evidence (fingerprint, shared
-  file blobs, package hash, size and content identity at the Prod commit) and source-revision
-  evidence (`VERIFIED`, `NOT AVAILABLE` when the Dev commit is not in the clone, or `MISMATCH`)
-  separately.
+Pass absolute folder paths (`(Resolve-Path <folder>).ProviderPath`): the helper starts Git and
+Node with the path it is given, not with the PowerShell location.
+
+### 29.1 Release classes and the evidence behind them
+
+| Term | Exactly what it means |
+|---|---|
+| **OFFICIAL RELEASE** | The manifest says `validated: true`, which the helper sets only when all of these hold: the package identity was verified from its content, the helper's build evidence binds those exact bytes to the source commit, lint PASS, unit PASS, the `powerbi-visuals-tools` and Node versions are recorded, and an `APPROVE` (or `APPROVE WITH NONBLOCKING NOTES`) review names the exact source commit. It never implies host testing or any certification. |
+| **DEVELOPMENT/TEST CANDIDATE** | `validated: false`, with every missing item listed in `validationGaps`. Allowed at Level 1/2 only; Level 3 never promotes it (`Add-PbivizRelease -Worktree` blocks it before writing, G6 blocks it in the candidate). It is never presented or distributed as a production release. |
+| **Verified local build** (`BuildEvidence = VERIFIED`) | The helper's own build record exists for exactly these package bytes: `Invoke-PbivizBuild` ran the visual's project-local CLI on this machine on the source revision. It is what the helper observed here, not a reproducible-build attestation, and it does not vouch for the contents of `node_modules`. |
+| **Package identity inspection** (`package.identity = VERIFIED`) | GUID, version and resource read from the `.pbiviz` content (`package.json` and `resources/<guid>.pbiviz.json`) and matched against `pbiviz.json` at the source commit. It says nothing about how or from what the package was built: BUILT is never derived from package metadata. |
+
+A FAIL test result, a `BLOCK` review, an invented `package` result, a review of another commit or a
+package built from another commit is BLOCKED; a missing result is a gap, never filled with PASS.
+
+### 29.2 Release workflow - Level 1 and Level 2 (clean checkout)
+
+Preconditions, each checked by the helper (BLOCKED otherwise, nothing written):
+- the PBIVIZ repository root, HEAD on a branch (not detached) and equal to the commit you release;
+  no uncommitted change, no untracked file in the visual, no `assume-unchanged` / `skip-worktree`
+  entry, no ignored file in the visual other than build output;
+- the visual's own `powerbi-visuals-tools` is installed in `<Name>/node_modules`. The helper never
+  downloads: when it is missing the result is BLOCKED and names `APPROVED:INSTALL:<Name>` - restore
+  the locked dependencies (section 28) only after the user gives that token;
+- `node` is on PATH, `pbiviz.json` has a valid GUID and version at that commit, and
+  `<Name>/dist/<guid>.<version>.pbiviz` does not exist yet (a package is never overwritten);
+- the version exceeds every archived version of the visual, validated and legacy (checked by
+  `Add-PbivizRelease`).
+
+```powershell
+. .\.github\agent-docs\Pbiviz-Alm.ps1                    # from the workspace root
+$root = (Resolve-Path '<PBIVIZ folder>').ProviderPath
+$b = Invoke-PbivizBuild -Root $root -Visual 'Bar'
+$b.Status, $b.Reason       # PASS -> $b.PackagePath, $b.Sha256, $b.SourceSha, $b.RecordPath
+# 083 reports lint/unit for $b.SourceSha; 084 reviews exactly $b.SourceSha.
+$r = Add-PbivizRelease -Root $root -Visual 'Bar' -SourceSha $b.SourceSha `
+       -Tests  @{ lint = 'PASS'; unit = 'PASS'; host = 'NOT RUN'; certification = 'NOT RUN' } `
+       -Review @{ reviewer = '084 PBIVIZ Reviewer'; verdict = 'APPROVE'; sourceSha = $b.SourceSha }
+$r.Status, $r.Validated, $r.ReleaseClass, $r.BuildEvidence, ($r.ValidationGaps -join '; ')
+$r.Staged                  # exactly Bar/releases/<guid>.<version>.pbiviz and .release.json
+```
+
+Expected outcomes:
+- `Invoke-PbivizBuild` PASS: `dist/<guid>.<version>.pbiviz` exists and the build record
+  `<git common dir>/pbiviz-builds/<sha256>.json` (plus the build log) binds those bytes to the
+  source commit, its fingerprint, the tools and Node versions and the command
+  `node node_modules/powerbi-visuals-tools/bin/pbiviz.js package`. FAILED (no evidence) when the
+  build fails, times out, leaves processes running, changes the repository state, or produces no
+  package or a package with another identity.
+- `Add-PbivizRelease` PASS: the pair is written and staged, `BuildEvidence = VERIFIED`,
+  `PackageSource = build output`. With the complete evidence above, `Validated = True` and
+  `ReleaseClass = OFFICIAL RELEASE`; with anything missing (for example no review),
+  `Validated = False`, `ReleaseClass = DEVELOPMENT/TEST CANDIDATE` and `ValidationGaps` lists it.
+- Then commit exactly the two staged files (the helper never commits), and check the release
+  commit: `Test-PbivizReleaseIntegrity -Root $root -Visual 'Bar' -Version <v> -Commit HEAD`. Report
+  an official release only for `Status = PASS`, `Verification = COMPLETE`,
+  `ReleaseClass = OFFICIAL RELEASE`.
+
+### 29.3 Release workflow - Level 3 (one visual, Dev to Prod)
+
+```powershell
+$c = New-PbivizPromotionCandidate -Root $root -Visual 'Bar' -SourceRef PBVIZ_Team_Dev -TargetRef PBVIZ_Team_Prod
+$b = Invoke-PbivizBuild -Worktree $c.Worktree -Visual 'Bar'
+$r = Add-PbivizRelease -Worktree $c.Worktree -Visual 'Bar' -SourceSha $c.Source -Tests $tests -Review $review
+$g = Test-PbivizPromotionGates -Worktree $c.Worktree -Visual 'Bar' -TargetRef PBVIZ_Team_Prod
+$g.Status; $g.Gates | Format-Table Gate, Pass, Detail
+```
+
+- `$tests` / `$review` are the same evidence as in 29.2, for `$c.Source`. Only `validated: true`
+  is accepted: an incomplete release is BLOCKED before anything is written.
+- Every gate must PASS. Then commit on the release branch (trailer
+  `Pbiviz-Release: <visual>@<version>`); push and open the pull request only with
+  `APPROVED:PUSH` and `APPROVED:PR`; merge only with `APPROVED:MERGE` and every required review
+  and check satisfied. After the merge nothing is written to Prod:
+  `Get-PbivizReleaseProvenance` derives the Prod commit and `Test-PbivizReleaseIntegrity` re-checks
+  the release there. Remove the candidate with `Remove-PbivizPromotionWorktree`.
+- Alternative build: build the source commit on the clean Dev checkout (29.2) and pass that
+  `dist/` package with `-PackagePath`; it is still a worktree of this repository.
+
+### 29.4 External packages - `APPROVED:EXTERNAL-PACKAGE:<Name>:<sha256>`
+
+A package anywhere other than `<Name>/dist/<guid>.<version>.pbiviz` of a worktree of this
+repository (or reached through a junction) is external. `Add-PbivizRelease -PackagePath <file>`
+then returns BLOCKED and quotes the exact token for those bytes,
+`-ExternalPackageApproval 'APPROVED:EXTERNAL-PACKAGE:Bar:<64-character sha256 of the file>'`. Ask the user; only after
+they give that token, re-run with it. The token binds the SHA-256 of the bytes: another file, or
+the same file changed, needs a new approval. An approved external package carries build evidence
+only when its bytes are identical to a helper build record; otherwise `BuildEvidence = NONE`, it
+stays a DEVELOPMENT/TEST CANDIDATE and Level 3 refuses it.
+
+### 29.5 Integrity results - how to report them
+
+| `Status` | `Verification` | `CommitEvidence` / `SourceRevision` | Report as |
+|---|---|---|---|
+| `PASS` | `COMPLETE` | `VERIFIED` / `VERIFIED` | verified; an official release only if `ReleaseClass = OFFICIAL RELEASE` |
+| `PARTIAL` | `COMMIT ONLY` | `VERIFIED` / `NOT AVAILABLE` | "commit evidence verified; source revision not verified" - never as a verified release; fetch the Dev history and re-run |
+| `FAILED` | `NONE` | `MISMATCH` (commit or source revision), or no single release manifest at that commit | not a valid release |
+
+COMMIT evidence: fingerprint, shared-file blobs, package hash, size, content claims, build evidence
+and validation claim at the given commit. SOURCE-REVISION evidence: the Dev commit named in the
+manifest still yields the same fingerprint and shared blobs.
+
+### 29.6 Build supervision, transactional archiving and G4 limits
+
+- **Build supervision** - `pbiviz package` runs under process-tree supervision (Windows job
+  object): the CLI starts suspended inside the job, stdin is `NUL`, stdout/stderr are drained into
+  bounded buffers (4 MB per stream; the excess is counted in the log, not kept). When the CLI exits
+  or the timeout expires, every process of its tree still running - detached descendants
+  included - is counted and terminated before the call returns, so nothing can write a package
+  afterwards (the console host Windows attaches to the CLI is not counted). A timeout, a descendant still running after the CLI exited, or output that could not
+  be collected is FAILED with no build evidence.
+- **Transactional archiving** - `Add-PbivizRelease` and `Add-PbivizLegacyArchive` write each new
+  file to a temporary file and rename it into place (never over an existing file), and record
+  every folder and file they create. If anything fails after the first write - package, manifest,
+  staging or the post-staging candidate check - they unstage what they staged, delete what they
+  wrote while it still holds the bytes they wrote, and remove folders they created when empty; the
+  reason ends with `rolled back: nothing this call wrote or staged was left behind`. Pre-existing
+  releases and user files are never touched. If a written file changed meanwhile it is left in
+  place and the result is FAILED with `ROLLBACK INCOMPLETE` naming it. A release file that exists
+  but is not tracked is reported (never deleted) for you to inspect.
+- **G4 (dependencies stay inside the visual)** - analyses the visual's own code, styles and JSON
+  configuration as the PBIVIZ toolchain (webpack 5, ts-loader, less-loader, css-loader) resolves
+  them: `import` / `export ... from`, side-effect imports, `import()` (template literals by their
+  static prefix), `require()`, `require.resolve()`, `require.context()`,
+  `import.meta.webpackContext()`, `new URL(<request>, import.meta.url)`, triple-slash references,
+  LESS/CSS `@import` and `url()`, and relative or absolute path strings in the visual's JSON files
+  (for example `extends`, `baseUrl` and `paths` in `tsconfig.json`, `file:` dependencies in
+  `package.json` and the lockfile, paths in `pbiviz.json`). A request
+  reaching a file outside the visual that is not allowlisted, a folder request (context or
+  template) outside the visual, npm workspaces at the repository root, or an absolute path BLOCK
+  the gate. It fails closed (`analysis incomplete`) on a computed request, a package the visual's
+  own `package.json` / `package-lock.json` does not declare or lock, inline loader syntax,
+  `#` subpath imports, an executable `pbiviz.mjs` / `tsconfig.mjs` / `capabilities.mjs`, a
+  `node_modules` folder at the repository root, unreadable or oversized files, junctions and
+  links. Limits: the contents of `node_modules` are not analysed; TypeScript automatic `@types`
+  inclusion from folders above the repository, pnpm/Yarn layouts, lockfile version 1 and R scripts
+  are not resolved; text inside JSX that looks like a comment can hide a computed import from the
+  lexer (static relative requests are still caught by a raw scan). G4 is a static classification,
+  not a proof that the bundle contains nothing from outside the visual.
+
 - **Cleanup** — only helper-created candidates (record, folder and `release/pbiviz/*` branch
   must match) are removed; unexpected staged, unstaged or untracked data and operations in
   progress are refused, with or without approval. The release branch is always kept.
@@ -797,8 +928,8 @@ Git call goes through one function with literal pathspecs, UTF-8 output and no p
   each gated by an explicit approval token (`APPROVED:PUSH`, `APPROVED:PR`, `APPROVED:MERGE`
   with every required review and check satisfied); the helper performs none of them.
 - **Results** — every function returns a status (`PASS`, `BLOCKED`, `NEEDS INPUT`,
-  `NEEDS CHECKPOINT`, `CONFLICT`, `FAILED`; provenance: `DERIVED` / `NOT DERIVABLE`) with a
-  reason and evidence; agents report it verbatim.
+  `NEEDS CHECKPOINT`, `CONFLICT`, `FAILED`; integrity: also `PARTIAL`; provenance: `DERIVED` /
+  `NOT DERIVABLE`) with a reason and evidence; agents report it verbatim.
 
 ---
 

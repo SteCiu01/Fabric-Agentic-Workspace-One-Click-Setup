@@ -2648,34 +2648,249 @@ function Get-PbivizGitError {
     return ([string]$hit).Trim()
 }
 
-# Non-git programs (the project-local pbiviz CLI): a .NET process, no shell, stdin closed, bounded.
+# Process-tree supervision for non-git programs (the project-local pbiviz CLI and Node). Windows
+# job object with KILL_ON_JOB_CLOSE; the program starts suspended, joins the job before it runs a
+# single instruction, gets NUL as stdin and pipes as stdout/stderr that are drained by background
+# threads into bounded buffers. When it exits or times out, every process of the job still running
+# (descendants inheriting the job, detached ones included) is counted and terminated, and the call
+# waits until the job is empty, so nothing it started can outlive the call or write afterwards.
+# Compatible with Windows PowerShell 5.1 (C# 5) and PowerShell 7.
+$script:PbivizProcessRunnerSource = @"
+#pragma warning disable
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+using Microsoft.Win32.SafeHandles;
+
+namespace PbivizNative
+{
+    public sealed class ProcessTreeResult
+    {
+        public int ExitCode;
+        public bool TimedOut;
+        public int StrayProcesses;
+        public bool OutputComplete;
+        public long DroppedBytes;
+        public string Out = "";
+        public string Err = "";
+        public string Error;
+    }
+
+    public static class ProcessTreeRunner
+    {
+        [StructLayout(LayoutKind.Sequential)]
+        struct SECURITY_ATTRIBUTES { public int nLength; public IntPtr lpSecurityDescriptor; public int bInheritHandle; }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct STARTUPINFO
+        {
+            public int cb; public string lpReserved; public string lpDesktop; public string lpTitle;
+            public int dwX; public int dwY; public int dwXSize; public int dwYSize; public int dwXCountChars; public int dwYCountChars;
+            public int dwFillAttribute; public int dwFlags; public short wShowWindow; public short cbReserved2; public IntPtr lpReserved2;
+            public IntPtr hStdInput; public IntPtr hStdOutput; public IntPtr hStdError;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct PROCESS_INFORMATION { public IntPtr hProcess; public IntPtr hThread; public int dwProcessId; public int dwThreadId; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct JOBOBJECT_BASIC_LIMIT_INFORMATION
+        {
+            public long PerProcessUserTimeLimit; public long PerJobUserTimeLimit; public uint LimitFlags;
+            public UIntPtr MinimumWorkingSetSize; public UIntPtr MaximumWorkingSetSize; public uint ActiveProcessLimit;
+            public UIntPtr Affinity; public uint PriorityClass; public uint SchedulingClass;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct IO_COUNTERS { public ulong ReadOperationCount, WriteOperationCount, OtherOperationCount, ReadTransferCount, WriteTransferCount, OtherTransferCount; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+        {
+            public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation; public IO_COUNTERS IoInfo;
+            public UIntPtr ProcessMemoryLimit; public UIntPtr JobMemoryLimit; public UIntPtr PeakProcessMemoryUsed; public UIntPtr PeakJobMemoryUsed;
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern IntPtr CreateJobObject(IntPtr attributes, string name);
+        [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetInformationJobObject(IntPtr job, int infoClass, ref JOBOBJECT_EXTENDED_LIMIT_INFORMATION info, int length);
+        [DllImport("kernel32.dll", SetLastError = true)] static extern bool QueryInformationJobObject(IntPtr job, int infoClass, IntPtr info, int length, IntPtr returnLength);
+        [DllImport("kernel32.dll", SetLastError = true)] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+        [DllImport("kernel32.dll", SetLastError = true)] static extern bool TerminateJobObject(IntPtr job, uint exitCode);
+        [DllImport("kernel32.dll", SetLastError = true)] static extern bool CreatePipe(out IntPtr read, out IntPtr write, ref SECURITY_ATTRIBUTES attributes, int size);
+        [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetHandleInformation(IntPtr handle, int mask, int flags);
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern IntPtr CreateFile(string name, uint access, uint share, ref SECURITY_ATTRIBUTES attributes, uint disposition, uint flags, IntPtr template);
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern bool CreateProcess(string application, StringBuilder commandLine, IntPtr processAttributes, IntPtr threadAttributes, bool inheritHandles, uint flags, IntPtr environment, string directory, ref STARTUPINFO startup, out PROCESS_INFORMATION info);
+        [DllImport("kernel32.dll", SetLastError = true)] static extern uint ResumeThread(IntPtr thread);
+        [DllImport("kernel32.dll", SetLastError = true)] static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+        [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetExitCodeProcess(IntPtr process, out uint exitCode);
+        [DllImport("kernel32.dll", SetLastError = true)] static extern bool TerminateProcess(IntPtr process, uint exitCode);
+        [DllImport("kernel32.dll", SetLastError = true)] static extern bool CloseHandle(IntPtr handle);
+
+        sealed class Pump
+        {
+            readonly IntPtr handle;
+            readonly long max;
+            readonly MemoryStream sink = new MemoryStream();
+            public long Dropped;
+            public readonly Thread Worker;
+            public Pump(IntPtr handle, long max) { this.handle = handle; this.max = max; Worker = new Thread(Run); Worker.IsBackground = true; }
+            void Run()
+            {
+                try
+                {
+                    using (FileStream fs = new FileStream(new SafeFileHandle(handle, true), FileAccess.Read, 4096, false))
+                    {
+                        byte[] buf = new byte[8192];
+                        int n;
+                        while ((n = fs.Read(buf, 0, buf.Length)) > 0)
+                        {
+                            lock (sink)
+                            {
+                                long room = max - sink.Length;
+                                int keep = room <= 0 ? 0 : (int)Math.Min((long)n, room);
+                                if (keep > 0) sink.Write(buf, 0, keep);
+                                Dropped += n - keep;
+                            }
+                        }
+                    }
+                }
+                catch (IOException) { }
+                catch (ObjectDisposedException) { }
+            }
+            public string Text() { lock (sink) { return Encoding.UTF8.GetString(sink.ToArray()); } }
+            public long DroppedBytes() { lock (sink) { return Dropped; } }
+        }
+
+        // Ids of the processes in the job (JobObjectBasicProcessIdList); null when unknown.
+        static List<long> JobProcessIds(IntPtr job)
+        {
+            int size = 8 + IntPtr.Size * 4096;
+            IntPtr buf = Marshal.AllocHGlobal(size);
+            try
+            {
+                if (!QueryInformationJobObject(job, 3, buf, size, IntPtr.Zero)) return null;
+                int listed = Marshal.ReadInt32(buf, 4);
+                List<long> ids = new List<long>();
+                for (int i = 0; i < listed; i++) ids.Add(Marshal.ReadIntPtr(buf, 8 + i * IntPtr.Size).ToInt64());
+                return ids;
+            }
+            finally { Marshal.FreeHGlobal(buf); }
+        }
+
+        // Processes of the job other than the program itself; the console host Windows attaches to a
+        // console program is not one of its descendants (it is still terminated with the job).
+        static int CountOthers(IntPtr job, int mainPid)
+        {
+            List<long> ids = JobProcessIds(job);
+            if (ids == null) return -1;
+            int n = 0;
+            foreach (long id in ids)
+            {
+                if (id == mainPid) continue;
+                string name;
+                try { using (Process p = Process.GetProcessById((int)id)) { name = p.ProcessName; } }
+                catch (ArgumentException) { continue; }
+                catch (InvalidOperationException) { continue; }
+                if (string.Equals(name, "conhost", StringComparison.OrdinalIgnoreCase)) continue;
+                n++;
+            }
+            return n;
+        }
+
+        public static ProcessTreeResult Run(string file, string arguments, string directory, int timeoutMs, long maxBytes, int drainMs)
+        {
+            ProcessTreeResult r = new ProcessTreeResult();
+            IntPtr job = IntPtr.Zero, outRead = IntPtr.Zero, outWrite = IntPtr.Zero, errRead = IntPtr.Zero, errWrite = IntPtr.Zero, nul = IntPtr.Zero;
+            PROCESS_INFORMATION pi = new PROCESS_INFORMATION();
+            Pump po = null, pe = null;
+            try
+            {
+                job = CreateJobObject(IntPtr.Zero, null);
+                if (job == IntPtr.Zero) throw new Win32Exception();
+                JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
+                limits.BasicLimitInformation.LimitFlags = 0x2000;
+                if (!SetInformationJobObject(job, 9, ref limits, Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION)))) throw new Win32Exception();
+                SECURITY_ATTRIBUTES sa = new SECURITY_ATTRIBUTES();
+                sa.nLength = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES));
+                sa.bInheritHandle = 1;
+                if (!CreatePipe(out outRead, out outWrite, ref sa, 0)) throw new Win32Exception();
+                if (!CreatePipe(out errRead, out errWrite, ref sa, 0)) throw new Win32Exception();
+                if (!SetHandleInformation(outRead, 1, 0) || !SetHandleInformation(errRead, 1, 0)) throw new Win32Exception();
+                nul = CreateFile("NUL", 0x80000000, 3, ref sa, 3, 0, IntPtr.Zero);
+                if (nul == new IntPtr(-1)) { nul = IntPtr.Zero; throw new Win32Exception(); }
+                STARTUPINFO si = new STARTUPINFO();
+                si.cb = Marshal.SizeOf(typeof(STARTUPINFO));
+                si.dwFlags = 0x100;
+                si.hStdInput = nul; si.hStdOutput = outWrite; si.hStdError = errWrite;
+                StringBuilder cmd = new StringBuilder("\"" + file + "\"" + (string.IsNullOrEmpty(arguments) ? "" : " " + arguments));
+                if (!CreateProcess(file, cmd, IntPtr.Zero, IntPtr.Zero, true, 0x00000004 | 0x08000000, IntPtr.Zero, directory, ref si, out pi)) { pi = new PROCESS_INFORMATION(); throw new Win32Exception(); }
+                if (!AssignProcessToJobObject(job, pi.hProcess))
+                {
+                    int code = Marshal.GetLastWin32Error();
+                    TerminateProcess(pi.hProcess, 1);
+                    throw new Win32Exception(code);
+                }
+                CloseHandle(outWrite); outWrite = IntPtr.Zero;
+                CloseHandle(errWrite); errWrite = IntPtr.Zero;
+                CloseHandle(nul); nul = IntPtr.Zero;
+                po = new Pump(outRead, maxBytes); outRead = IntPtr.Zero; po.Worker.Start();
+                pe = new Pump(errRead, maxBytes); errRead = IntPtr.Zero; pe.Worker.Start();
+                ResumeThread(pi.hThread);
+                r.TimedOut = WaitForSingleObject(pi.hProcess, (uint)timeoutMs) != 0;
+                r.StrayProcesses = CountOthers(job, pi.dwProcessId);
+                TerminateJobObject(job, 1);
+                Stopwatch sw = Stopwatch.StartNew();
+                while (sw.ElapsedMilliseconds < 15000)
+                {
+                    List<long> left = JobProcessIds(job);
+                    if (left != null && left.Count == 0) break;
+                    Thread.Sleep(50);
+                }
+                WaitForSingleObject(pi.hProcess, 5000);
+                uint exit;
+                GetExitCodeProcess(pi.hProcess, out exit);
+                r.ExitCode = r.TimedOut ? -2 : unchecked((int)exit);
+                bool a = po.Worker.Join(drainMs);
+                bool b = pe.Worker.Join(drainMs);
+                r.OutputComplete = a && b;
+            }
+            catch (Exception ex)
+            {
+                r.Error = ex.Message;
+                r.ExitCode = -1;
+                if (job != IntPtr.Zero) TerminateJobObject(job, 1);
+            }
+            finally
+            {
+                if (po != null) { r.Out = po.Text(); r.DroppedBytes += po.DroppedBytes(); }
+                if (pe != null) { r.Err = pe.Text(); r.DroppedBytes += pe.DroppedBytes(); }
+                foreach (IntPtr h in new IntPtr[] { outRead, outWrite, errRead, errWrite, nul, pi.hThread, pi.hProcess }) { if (h != IntPtr.Zero) CloseHandle(h); }
+                if (job != IntPtr.Zero) CloseHandle(job);
+            }
+            return r;
+        }
+    }
+}
+"@
+
+function Initialize-PbivizProcessRunner {
+    if (-not ('PbivizNative.ProcessTreeRunner' -as [type])) { Add-Type -TypeDefinition $script:PbivizProcessRunnerSource -Language CSharp -IgnoreWarnings }
+}
+
+# Runs a non-git program under process-tree supervision (see above). TimedOut, StrayProcesses
+# (processes of its tree still running when it ended; -1 = unknown), OutputComplete and
+# DroppedBytes (output beyond MaxOutputBytes per stream, not kept) let callers fail closed.
 function Invoke-PbivizProcess {
-    param([string]$FilePath, [string[]]$Arguments, [string]$WorkingDirectory, [int]$TimeoutSeconds = 900)
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $FilePath
-    $psi.Arguments = ConvertTo-PbivizCommandLine $Arguments
-    $psi.WorkingDirectory = $WorkingDirectory
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $psi.RedirectStandardInput = $true
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.StandardOutputEncoding = $script:PbivizUtf8
-    $psi.StandardErrorEncoding = $script:PbivizUtf8
-    $p = New-Object System.Diagnostics.Process
-    $p.StartInfo = $psi
-    try { [void]$p.Start() } catch { return [pscustomobject]@{ ExitCode = -1; Out = ''; Err = $_.Exception.Message; TimedOut = $false } }
-    $p.StandardInput.Close()
-    $outTask = $p.StandardOutput.ReadToEndAsync()
-    $errTask = $p.StandardError.ReadToEndAsync()
-    $timedOut = -not $p.WaitForExit($TimeoutSeconds * 1000)
-    if ($timedOut) { try { $p.Kill() } catch { } }
-    $p.WaitForExit()
-    [void]$outTask.Wait(30000)
-    [void]$errTask.Wait(30000)
-    $code = if ($timedOut) { -2 } else { $p.ExitCode }
-    $p.Dispose()
-    return [pscustomobject]@{ ExitCode = $code; Out = [string]$outTask.Result; Err = [string]$errTask.Result; TimedOut = $timedOut }
+    param([string]$FilePath, [string[]]$Arguments, [string]$WorkingDirectory, [int]$TimeoutSeconds = 900, [long]$MaxOutputBytes = 4MB)
+    try { Initialize-PbivizProcessRunner }
+    catch { return [pscustomobject]@{ ExitCode = -1; Out = ''; Err = ''; TimedOut = $false; StrayProcesses = 0; OutputComplete = $false; DroppedBytes = 0; Error = "cannot load the process-tree runner: $($_.Exception.Message)" } }
+    $r = [PbivizNative.ProcessTreeRunner]::Run($FilePath, (ConvertTo-PbivizCommandLine $Arguments), ([IO.Path]::GetFullPath($WorkingDirectory)), [int]([Math]::Max(1, $TimeoutSeconds) * 1000), $MaxOutputBytes, 15000)
+    return [pscustomobject]@{ ExitCode = $r.ExitCode; Out = [string]$r.Out; Err = $(if ($r.Error) { [string]$r.Error } else { [string]$r.Err }); TimedOut = $r.TimedOut; StrayProcesses = $r.StrayProcesses; OutputComplete = $r.OutputComplete; DroppedBytes = $r.DroppedBytes; Error = $r.Error }
 }
 
 # NUL-separated output -> string[]; only the terminator after the last record is dropped, so a
@@ -4089,7 +4304,7 @@ function Invoke-PbivizBuild {
         if (-not $node) { $res.Reason = 'Node.js (node) is not on PATH'; return $res }
         $nv = Invoke-PbivizProcess -FilePath $node.Source -Arguments @('--version') -WorkingDirectory $visualDir -TimeoutSeconds 60
         $nodeVersion = $nv.Out.Trim()
-        if ($nv.ExitCode -ne 0 -or $nodeVersion -notmatch '^v\d+\.\d+\.\d+$') { $res.Reason = 'cannot read the Node.js version'; return $res }
+        if ($nv.ExitCode -ne 0 -or $nodeVersion -notmatch '^v\d+\.\d+\.\d+$') { $res.Reason = "cannot read the Node.js version$(if ($nv.Error) { ": $($nv.Error)" })"; return $res }
         $res.ToolsVersion = $tv; $res.NodeVersion = $nodeVersion
         $id = Get-PbivizVisualIdentity -Root $dir -Entries @(Get-PbivizTreeEntries -Root $dir -TreeIsh $src) -Visual $Visual
         if (-not $id -or $id.Guid -notmatch '^[A-Za-z0-9_]{1,128}$' -or -not (ConvertTo-PbivizVersion $id.Version)) { $res.Reason = 'pbiviz.json has no valid guid/version at the source revision'; return $res }
@@ -4105,8 +4320,12 @@ function Invoke-PbivizBuild {
         $finished = [DateTime]::UtcNow
         $res.ExitCode = $run.ExitCode
         $log = "$($run.Out)`n$($run.Err)"
+        if ($run.DroppedBytes -gt 0) { $log += "`n[pbiviz-alm: output limit reached - $($run.DroppedBytes) byte(s) were not kept]" }
         $tail = @(($log -split "`r?`n") | Where-Object { $_ -match '\S' }) | Select-Object -Last 1
-        if ($run.TimedOut) { $res.Status = 'FAILED'; $res.Reason = "pbiviz package timed out after $TimeoutSeconds s - no build evidence recorded"; return $res }
+        if ($run.Error) { $res.Status = 'FAILED'; $res.Reason = "pbiviz package could not run under process-tree supervision: $($run.Error) - no build evidence recorded"; return $res }
+        if ($run.TimedOut) { $res.Status = 'FAILED'; $res.Reason = "pbiviz package timed out after $TimeoutSeconds s - no build evidence recorded; its whole process tree was stopped$(if ($run.StrayProcesses -gt 0) { " (including $($run.StrayProcesses) descendant process(es))" })"; return $res }
+        if ($run.StrayProcesses -ne 0) { $res.Status = 'FAILED'; $res.Reason = "pbiviz package exited but left $(if ($run.StrayProcesses -lt 0) { 'an unknown number of' } else { $run.StrayProcesses }) process(es) of its tree running; they were stopped before they could write anything more - no build evidence recorded"; return $res }
+        if (-not $run.OutputComplete) { $res.Status = 'FAILED'; $res.Reason = 'the output of pbiviz package could not be collected completely - no build evidence recorded'; return $res }
         if ($run.ExitCode -ne 0) { $res.Status = 'FAILED'; $res.Reason = "pbiviz package failed (exit $($run.ExitCode)): $tail - no build evidence recorded"; return $res }
         $after = if ($Worktree) { Test-PbivizCandidateState -Worktree $Worktree } else { Test-PbivizCleanTree -Root $Root -Visual $Visual }
         if ($after.Status -ne 'PASS' -or (Resolve-PbivizCommit -Root $dir -Ref 'HEAD') -ne $(if ($Worktree) { [string]$rec.tgt } else { $src })) { $res.Status = 'FAILED'; $res.Reason = "the build changed the repository state ($($after.Reason)) - no build evidence recorded"; return $res }
@@ -4268,6 +4487,111 @@ function Get-PbivizReleasePairProblems {
     return $p.ToArray()
 }
 
+# Failure-injection seam for the automated tests ONLY: name -> $true, or a scriptblock run just
+# before the injected failure. Empty in normal use; nothing in the workspace sets it.
+$script:PbivizFaults = @{}
+function Invoke-PbivizFault {
+    param([string]$Name, $Context = $null)
+    if (-not $script:PbivizFaults -or -not $script:PbivizFaults.ContainsKey($Name)) { return }
+    $action = $script:PbivizFaults[$Name]
+    if ($action -is [scriptblock]) { & $action $Context }
+    throw "injected fault at $Name"
+}
+
+# Archive writes are transactional: every folder and file one call creates is recorded with the
+# exact bytes written, and unless the call ends in PASS exactly those writes are undone.
+function New-PbivizArchiveTxn {
+    return [pscustomobject]@{ Dirs = (New-Object System.Collections.Generic.List[string]); Files = (New-Object System.Collections.Generic.List[object]); Staged = @() }
+}
+
+function New-PbivizArchiveFolders {
+    param($Txn, [string]$Folder, [string]$StopAt)
+    $missing = New-Object System.Collections.Generic.List[string]
+    $d = $Folder.TrimEnd('\')
+    while ($d -and $d.Length -gt $StopAt.TrimEnd('\').Length -and -not (Test-Path -LiteralPath $d)) { $missing.Insert(0, $d); $d = Split-Path $d -Parent }
+    foreach ($m in $missing) { [void][IO.Directory]::CreateDirectory((ConvertTo-PbivizIoPath $m)); $Txn.Dirs.Add($m) }
+}
+
+# A NEW file, written completely before it appears: the bytes go to a temporary file in the same
+# folder that is then renamed; the rename never replaces an existing file.
+function New-PbivizArchiveFile {
+    param($Txn, [string]$Path, [byte[]]$Bytes, [string]$Sha256)
+    $tmp = Join-Path (Split-Path $Path -Parent) ('.pbiviz-write-' + [guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        $fs = New-Object IO.FileStream((ConvertTo-PbivizIoPath $tmp), [IO.FileMode]::CreateNew, [IO.FileAccess]::Write)
+        try { $fs.Write($Bytes, 0, $Bytes.Length); $fs.Flush($true) } finally { $fs.Dispose() }
+        [IO.File]::Move((ConvertTo-PbivizIoPath $tmp), (ConvertTo-PbivizIoPath $Path))
+    } catch {
+        try { [IO.File]::Delete((ConvertTo-PbivizIoPath $tmp)) } catch { }
+        throw
+    }
+    $Txn.Files.Add([pscustomobject]@{ Path = $Path; Sha256 = $Sha256 })
+}
+
+# Undoes the recorded writes: unstages the recorded paths that are in the index (they were not
+# tracked before the call), deletes recorded files that still hold exactly the bytes written and
+# removes recorded folders that are empty. Anything else - including a recorded file that changed
+# since - is left in place and reported.
+function Undo-PbivizArchiveWrite {
+    param([string]$Directory, $Txn)
+    $done = New-Object System.Collections.Generic.List[string]
+    $left = New-Object System.Collections.Generic.List[string]
+    $tmpFiles = @()
+    try {
+        $staged = @($Txn.Staged | Where-Object { $_ })
+        if ($staged.Count -gt 0) {
+            $ls = Invoke-PbivizGit -WorkingDirectory $Directory -Arguments @('ls-files', '-z')
+            if ($ls.ExitCode -ne 0) { $left.Add("the index could not be read, so staged release paths may remain: $(Get-PbivizGitError $ls)") }
+            else {
+                $indexSet = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+                foreach ($p in @(Split-PbivizNul $ls.Out)) { [void]$indexSet.Add($p) }
+                $inIndex = @($staged | Where-Object { $indexSet.Contains($_) })
+                if ($inIndex.Count -gt 0) {
+                    $f2 = Write-PbivizPathspecFile -Paths $inIndex; $tmpFiles += $f2
+                    # Index only (mixed reset of exactly these paths): the paths were untracked
+                    # before, so this removes the entries this call staged and touches no file.
+                    $rm = Invoke-PbivizGit -WorkingDirectory $Directory -Arguments @('reset', '-q', "--pathspec-from-file=$f2", '--pathspec-file-nul')
+                    if ($rm.ExitCode -ne 0) { $left.Add("still staged: $($inIndex -join ', ') ($(Get-PbivizGitError $rm))") }
+                    else { $done.Add("unstaged $($inIndex -join ', ')") }
+                }
+            }
+        }
+        $created = $Txn.Files.ToArray()
+        [array]::Reverse($created)
+        foreach ($x in $created) {
+            if (-not (Test-Path -LiteralPath $x.Path -PathType Leaf)) { continue }
+            $now = $null
+            try { $now = Get-PbivizFileSha256 $x.Path } catch { }
+            if ($now -ne $x.Sha256) { $left.Add("$($x.Path) changed after this call wrote it - left in place"); continue }
+            try { [IO.File]::Delete((ConvertTo-PbivizIoPath $x.Path)); $done.Add("removed $(Split-Path $x.Path -Leaf)") }
+            catch { $left.Add("$($x.Path) could not be removed: $(Get-PbivizErrorText $_)") }
+        }
+        $dirs = $Txn.Dirs.ToArray()
+        [array]::Reverse($dirs)
+        foreach ($d in $dirs) {
+            if (-not (Test-Path -LiteralPath $d -PathType Container)) { continue }
+            if (@(Get-ChildItem -LiteralPath $d -Force -ErrorAction SilentlyContinue).Count -gt 0) { $left.Add("folder $d is not empty - left in place"); continue }
+            try { [IO.Directory]::Delete((ConvertTo-PbivizIoPath $d)); $done.Add("removed folder $(Split-Path $d -Leaf)") }
+            catch { $left.Add("folder $d could not be removed: $(Get-PbivizErrorText $_)") }
+        }
+    } catch { $left.Add("rollback error: $(Get-PbivizErrorText $_)") }
+    finally { foreach ($x in $tmpFiles) { Remove-Item -LiteralPath $x -Force -ErrorAction SilentlyContinue } }
+    return [pscustomobject]@{ Complete = ($left.Count -eq 0); Done = $done.ToArray(); Left = $left.ToArray() }
+}
+
+function Complete-PbivizArchiveRollback {
+    param($Result, [string]$Directory, $Txn)
+    $rb = Undo-PbivizArchiveWrite -Directory $Directory -Txn $Txn
+    if ($rb.Complete) {
+        $Result.Reason = "$($Result.Reason) - rolled back: nothing this call wrote or staged was left behind$(if ($rb.Done.Count) { " ($($rb.Done -join '; '))" })"
+        if ($Result.PSObject.Properties['PackagePath']) { $Result.PackagePath = $null; $Result.ManifestPath = $null; $Result.Staged = @() }
+        if ($Result.PSObject.Properties['Archived']) { $Result.Archived = @() }
+    } else {
+        $Result.Status = 'FAILED'
+        $Result.Reason = "$($Result.Reason) - ROLLBACK INCOMPLETE, review by hand before archiving again: $($rb.Left -join '; ')$(if ($rb.Done.Count) { " (undone: $($rb.Done -join '; '))" })"
+    }
+}
+
 # Archives one release pair. Level 1/2 (-Root): an unvalidated pair is allowed and stays a
 # DEVELOPMENT/TEST CANDIDATE. Level 3 (-Worktree): only a validated release enters the candidate.
 # The package must be the canonical build output of a worktree of this repository; any other
@@ -4279,6 +4603,7 @@ function Add-PbivizRelease {
           [System.Collections.IDictionary]$Review = $null, [string]$ExternalPackageApproval = $null)
     $res = [pscustomobject][ordered]@{ Status = 'BLOCKED'; Reason = ''; PackagePath = $null; ManifestPath = $null; Sha256 = $null; Bytes = 0; Guid = $null; Version = $null; Validated = $false; ReleaseClass = $null; ValidationGaps = @(); Quality = $null; BuildEvidence = 'NONE'; PackageSource = $null; Staged = @(); Evidence = (New-Object System.Collections.Generic.List[string]) }
     $files = @()
+    $txn = New-PbivizArchiveTxn; $writing = $false; $dir = $null
     try {
         if (($Root -and $Worktree) -or (-not $Root -and -not $Worktree)) { $res.Reason = 'use exactly one of -Root or -Worktree'; return $res }
         if ([string]$SourceSha -notmatch '^[0-9a-f]{40}([0-9a-f]{24})?$') { $res.Reason = 'invalid input: -SourceSha must be a full commit id'; return $res }
@@ -4392,18 +4717,21 @@ function Add-PbivizRelease {
         $names = Get-PbivizReleaseNames -Visual $Visual -Guid $id.Guid -Version $id.Version
         $pkgFull = Join-Path $dir ($names[0] -replace '/', '\')
         $manFull = Join-Path $dir ($names[1] -replace '/', '\')
-        if ((Test-Path -LiteralPath $pkgFull) -or (Test-Path -LiteralPath $manFull)) { $res.Reason = 'a release with this GUID and version already exists - releases are never overwritten'; return $res }
         $tracked = Invoke-PbivizGit -WorkingDirectory $dir -Arguments @('ls-files', '-z')
+        if ($tracked.ExitCode -ne 0) { $res.Reason = "cannot list the index: $(Get-PbivizGitError $tracked)"; return $res }
         $trackedSet = @(Split-PbivizNul $tracked.Out)
+        $present = @(@($pkgFull, $manFull) | Where-Object { Test-Path -LiteralPath $_ })
+        if ($present.Count -gt 0) {
+            $known = @($names | Where-Object { $n = $_; $trackedSet | Where-Object { $_.Equals($n, [StringComparison]::OrdinalIgnoreCase) } })
+            if ($known.Count -gt 0) { $res.Reason = 'a release with this GUID and version already exists - releases are never overwritten'; return $res }
+            $res.Reason = "a release with this GUID and version already exists - releases are never overwritten. $(@($present | ForEach-Object { Split-Path $_ -Leaf }) -join ' and ') $(if ($present.Count -gt 1) { 'are' } else { 'is' }) not tracked by Git: possibly left by an interrupted run of a helper without rollback, or created by hand. The helper never deletes it - inspect it and remove or move it yourself before archiving again."
+            return $res
+        }
         foreach ($n in $names) { if ($trackedSet | Where-Object { $_.Equals($n, [StringComparison]::OrdinalIgnoreCase) }) { $res.Reason = "release path already tracked: $n"; return $res } }
         $verdictObj = Get-PbivizValidationVerdict -Tests $testsObj -Review $reviewObj -SourceSha $SourceSha -ToolsVersion $ToolsVersion -NodeVersion $NodeVersion -PackageVerified $true -BuildVerified ($null -ne $buildBlock)
         $res.Validated = $verdictObj.Validated; $res.ValidationGaps = @($verdictObj.Gaps); $res.Quality = $verdictObj.Quality
         $res.ReleaseClass = if ($verdictObj.Validated) { $script:PbivizOfficialClass } else { $script:PbivizCandidateClass }
         if ($Worktree -and -not $verdictObj.Validated) { $res.Reason = "Level 3 promotes only validated releases (validated: true); missing: $($verdictObj.Gaps -join '; '). An unvalidated package stays a $($script:PbivizCandidateClass) - it is never promoted to Prod. Nothing was written."; return $res }
-        $arch = Split-Path $pkgFull -Parent
-        if (-not (Test-Path -LiteralPath $arch)) { New-Item -ItemType Directory -Path $arch -Force | Out-Null }
-        $fs = New-Object IO.FileStream((ConvertTo-PbivizIoPath $pkgFull), [IO.FileMode]::CreateNew, [IO.FileAccess]::Write)
-        try { $fs.Write($pkgBytes, 0, $pkgBytes.Length) } finally { $fs.Dispose() }
         $res.Sha256 = $sha
         $res.Bytes = $pkgBytes.Length
         # Allowlisted shared files are outside the fingerprint scope: record them by path and blob id
@@ -4423,20 +4751,34 @@ function Add-PbivizRelease {
             tests = $testsObj; review = $reviewObj; level = $level
             archivedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
         }
-        Write-PbivizTextFile -Path $manFull -Text (ConvertTo-PbivizJson $manifest)
+        $manBytes = $script:PbivizUtf8.GetBytes((ConvertTo-PbivizJson $manifest))
+        # From here on every write is recorded; unless the call ends in PASS, the finally block
+        # undoes exactly these writes (and never anything that existed before).
+        $writing = $true
+        New-PbivizArchiveFolders -Txn $txn -Folder (Split-Path $pkgFull -Parent) -StopAt (Join-Path $dir $Visual)
+        New-PbivizArchiveFile -Txn $txn -Path $pkgFull -Bytes $pkgBytes -Sha256 $sha
+        Invoke-PbivizFault -Name 'release:package-written' -Context $pkgFull
+        New-PbivizArchiveFile -Txn $txn -Path $manFull -Bytes $manBytes -Sha256 (Get-PbivizSha256Hex $manBytes)
+        Invoke-PbivizFault -Name 'release:manifest-written' -Context $manFull
         $f = Write-PbivizPathspecFile -Paths $names; $files += $f
+        $txn.Staged = $names
         $add = Invoke-PbivizGit -WorkingDirectory $dir -Arguments @('add', "--pathspec-from-file=$f", '--pathspec-file-nul')
         if ($add.ExitCode -ne 0) { $res.Reason = "staging the release pair failed: $(Get-PbivizGitError $add)"; return $res }
+        Invoke-PbivizFault -Name 'release:staged' -Context $dir
         $res.PackagePath = $pkgFull; $res.ManifestPath = $manFull; $res.Staged = $names
         if ($Worktree) {
             $after = Test-PbivizCandidateState -Worktree $Worktree -AfterRelease
             if ($after.Status -ne 'PASS') { $res.Reason = $after.Reason; return $res }
         }
+        Invoke-PbivizFault -Name 'release:verified' -Context $dir
         $res.Evidence.Add("release pair staged: $($names -join ', ') sha256=$($res.Sha256); package content $($pk.Guid) $($pk.Version) verified; source: $($res.PackageSource); build evidence: $($res.BuildEvidence)")
         $res.Evidence.Add($(if ($verdictObj.Validated) { "validated: every required gate has recorded evidence - $($res.ReleaseClass)" } else { "validated: false - $($res.ReleaseClass), never presented or distributed as an official release: $($verdictObj.Gaps -join '; ')" }))
         $res.Status = 'PASS'
     } catch { $res.Status = 'BLOCKED'; $res.Reason = $_.Exception.Message }
-    finally { foreach ($x in $files) { Remove-Item -LiteralPath $x -Force -ErrorAction SilentlyContinue } }
+    finally {
+        foreach ($x in $files) { Remove-Item -LiteralPath $x -Force -ErrorAction SilentlyContinue }
+        if ($writing -and $res.Status -ne 'PASS') { Complete-PbivizArchiveRollback -Result $res -Directory $dir -Txn $txn }
+    }
     return $res
 }
 
@@ -4444,6 +4786,7 @@ function Add-PbivizLegacyArchive {
     param([string]$Root, [string]$Visual)
     $res = [pscustomobject][ordered]@{ Status = 'BLOCKED'; Reason = ''; Archived = @(); Skipped = @(); Evidence = (New-Object System.Collections.Generic.List[string]) }
     $files = @()
+    $txn = New-PbivizArchiveTxn; $writing = $false
     try {
         if (-not (Test-PbivizIsRepoRoot $Root)) { $res.Reason = 'not the root of the PBIVIZ repository'; return $res }
         $vi = Test-PbivizVisualInput -Root $Root -Name $Visual -RequireOnDisk
@@ -4464,21 +4807,25 @@ function Add-PbivizLegacyArchive {
             $pk = Get-PbivizPackageIdentity -Bytes $bytes
             if (-not $pk.Ok) { $res.Skipped += "$($pkg.Name) ($($pk.Reason))"; continue }
             if ($pk.Guid -cne $m.Groups['guid'].Value -or -not (Test-PbivizSameVersion $pk.Version $m.Groups['ver'].Value)) { $res.Skipped += "$($pkg.Name) (content is $($pk.Guid) $($pk.Version); the file name does not match)"; continue }
-            if (-not (Test-Path -LiteralPath $legacyDir)) { New-Item -ItemType Directory -Path $legacyDir -Force | Out-Null }
-            $fs = New-Object IO.FileStream((ConvertTo-PbivizIoPath $target), [IO.FileMode]::CreateNew, [IO.FileAccess]::Write)
-            try { $fs.Write($bytes, 0, $bytes.Length) } finally { $fs.Dispose() }
+            $pkgSha = Get-PbivizSha256Hex $bytes
             $manifest = [ordered]@{
                 schemaVersion = 1; visual = $Visual; guid = $m.Groups['guid'].Value; version = $m.Groups['ver'].Value; origin = 'legacy-archive'; validated = $false
-                sourceSha = $null; sourceFingerprint = $null; packageFile = $pkg.Name; sha256 = (Get-PbivizSha256Hex $bytes); bytes = $bytes.Length
+                sourceSha = $null; sourceFingerprint = $null; packageFile = $pkg.Name; sha256 = $pkgSha; bytes = $bytes.Length
                 package = [ordered]@{ identity = 'VERIFIED'; guid = $pk.Guid; version = $pk.Version; resource = $pk.Resource; entries = $pk.Entries }
                 importedFrom = "dist/$($pkg.Name)"; importedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
             }
-            Write-PbivizTextFile -Path $manifestPath -Text (ConvertTo-PbivizJson $manifest)
+            $manBytes = $script:PbivizUtf8.GetBytes((ConvertTo-PbivizJson $manifest))
+            $writing = $true
+            New-PbivizArchiveFolders -Txn $txn -Folder $legacyDir -StopAt (Join-Path $Root $Visual)
+            New-PbivizArchiveFile -Txn $txn -Path $target -Bytes $bytes -Sha256 $pkgSha
+            New-PbivizArchiveFile -Txn $txn -Path $manifestPath -Bytes $manBytes -Sha256 (Get-PbivizSha256Hex $manBytes)
+            Invoke-PbivizFault -Name 'legacy:written' -Context $target
             $added.Add("$Visual/releases/legacy/$($pkg.Name)")
             $added.Add("$Visual/releases/legacy/" + (Split-Path $manifestPath -Leaf))
         }
         if ($added.Count -gt 0) {
             $f = Write-PbivizPathspecFile -Paths $added.ToArray(); $files += $f
+            $txn.Staged = $added.ToArray()
             $add = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('add', "--pathspec-from-file=$f", '--pathspec-file-nul')
             if ($add.ExitCode -ne 0) { $res.Reason = "staging failed: $(Get-PbivizGitError $add)"; return $res }
         }
@@ -4486,26 +4833,353 @@ function Add-PbivizLegacyArchive {
         $res.Status = 'PASS'
         $res.Evidence.Add("archived $($added.Count / 2) legacy package(s) as validated:false")
     } catch { $res.Status = 'BLOCKED'; $res.Reason = $_.Exception.Message }
-    finally { foreach ($x in $files) { Remove-Item -LiteralPath $x -Force -ErrorAction SilentlyContinue } }
+    finally {
+        foreach ($x in $files) { Remove-Item -LiteralPath $x -Force -ErrorAction SilentlyContinue }
+        if ($writing -and $res.Status -ne 'PASS') { Complete-PbivizArchiveRollback -Result $res -Directory $Root -Txn $txn }
+    }
     return $res
 }
 
-# G4 scan of the visual's own source for relative imports that leave its folder. Dependency, cache
-# and generated trees are pruned WHILE walking (never enumerated); junctions and symbolic links are
-# never followed. Anything that could not be analysed is reported and makes the result incomplete:
-# G4 fails closed on it.
+# ---------------------------------------------------------------- G4 dependency analysis
+# What the PBIVIZ toolchain resolves (powerbi-visuals-tools 5-7, checked against 7.0.3): webpack 5
+# with ts-loader, json-loader, less-loader and css-loader; resolve.extensions .tsx .ts .jsx .js .mjs
+# .css; resolve.modules = node_modules lookup (no aliases, so TypeScript `paths` never reach the
+# bundle); AMD parsing off; powerbi-visuals-api and Node core modules are externals; fonts and
+# images referenced by url() are inlined; pbiviz.json / tsconfig.json / capabilities.json are read
+# as <name>.mjs (JavaScript) first when such a file exists. Requests are classified, never run.
+$script:PbivizCodeExts       = @('.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs')
+$script:PbivizStyleExts      = @('.less', '.css', '.scss')
+$script:PbivizResolveExts    = @('.tsx', '.ts', '.jsx', '.js', '.mjs', '.css', '.less', '.json', '.d.ts')
+$script:PbivizBuiltinModules = @('powerbi-visuals-api', 'assert', 'buffer', 'child_process', 'cluster', 'console', 'constants', 'crypto', 'dgram', 'dns', 'domain', 'events', 'fs', 'http', 'https', 'net', 'os', 'path', 'process', 'punycode', 'querystring', 'readline', 'repl', 'stream', 'string_decoder', 'sys', 'timers', 'tls', 'tty', 'url', 'util', 'vm', 'zlib')
+$script:PbivizExecConfigs    = @('pbiviz.mjs', 'tsconfig.mjs', 'capabilities.mjs')
+$script:PbivizRegexPrecede   = @('return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void', 'throw', 'case', 'do', 'else', 'yield', 'await')
+$script:PbivizTemplateStops  = [char[]]@([char]92, [char]96, [char]36)
+$script:PbivizJsTokenRx      = New-Object regex '\G(?:(?<ws>\s+)|(?<lc>//[^\r\n]*)|(?<bc>/\*[\s\S]*?(?:\*/|\z))|(?<str>''(?:[^''\\\r\n]|\\[\s\S])*(?:''|(?=[\r\n])|\z)|"(?:[^"\\\r\n]|\\[\s\S])*(?:"|(?=[\r\n])|\z))|(?<bt>`)|(?<id>[\p{L}\p{Nl}$_][\p{L}\p{Nl}\p{Mn}\p{Mc}\p{Nd}\p{Pc}$]*)|(?<num>\d[\w.]*)|(?<p>[\s\S]))'
+$script:PbivizJsRegexRx      = New-Object regex '\G/(?:[^/\\\[\r\n]|\\.|\[(?:[^\]\\\r\n]|\\.)*\])+/[A-Za-z]*'
+
+function ConvertFrom-PbivizJsString {
+    param([string]$Token)
+    $body = $Token.Substring(1)
+    if ($body.Length -gt 0 -and $body[$body.Length - 1] -eq $Token[0]) { $body = $body.Substring(0, $body.Length - 1) }
+    return [regex]::Replace($body, '\\([\s\S])', '$1')
+}
+
+# Significant tokens of JavaScript/TypeScript: comments and whitespace dropped, strings and template
+# literals lexed as units (text inside them is never code), a slash starts a regular expression
+# only where an expression can begin. Template substitutions get their own token list; triple-slash
+# references are taken from the comments.
+function Get-PbivizJsTokens {
+    param([string]$Text, [int]$Start, [bool]$StopAtBrace, $Lists, $Refs)
+    $types = New-Object System.Collections.Generic.List[char]
+    $vals = New-Object System.Collections.Generic.List[string]
+    $poss = New-Object System.Collections.Generic.List[int]
+    $Lists.Add([pscustomobject]@{ T = $types; V = $vals; P = $poss })
+    $pos = $Start; $len = $Text.Length; $depth = 0
+    while ($pos -lt $len) {
+        $m = $script:PbivizJsTokenRx.Match($Text, $pos)
+        $g = $m.Groups
+        if ($g['ws'].Success -or $g['bc'].Success) { $pos += $m.Length; continue }
+        if ($g['lc'].Success) {
+            $r = [regex]::Match($m.Value, '^///\s*<reference\s+(path|types)\s*=\s*(["''])(.*?)\2')
+            if ($r.Success) { $Refs.Add([pscustomobject]@{ Pos = $pos; Form = "/// <reference $($r.Groups[1].Value)>"; Kind = 'static'; Spec = $r.Groups[3].Value }) }
+            $pos += $m.Length; continue
+        }
+        if ($g['str'].Success) { $types.Add('s'); $vals.Add((ConvertFrom-PbivizJsString $m.Value)); $poss.Add($pos); $pos += $m.Length; continue }
+        if ($g['bt'].Success) {
+            $tpl = Read-PbivizJsTemplate -Text $Text -Start $pos -Lists $Lists -Refs $Refs
+            $types.Add($(if ($tpl.Subst) { 't' } else { 's' })); $vals.Add($tpl.Prefix); $poss.Add($pos); $pos = $tpl.End; continue
+        }
+        if ($g['id'].Success) { $types.Add('i'); $vals.Add($m.Value); $poss.Add($pos); $pos += $m.Length; continue }
+        if ($g['num'].Success) { $types.Add('n'); $vals.Add($m.Value); $poss.Add($pos); $pos += $m.Length; continue }
+        $c = $m.Value
+        if ($c -eq '/') {
+            $prevT = if ($types.Count) { $types[$types.Count - 1] } else { [char]0 }
+            $prevV = if ($vals.Count) { $vals[$vals.Count - 1] } else { '' }
+            if ($prevT -eq [char]0 -or ($prevT -eq 'p' -and @(')', ']', '}') -notcontains $prevV) -or ($prevT -eq 'i' -and $script:PbivizRegexPrecede -ccontains $prevV)) {
+                $rm = $script:PbivizJsRegexRx.Match($Text, $pos)
+                if ($rm.Success) { $types.Add('r'); $vals.Add(''); $poss.Add($pos); $pos += $rm.Length; continue }
+            }
+        }
+        if ($StopAtBrace) {
+            if ($c -eq '{') { $depth++ }
+            elseif ($c -eq '}') { if ($depth -eq 0) { return ($pos + 1) }; $depth-- }
+        }
+        $types.Add('p'); $vals.Add($c); $poss.Add($pos); $pos += 1
+    }
+    return $len
+}
+
+# A template literal: its text up to the first substitution (the static prefix a bundler can use).
+function Read-PbivizJsTemplate {
+    param([string]$Text, [int]$Start, $Lists, $Refs)
+    $sb = New-Object System.Text.StringBuilder
+    $i = $Start + 1; $len = $Text.Length; $subst = $false
+    while ($i -lt $len) {
+        $j = $Text.IndexOfAny($script:PbivizTemplateStops, $i)
+        if ($j -lt 0) { if (-not $subst) { [void]$sb.Append($Text, $i, $len - $i) }; $i = $len; break }
+        if (-not $subst) { [void]$sb.Append($Text, $i, $j - $i) }
+        $c = $Text[$j]
+        if ($c -eq [char]96) { return [pscustomobject]@{ End = $j + 1; Prefix = $sb.ToString(); Subst = $subst } }
+        if ($c -eq [char]92) { if (-not $subst -and $j + 1 -lt $len) { [void]$sb.Append($Text[$j + 1]) }; $i = $j + 2; continue }
+        if ($j + 1 -lt $len -and $Text[$j + 1] -eq [char]123) { $subst = $true; $i = Get-PbivizJsTokens -Text $Text -Start ($j + 2) -StopAtBrace $true -Lists $Lists -Refs $Refs; continue }
+        if (-not $subst) { [void]$sb.Append([char]36) }
+        $i = $j + 1
+    }
+    return [pscustomobject]@{ End = $len; Prefix = $sb.ToString(); Subst = $subst }
+}
+
+# Every request webpack 5 / ts-loader can take from JavaScript or TypeScript: import / export ...
+# from, side-effect import, import(), require(), require.resolve(), require.context(),
+# import.meta.webpackContext(), new URL(<request>, import.meta.url) and triple-slash references.
+# Kind: static (a literal), template (only a static prefix is known), context (a folder) or
+# dynamic (a computed request nothing can resolve statically).
+function Get-PbivizJsReferences {
+    param([string]$Text)
+    $lists = New-Object System.Collections.Generic.List[object]
+    $refs = New-Object System.Collections.Generic.List[object]
+    [void](Get-PbivizJsTokens -Text $Text -Start 0 -StopAtBrace $false -Lists $lists -Refs $refs)
+    foreach ($l in $lists) {
+        # (PowerShell variable names are case-insensitive: the token lists get distinct names.)
+        $tt = $l.T; $tv = $l.V; $tp = $l.P; $n = $tt.Count
+        $isP = { param($at, [string]$want) ($at -lt $n -and $tt[$at] -eq 'p' -and $tv[$at] -ceq $want) }
+        $argOf = {
+            param($at, [string]$form, [string]$kind)
+            if ($at -ge $n) { return [pscustomobject]@{ Pos = $tp[$n - 1]; Form = $form; Kind = 'dynamic'; Spec = $null } }
+            $next = if ($at + 1 -lt $n -and $tt[$at + 1] -eq 'p') { $tv[$at + 1] } else { '' }
+            if ($tt[$at] -eq 's' -and ($next -eq ')' -or $next -eq ',')) { return [pscustomobject]@{ Pos = $tp[$at]; Form = $form; Kind = $kind; Spec = $tv[$at] } }
+            if (($tt[$at] -eq 's' -and $next -eq '+') -or $tt[$at] -eq 't') { return [pscustomobject]@{ Pos = $tp[$at]; Form = $form; Kind = 'template'; Spec = $tv[$at] } }
+            return [pscustomobject]@{ Pos = $tp[$at]; Form = $form; Kind = 'dynamic'; Spec = $null }
+        }
+        for ($i = 0; $i -lt $n; $i++) {
+            if ($tt[$i] -ne 'i') { continue }
+            $w = $tv[$i]
+            if ($w -cne 'import' -and $w -cne 'from' -and $w -cne 'require' -and $w -cne 'new') { continue }
+            if ($i -gt 0 -and $tt[$i - 1] -eq 'p' -and $tv[$i - 1] -eq '.') { continue }
+            if ($w -ceq 'from') {
+                if ($i + 1 -lt $n -and $tt[$i + 1] -eq 's') { $refs.Add([pscustomobject]@{ Pos = $tp[$i + 1]; Form = 'import/export from'; Kind = 'static'; Spec = $tv[$i + 1] }) }
+            } elseif ($w -ceq 'import') {
+                if ($i + 1 -lt $n -and $tt[$i + 1] -eq 's') { $refs.Add([pscustomobject]@{ Pos = $tp[$i + 1]; Form = 'import'; Kind = 'static'; Spec = $tv[$i + 1] }) }
+                elseif (& $isP ($i + 1) '(') { $refs.Add((& $argOf ($i + 2) 'import()' 'static')) }
+                elseif ((& $isP ($i + 1) '.') -and $i + 5 -lt $n -and $tv[$i + 2] -ceq 'meta' -and (& $isP ($i + 3) '.') -and $tv[$i + 4] -ceq 'webpackContext' -and (& $isP ($i + 5) '(')) { $refs.Add((& $argOf ($i + 6) 'import.meta.webpackContext()' 'context')) }
+            } elseif ($w -ceq 'require') {
+                if (& $isP ($i + 1) '(') { $refs.Add((& $argOf ($i + 2) 'require()' 'static')) }
+                elseif ((& $isP ($i + 1) '.') -and $i + 3 -lt $n -and $tt[$i + 2] -eq 'i' -and (& $isP ($i + 3) '(')) {
+                    $mem = $tv[$i + 2]
+                    if ($mem -ceq 'resolve' -or $mem -ceq 'resolveWeak') { $refs.Add((& $argOf ($i + 4) "require.$mem()" 'static')) }
+                    elseif ($mem -ceq 'context') { $refs.Add((& $argOf ($i + 4) 'require.context()' 'context')) }
+                    elseif ($mem -ceq 'ensure' -or $mem -ceq 'include') { $refs.Add([pscustomobject]@{ Pos = $tp[$i]; Form = "require.$mem()"; Kind = 'dynamic'; Spec = $null }) }
+                }
+            } elseif ($i + 3 -lt $n -and $tt[$i + 1] -eq 'i' -and $tv[$i + 1] -ceq 'URL' -and (& $isP ($i + 2) '(')) {
+                # Only the asset form counts: new URL(<request>, import.meta.url).
+                $a = & $argOf ($i + 3) 'new URL(..., import.meta.url)' 'static'
+                $depth = 0; $asset = $false
+                for ($k = $i + 3; $k -lt $n -and $k -lt $i + 400; $k++) {
+                    if ($tt[$k] -ne 'p') { continue }
+                    $pv = $tv[$k]
+                    if ($pv -eq '(' -or $pv -eq '[' -or $pv -eq '{') { $depth++ }
+                    elseif ($pv -eq ')' -or $pv -eq ']' -or $pv -eq '}') { if ($depth -eq 0) { break }; $depth-- }
+                    elseif ($pv -eq ',' -and $depth -eq 0) {
+                        $asset = ($k + 5 -lt $n -and $tt[$k + 1] -eq 'i' -and $tv[$k + 1] -ceq 'import' -and (& $isP ($k + 2) '.') -and $tv[$k + 3] -ceq 'meta' -and (& $isP ($k + 4) '.') -and $tv[$k + 5] -ceq 'url')
+                        break
+                    }
+                }
+                if ($asset) { $refs.Add($a) }
+            }
+        }
+    }
+    return $refs.ToArray()
+}
+
+# @import / @plugin / url() requests of LESS, CSS and SCSS (comments removed, strings kept).
+function Get-PbivizStyleReferences {
+    param([string]$Text, [bool]$LineComments)
+    $clean = [regex]::Replace($Text, '"(?:[^"\\\r\n]|\\.)*"|''(?:[^''\\\r\n]|\\.)*''|\burl\([^)]*\)|/\*[\s\S]*?(?:\*/|\z)|//[^\r\n]*', [System.Text.RegularExpressions.MatchEvaluator]{
+        param($m)
+        if ($m.Value.StartsWith('/*') -or ($LineComments -and $m.Value.StartsWith('//'))) { return ($m.Value -replace '[^\r\n]', ' ') }
+        return $m.Value
+    })
+    $refs = New-Object System.Collections.Generic.List[object]
+    foreach ($m in [regex]::Matches($clean, '@import\s*(?:\([^)]*\)\s*)?(?:url\(\s*)?(["'']?)([^"'')\s;]+)\1')) { $refs.Add([pscustomobject]@{ Pos = $m.Index; Form = '@import'; Spec = $m.Groups[2].Value }) }
+    foreach ($m in [regex]::Matches($clean, '@plugin\s*(["''])(.+?)\1')) { $refs.Add([pscustomobject]@{ Pos = $m.Index; Form = '@plugin'; Spec = $m.Groups[2].Value }) }
+    foreach ($m in [regex]::Matches($clean, '\burl\(\s*(["'']?)(.*?)\1\s*\)')) { $refs.Add([pscustomobject]@{ Pos = $m.Index; Form = 'url()'; Spec = $m.Groups[2].Value }) }
+    foreach ($r in $refs) {
+        $s = $r.Spec
+        $kind = if ($s -match '^(?i:data:|https?:|//|#|about:)' -or -not $s) { 'external' } elseif ($s -match '@\{|#\{|^[@$]|\bvar\(') { 'dynamic' } else { 'static' }
+        $r | Add-Member -NotePropertyName Kind -NotePropertyValue $kind
+    }
+    return $refs.ToArray()
+}
+
+# Path-like strings of a JSON file: relative (./, ../ or a '..' segment) or absolute (drive, UNC, or
+# a leading '/' in configuration files), optionally behind npm's file:, link: or portal:.
+function Get-PbivizJsonPathStrings {
+    param([string]$Text, [bool]$Config)
+    $out = New-Object System.Collections.Generic.List[object]
+    foreach ($m in [regex]::Matches($Text, '"((?:[^"\\]|\\.)*)"')) {
+        $s = [regex]::Replace($m.Groups[1].Value, '\\(["\\/])', '$1')
+        if ($s -match '://') { continue }
+        $p = $s -replace '^(?:file|link|portal):', ''
+        $abs = ($p -match '^(?:[A-Za-z]:[\\/]|\\\\|//)') -or ($Config -and $p -match '^/[^/]')
+        $rel = (-not $abs) -and ($p -match '^\.{1,2}(?:[\\/]|$)' -or $p -match '(?:^|[\\/])\.\.(?:[\\/]|$)')
+        if ($abs -or $rel) { $out.Add([pscustomobject]@{ Pos = $m.Index; Raw = $s; Path = $p; Absolute = $abs }) }
+    }
+    return $out.ToArray()
+}
+
+# Normalised repository-relative path of <base folder>/<request>; $null when it climbs above the root.
+function Join-PbivizRelPath {
+    param([string]$BaseRel, [string]$Spec)
+    $parts = New-Object System.Collections.Generic.List[string]
+    foreach ($s in @($BaseRel.Split('/') + $Spec.Replace('\', '/').Split('/'))) {
+        if ($s -eq '' -or $s -eq '.') { continue }
+        if ($s -eq '..') { if ($parts.Count -eq 0) { return $null }; $parts.RemoveAt($parts.Count - 1); continue }
+        $parts.Add($s)
+    }
+    return ($parts -join '/')
+}
+
+function Get-PbivizLineAt {
+    param([string]$Text, [int]$Pos)
+    $n = 1; $i = $Text.IndexOf([char]10)
+    while ($i -ge 0 -and $i -lt $Pos) { $n++; $i = $Text.IndexOf([char]10, $i + 1) }
+    return $n
+}
+
+function Get-PbivizPackageName {
+    param([string]$Spec)
+    $segs = $Spec.Split('/')
+    if ($Spec.StartsWith('@') -and $segs.Length -ge 2) { return "$($segs[0])/$($segs[1])" }
+    return $segs[0]
+}
+
+# Packages a bundle of this visual can resolve from ITS OWN node_modules: declared in its
+# package.json or installed at the top level of its lockfile (transitive dependencies).
+function Get-PbivizVisualPackages {
+    param([string]$VisualDir)
+    $set = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    $notes = New-Object System.Collections.Generic.List[string]
+    $pj = Join-Path $VisualDir 'package.json'
+    if (Test-Path -LiteralPath $pj -PathType Leaf) {
+        try {
+            $o = ([IO.File]::ReadAllText((ConvertTo-PbivizIoPath $pj))).TrimStart([char]0xFEFF) | ConvertFrom-Json
+            foreach ($sec in 'dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies') { if ($o.$sec) { foreach ($p in $o.$sec.PSObject.Properties) { [void]$set.Add($p.Name) } } }
+        } catch { $notes.Add("its package.json is unreadable: $(Get-PbivizErrorText $_)") }
+    } else { $notes.Add('the visual has no package.json') }
+    $locked = $false; $lockSeen = $false
+    foreach ($lock in 'package-lock.json', 'npm-shrinkwrap.json') {
+        $lf = Join-Path $VisualDir $lock
+        if (-not (Test-Path -LiteralPath $lf -PathType Leaf)) { continue }
+        $lockSeen = $true
+        try { $txt = [IO.File]::ReadAllText((ConvertTo-PbivizIoPath $lf)) } catch { $notes.Add("its $lock is unreadable"); continue }
+        foreach ($m in [regex]::Matches($txt, '"node_modules/((?:@[^/"\\]+/)?[^/"\\]+)"\s*:')) { [void]$set.Add($m.Groups[1].Value); $locked = $true }
+        if (-not $locked -and $txt -match '"lockfileVersion"\s*:\s*1\b') { $notes.Add("its $lock uses lockfileVersion 1, which lists no package folders") }
+    }
+    if (-not $lockSeen) { $notes.Add('the visual has no package-lock.json') }
+    return [pscustomobject]@{ Names = $set; Notes = $notes.ToArray() }
+}
+
+# Verdict for one request of a file inside the visual: $null (resolves inside the visual, to an
+# allowlisted shared file, to a Node built-in or external, or to a package of the visual's own
+# lockfile), or an Escape / Uncertain text. Unknown is never treated as inside.
+function Get-PbivizRequestVerdict {
+    param($Ctx, [string]$FileRel, [string]$DirRel, [int]$Line, [string]$Form, [string]$Kind, [string]$Spec, [string]$Mode)
+    $at = "${FileRel}:$Line"
+    if ($Kind -eq 'dynamic') { return @{ Uncertain = "${at}: $Form with a computed request - it cannot be resolved statically" } }
+    $raw = [string]$Spec
+    if ($raw.Contains('!')) { return @{ Uncertain = "${at}: $Form uses inline loader syntax '$raw'" } }
+    if ($raw.StartsWith('#')) { return @{ Uncertain = "${at}: package.json subpath import '$raw' - its target is not analysed" } }
+    $s = ($raw -split '[?#]', 2)[0]
+    $isRel = $s -match '^\.{1,2}(?:[\\/]|$)'
+    $isAbs = $s -match '^(?:[A-Za-z]:[\\/]|\\\\|/)'
+    $inVisual = { param($r) ($null -ne $r) -and ($r.Equals($Ctx.Visual, [StringComparison]::OrdinalIgnoreCase) -or $r.StartsWith("$($Ctx.Visual)/", [StringComparison]::OrdinalIgnoreCase)) }
+    $packageVerdict = {
+        param([string]$Request, [string[]]$Names)
+        if ($Request.StartsWith('node:') -or $script:PbivizBuiltinModules -ccontains $Request.Split('/')[0]) { return $null }
+        if ($Request -match '(?:^|/)\.\.(?:/|$)') { return @{ Uncertain = "${at}: $Form request '$raw' climbs out of a package folder" } }
+        foreach ($nm in $Names) { if ($Ctx.Packages.Names.Contains($nm)) { return $null } }
+        $why = if (@($Ctx.Packages.Notes).Count) { " ($(@($Ctx.Packages.Notes) -join '; '))" } else { '' }
+        return @{ Uncertain = "${at}: '$raw' is not a file of the visual and package '$($Names[0])' is neither declared in its package.json nor locked in its package-lock.json - it could resolve from a node_modules folder outside the visual$why" }
+    }
+    if ($Kind -eq 'template' -or $Kind -eq 'context') {
+        if ($isAbs) { return @{ Escape = "$FileRel -> $raw (folder)" } }
+        if ($isRel) {
+            $dirPart = if ($Kind -eq 'context') { $s } else { $u = $s.Replace('\', '/'); $cut = $u.LastIndexOf('/'); if ($cut -ge 0) { $u.Substring(0, $cut + 1) } elseif ($u -eq '..') { '..' } else { '.' } }
+            $t = Join-PbivizRelPath $DirRel $dirPart
+            if (& $inVisual $t) { return $null }
+            return @{ Escape = "$FileRel -> $raw$(if ($Kind -eq 'template') { '<computed>' }) (a folder: every file below it can be bundled, so it can never be allowlisted)" }
+        }
+        $cut = $s.IndexOf('/', $(if ($s.StartsWith('@')) { $s.IndexOf('/') + 1 } else { 0 }))
+        if ($s -and $cut -gt 0) { return (& $packageVerdict $s @(Get-PbivizPackageName $s)) }
+        return @{ Uncertain = "${at}: $Form with a computed request '$raw...' has no static folder" }
+    }
+    if ($isAbs) {
+        $full = $null
+        try { $full = [IO.Path]::GetFullPath($s) } catch { }
+        if ($full -and $full.StartsWith($Ctx.VisualDir + '\', [StringComparison]::OrdinalIgnoreCase)) { return $null }
+        return @{ Escape = "$FileRel -> $raw" }
+    }
+    if ($Form -like '/// <reference types*') {
+        $types = if ($s.StartsWith('@')) { '@types/' + $s.Substring(1).Replace('/', '__') } else { "@types/$s" }
+        return (& $packageVerdict $s @((Get-PbivizPackageName $s), $types))
+    }
+    if (-not $isRel -and $Mode -eq 'style') {
+        if ($s.StartsWith('~')) { $s = $s.Substring(1); return (& $packageVerdict $s @(Get-PbivizPackageName $s)) }
+        $t = Join-PbivizRelPath $DirRel $s
+        if ($null -ne $t -and (& $inVisual $t)) {
+            foreach ($c in @($t, "$t.less", "$t.css")) { if (Test-Path -LiteralPath (Join-Path $Ctx.Root ($c -replace '/', '\')) -PathType Leaf) { return $null } }
+            # Not a file next to the stylesheet: less-loader falls back to its include paths and
+            # webpack's module lookup, i.e. a package.
+            $pkgReq = $s -replace '^node_modules/', ''
+            return (& $packageVerdict $pkgReq @(Get-PbivizPackageName $pkgReq))
+        }
+        $isRel = $true
+    }
+    if (-not $isRel) { return (& $packageVerdict $s @(Get-PbivizPackageName $s)) }
+    $t = Join-PbivizRelPath $DirRel $s
+    if (& $inVisual $t) { return $null }
+    if ($null -ne $t -and $Ctx.Allow.Count) {
+        foreach ($c in @(@($t) + @($script:PbivizResolveExts | ForEach-Object { "$t$_" }) + @($script:PbivizResolveExts | ForEach-Object { "$t/index$_" }))) {
+            if (Test-Path -LiteralPath (Join-Path $Ctx.Root ($c -replace '/', '\')) -PathType Leaf) {
+                if ($Ctx.Allow -contains $c) { return $null }
+                break
+            }
+        }
+    }
+    return @{ Escape = "$FileRel -> $raw" }
+}
+
+# G4: every dependency request in the visual's own files - code, styles and JSON configuration - is
+# resolved the way the toolchain resolves it; a request that reaches a file outside the visual
+# folder that is not allowlisted is an escape, and a request that cannot be classified (computed
+# imports, packages missing from the visual's own package.json / lockfile, executable
+# configuration, node_modules or npm workspaces outside the visual, unreadable files, junctions)
+# makes the analysis incomplete: G4 fails closed on it. Dependency, cache and generated trees are
+# pruned WHILE walking; junctions and symbolic links are never followed.
 function Get-PbivizDependencyEscapes {
     param([string]$Worktree, [string]$Visual, [string[]]$Allowlist = @())
-    $res = [pscustomobject][ordered]@{ Complete = $true; Escapes = @(); Uncertain = @(); FilesScanned = 0; DirectoriesVisited = 0; Pruned = @() }
+    $res = [pscustomobject][ordered]@{ Complete = $true; Escapes = @(); Uncertain = @(); FilesScanned = 0; References = 0; DirectoriesVisited = 0; Pruned = @() }
     $escapes = New-Object System.Collections.Generic.List[string]
     $uncertain = New-Object System.Collections.Generic.List[string]
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
     $pruned = New-Object System.Collections.Generic.List[string]
     $root = ([IO.Path]::GetFullPath($Worktree)).TrimEnd('\')
     $visualDir = $root + '\' + $Visual
-    $exts = @('.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.less', '.css', '.scss', '.json')
     $pruneAnywhere = @('node_modules', '.git', '.tmp', '.cache', 'coverage', '.nyc_output')
     $pruneAtVisualRoot = @('dist', 'releases', 'typings')
-    $codeRx = '(?:import|export)\s[^;]*?from\s*[''"]([^''"]+)[''"]|require\(\s*[''"]([^''"]+)[''"]\s*\)|import\(\s*[''"]([^''"]+)[''"]\s*\)|@import\s+(?:\([^)]*\)\s*)?[''"]([^''"]+)[''"]'
+    $rawRx = '(?:import|export)\s[^;]*?from\s*[''"]([^''"]+)[''"]|\bimport\s*[''"]([^''"]+)[''"]|require\(\s*[''"]([^''"]+)[''"]\s*\)|import\(\s*[''"]([^''"]+)[''"]\s*\)'
+    $ctx = [pscustomobject]@{ Root = $root; Visual = $Visual; VisualDir = $visualDir; Allow = @($Allowlist | Where-Object { $_ } | ForEach-Object { $_.Replace('\', '/') }); Packages = (Get-PbivizVisualPackages -VisualDir $visualDir) }
+    $note = { param($v) if ($v) { if ($v.Escape) { if ($seen.Add("E|$($v.Escape)")) { $escapes.Add($v.Escape) } } elseif ($v.Uncertain) { if ($seen.Add("U|$($v.Uncertain)")) { $uncertain.Add($v.Uncertain) } } } }
+    # Resolution context outside the visual: a node_modules folder or npm workspaces at the
+    # repository root are reached by Node, npm and TypeScript lookups from inside the visual.
+    if (Test-Path -LiteralPath (Join-Path $root 'node_modules') -PathType Container) { $uncertain.Add('node_modules/ exists at the repository root - package and @types lookups from the visual can resolve there') }
+    $rootPkg = Join-Path $root 'package.json'
+    if (Test-Path -LiteralPath $rootPkg -PathType Leaf) {
+        try { if ([IO.File]::ReadAllText($rootPkg) -match '"workspaces"\s*:' -and $ctx.Allow -notcontains 'package.json') { $escapes.Add('package.json -> npm workspaces at the repository root (dependencies are hoisted outside the visual)') } }
+        catch { $uncertain.Add("cannot read the repository-root package.json: $(Get-PbivizErrorText $_)") }
+    }
+    foreach ($x in $script:PbivizExecConfigs) {
+        if (Test-Path -LiteralPath (Join-Path $visualDir $x)) { $uncertain.Add("${x}: powerbi-visuals-tools runs it as JavaScript in place of $($x -replace '\.mjs$', '.json') - what it reads cannot be classified statically") }
+    }
     $stack = New-Object System.Collections.Generic.Stack[string]
     $stack.Push($visualDir)
     while ($stack.Count -gt 0) {
@@ -4523,28 +5197,46 @@ function Get-PbivizDependencyEscapes {
                 $stack.Push($dir + '\' + $e.Name)
                 continue
             }
-            if ($exts -notcontains $e.Extension.ToLowerInvariant()) { continue }
+            $ext = $e.Extension.ToLowerInvariant()
+            $mode = if ($script:PbivizCodeExts -contains $ext) { 'code' } elseif ($script:PbivizStyleExts -contains $ext) { 'style' } elseif ($ext -eq '.json') { 'json' } else { $null }
+            if (-not $mode) { continue }
+            if ($e.Length -gt 8MB) { $uncertain.Add("'$rel' ($([math]::Round($e.Length / 1MB)) MB) is too large to analyse"); continue }
             $full = $dir + '\' + $e.Name
             try { $text = [IO.File]::ReadAllText((ConvertTo-PbivizIoPath $full)) }
             catch { $uncertain.Add("cannot read '$rel': $(Get-PbivizErrorText $_)"); continue }
             $res.FilesScanned++
-            $specs = New-Object System.Collections.Generic.List[string]
-            if ($e.Extension -ieq '.json') {
-                foreach ($m in [regex]::Matches($text, '"((?:file:)?\.\.?/[^"]+)"')) { $specs.Add(($m.Groups[1].Value -replace '^file:', '')) }
-            } else {
-                foreach ($m in [regex]::Matches($text, $codeRx)) { foreach ($g in 1..4) { if ($m.Groups[$g].Success) { $specs.Add($m.Groups[$g].Value) } } }
-            }
-            foreach ($s in $specs) {
-                if (-not $s.StartsWith('.')) { continue }
-                $target = [IO.Path]::GetFullPath((Join-Path $dir ($s -replace '/', '\')))
-                if ($target.StartsWith($visualDir + '\', [StringComparison]::OrdinalIgnoreCase) -or $target -eq $visualDir) { continue }
-                $tRel = if ($target.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) { $target.Substring($root.Length + 1).Replace('\', '/') } else { $target }
-                $ok = $false
-                foreach ($a in $Allowlist) {
-                    $ap = $a.Replace('\', '/')
-                    if ($tRel -eq $ap -or $ap.StartsWith("$tRel.", [StringComparison]::Ordinal) -or $ap.StartsWith("$tRel/", [StringComparison]::Ordinal) -or $tRel.StartsWith("$ap/", [StringComparison]::Ordinal)) { $ok = $true }
+            $dirRel = if ($relDir) { "$Visual/$relDir" } else { $Visual }
+            $fileRel = $rel
+            if ($mode -eq 'json') {
+                $cfg = $e.Name -match '^(?i:tsconfig.*|jsconfig.*|pbiviz|package|package-lock|npm-shrinkwrap|dependencies)\.json$'
+                foreach ($j in @(Get-PbivizJsonPathStrings -Text $text -Config $cfg)) {
+                    $res.References++
+                    & $note (Get-PbivizRequestVerdict -Ctx $ctx -FileRel $fileRel -DirRel $dirRel -Line (Get-PbivizLineAt $text $j.Pos) -Form 'path in JSON' -Kind 'static' -Spec $(if ($j.Absolute) { $j.Path } elseif ($j.Path -match '^\.{1,2}(?:[\\/]|$)') { $j.Path } else { "./$($j.Path)" }) -Mode 'json')
                 }
-                if (-not $ok) { $escapes.Add("$rel -> $s") }
+                continue
+            }
+            if ($mode -eq 'style') {
+                foreach ($r in @(Get-PbivizStyleReferences -Text $text -LineComments ($ext -ne '.css'))) {
+                    if ($r.Kind -eq 'external') { continue }
+                    $res.References++
+                    & $note (Get-PbivizRequestVerdict -Ctx $ctx -FileRel $fileRel -DirRel $dirRel -Line (Get-PbivizLineAt $text $r.Pos) -Form $r.Form -Kind $r.Kind -Spec $r.Spec -Mode 'style')
+                }
+                continue
+            }
+            foreach ($r in @(Get-PbivizJsReferences -Text $text)) {
+                $res.References++
+                & $note (Get-PbivizRequestVerdict -Ctx $ctx -FileRel $fileRel -DirRel $dirRel -Line (Get-PbivizLineAt $text $r.Pos) -Form $r.Form -Kind $r.Kind -Spec $r.Spec -Mode 'code')
+            }
+            # Raw scan as a safety net (also inside comments): a relative or absolute request the
+            # lexer missed still counts.
+            foreach ($m in [regex]::Matches($text, $rawRx)) {
+                foreach ($gi in 1..4) {
+                    if (-not $m.Groups[$gi].Success) { continue }
+                    $sp = $m.Groups[$gi].Value
+                    if ($sp -notmatch '^(?:\.|[A-Za-z]:[\\/]|\\\\|/)') { continue }
+                    $v = Get-PbivizRequestVerdict -Ctx $ctx -FileRel $fileRel -DirRel $dirRel -Line (Get-PbivizLineAt $text $m.Index) -Form 'import' -Kind 'static' -Spec $sp -Mode 'code'
+                    if ($v -and $v.Escape) { & $note $v }
+                }
             }
         }
     }
@@ -4617,9 +5309,9 @@ function Test-PbivizPromotionGates {
         else {
             $scan = Get-PbivizDependencyEscapes -Worktree $Worktree -Visual $Visual -Allowlist $allowSet
             $g4d = @()
-            if (@($scan.Escapes).Count) { $g4d += "imports leave the visual folder: $(@($scan.Escapes) -join ', ')" }
+            if (@($scan.Escapes).Count) { $g4d += "dependencies resolve outside the visual folder and are not allowlisted: $(@($scan.Escapes) -join ', ')" }
             if (-not $scan.Complete) { $g4d += "analysis incomplete (fail closed): $(@($scan.Uncertain) -join '; ')" }
-            & $add 'G4' ($scan.Complete -and @($scan.Escapes).Count -eq 0) $(if ($g4d.Count) { $g4d -join ' | ' } else { "no imports leave the visual folder ($($scan.FilesScanned) file(s) scanned; pruned: $(if (@($scan.Pruned).Count) { @($scan.Pruned) -join ', ' } else { 'none' }))" })
+            & $add 'G4' ($scan.Complete -and @($scan.Escapes).Count -eq 0) $(if ($g4d.Count) { $g4d -join ' | ' } else { "every dependency request resolves inside the visual folder, to an allowlisted file or to a package of the visual's own package.json/lockfile ($($scan.References) request(s) in $($scan.FilesScanned) file(s); pruned: $(if (@($scan.Pruned).Count) { @($scan.Pruned) -join ', ' } else { 'none' }); package contents are not analysed)" })
         }
         if ($ArchiveOnly) { & $add 'G5' $true 'not applicable (archive-only)' }
         else {
@@ -7870,6 +8562,15 @@ read in place, never copied.
   command. A package built any other way has NO build evidence: BUILT stays NO EVIDENCE and it is
   never validated. The record proves what the helper observed on this machine; it is not a
   reproducible-build attestation and does not vouch for `node_modules`.
+- The build runs under process-tree supervision (Windows job object, stdin `NUL`, output bounded
+  to 4 MB per stream): on exit or timeout (`-TimeoutSeconds`, default 900) every process of the
+  CLI's tree still running is terminated before the call returns. A timeout, a descendant left
+  running after the CLI exited, or incomplete output is FAILED with no build evidence.
+- Archiving is transactional: if `Add-PbivizRelease` or `Add-PbivizLegacyArchive` fails after it
+  started writing, it unstages and deletes exactly what it wrote ("rolled back: nothing this call
+  wrote or staged was left behind"); pre-existing releases and user files are never touched. A
+  file it wrote that changed meanwhile is left in place and the result is FAILED with
+  `ROLLBACK INCOMPLETE` - report it and stop.
 - Official releases are immutable pairs in `<Visual>/releases/`: `<guid>.<version>.pbiviz` +
   `<guid>.<version>.release.json` (SHA-256, size, package content claims, source commit and
   fingerprint, build evidence, tool and Node versions, test results, review verdict, validation
@@ -8074,9 +8775,21 @@ ARCHIVE = `<Visual>/releases/**` (Prod is authoritative; the Dev archive is neve
      pathspec) stays inside the visual's source scope + allowlist + the two new release files;
      the source fingerprint equals SRC.
    - G2 nothing else differs from TGT. G3 every other visual tree is identical to TGT.
-   - G4 no import leaves the visual folder unless allowlisted; dependency, cache and generated
-     folders are pruned while walking, links are never followed, and an incomplete analysis
-     fails the gate. G5 GUID stable, version increases.
+   - G4 every dependency request of the visual resolves inside its folder, to an allowlisted
+     FILE, to a Node built-in or to a package its own `package.json` declares or its
+     `package-lock.json` locks. Covered: import/export from, side-effect imports, `import()`
+     (template literals by their static prefix), `require()` / `.resolve()` / `.context()`,
+     `import.meta.webpackContext()`, `new URL(<request>, import.meta.url)`, triple-slash
+     references, LESS/CSS `@import` and `url()`, and relative or absolute paths in the visual's
+     JSON files (`tsconfig.json` `extends` / `baseUrl` / `paths`, `file:` dependencies). A folder
+     request (context or template) outside the visual is never allowlistable; npm workspaces at
+     the repository root BLOCK. Computed requests, undeclared packages, inline loaders, `#`
+     subpath imports, executable `pbiviz.mjs` / `tsconfig.mjs` / `capabilities.mjs`, a root
+     `node_modules`, unreadable files and links make the analysis incomplete: the gate fails
+     closed. Dependency, cache and generated folders are pruned while walking. Limits: package
+     contents, automatic `@types` from outside the repository, pnpm/Yarn and lockfile v1 are not
+     resolved - G4 is a static classification, not a proof about the bundle. G5 GUID stable,
+     version increases.
    - G6 the archive is append-only across all visuals: archive entries are only `A`; exactly the
      two new files for a release promotion; every added pair is consistent (hash, size, every
      package claim re-read from the content, build evidence, validation claim re-derived from its
@@ -8108,7 +8821,8 @@ ARCHIVE = `<Visual>/releases/**` (Prod is authoritative; the Dev archive is neve
    operation in progress is refused, approval or not. The release branch is always kept.
 
 - Mixed Dev commits are safe: only the selected visual's files are restored.
-- A shared dependency outside the visual is BLOCKED unless allowlisted and approved.
+- A shared dependency outside the visual is BLOCKED unless it is a single allowlisted file that a
+  static request resolves to, and the allowlist was approved.
 - Prod-only hotfixes are ported back to Dev with the same file-list procedure.
 
 ## Candidate worktree state contract
@@ -9720,7 +10434,8 @@ $agentKnowledge = @{
             'Merge only with `APPROVED:MERGE:<repo>#<pr>` AND the provider reporting every required review and check satisfied (`gh pr view --json reviewDecision,mergeStateStatus,statusCheckRollup` or `az repos pr policy list`); never `--admin`, never `--bypass-policy`, never vote on your own PR.',
             'After the merge write nothing to Prod: report the Prod commit from `Get-PbivizReleaseProvenance`, verify it with `Test-PbivizReleaseIntegrity` and report its Status, Verification and ReleaseClass verbatim: only Status PASS (Verification COMPLETE) with ReleaseClass OFFICIAL RELEASE is a fully verified official release; PARTIAL (COMMIT ONLY, source revision NOT AVAILABLE) is reported as commit evidence only, never as verified; a DEVELOPMENT/TEST CANDIDATE is never presented or distributed as a production release. Tag only with `APPROVED:TAG` and provider permission, then `Remove-PbivizPromotionWorktree` (a committed candidate is removed without force; an uncommitted one only with `-DiscardApproval APPROVED:DISCARD-CANDIDATE:<branch>` from the user; a refusal is final - report it, never force).',
             'Level 1/2 release: `Invoke-PbivizBuild -Root` on the clean checkout, then `Add-PbivizRelease -Root` adds the new release pair with the same evidence parameters; without complete evidence the pair is kept as a DEVELOPMENT/TEST CANDIDATE (validated: false). `Invoke-PbivizBuild` never overwrites an existing `dist/<guid>.<version>.pbiviz`: ask the user before moving such a development build out of `dist/`, never delete it. A package outside `<Visual>/dist/` is used only with the user''s `APPROVED:EXTERNAL-PACKAGE:<visual>:<sha256>` for those exact bytes. Legacy dist packages are archived only on request, per visual (`Add-PbivizLegacyArchive`, validated: false; a package whose content does not match its file name is skipped).',
-            'Report the four states separately - code versioned, package released, code promoted, distributed; distribution only on explicit request (`APPROVED:DISTRIBUTE:<destination>`) and only for a fully verified OFFICIAL RELEASE.'
+            'Report the four states separately - code versioned, package released, code promoted, distributed; distribution only on explicit request (`APPROVED:DISTRIBUTE:<destination>`) and only for a fully verified OFFICIAL RELEASE.',
+            'Failures are reported, never worked around: a FAILED `Invoke-PbivizBuild` (build error, timeout, a process of its tree left running, incomplete output) recorded no evidence. A failed `Add-PbivizRelease` / `Add-PbivizLegacyArchive` has already rolled back its own writes ("rolled back: nothing this call wrote or staged was left behind"); `ROLLBACK INCOMPLETE` is FAILED - report the files it names and stop, never delete them yourself. G4 "dependencies resolve outside the visual folder" or "analysis incomplete (fail closed)" is BLOCKED: report the listed requests to 080 (an approved allowlist covers single files a static request resolves to - never folders, computed requests or undeclared packages).'
         )
         validate = @(
             'Every history-changing helper call returned PASS with its postcondition evidence (no commit loss, accounted refs); backup refs created are reported.',
