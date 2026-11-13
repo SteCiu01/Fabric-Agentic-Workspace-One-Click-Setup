@@ -2073,3 +2073,117 @@ Describe 'Archiving is transactional: a failed release leaves nothing half-creat
         @($ok.Archived).Count | Should -Be 2
     }
 }
+
+Describe 'G4 decodes request strings by their language rules before classifying them (focused correction)' {
+
+    BeforeAll {
+        function New-TG5 {
+            param([hashtable]$Files)
+            $w = New-TDir 'g4e'
+            Write-TFile $w 'Bar/pbiviz.json' '{ "visual": { "name": "Bar", "guid": "barGuid0001", "version": "1.0.0.1" } }'
+            Write-TFile $w 'Bar/src/visual.ts' 'export class Visual {}'
+            Write-TFile $w 'Bar/src/util.ts' 'export const x = 1;'
+            foreach ($k in $Files.Keys) { Write-TFile $w $k $Files[$k] }
+            return $w
+        }
+        # The G4 verdict exactly as Test-PbivizPromotionGates derives it from the scan.
+        function Get-TG4Verdict { param($Scan) return [bool]($Scan.Complete -and @($Scan.Escapes).Count -eq 0) }
+    }
+
+    It 'BLOCKS an escaped request that resolves outside the visual: <Case>' -TestCases @(
+        @{ Case = 'static import with \u escapes'; File = 'Bar/src/a.ts'; Text = "import { label } from '\u002e\u002e/\u002e\u002e/shared/probe.mjs';"; Escape = 'src/a.ts -> ../../shared/probe.mjs' },
+        @{ Case = 'export from with \x escapes'; File = 'Bar/src/a.ts'; Text = 'export { x } from "\x2e\x2e/\x2e\x2e/shared/x";'; Escape = 'src/a.ts -> ../../shared/x' },
+        @{ Case = 'side-effect import with mixed-case hex digits'; File = 'Bar/src/a.ts'; Text = "import '\x2E\u002E/\u002e./shared/side';"; Escape = 'src/a.ts -> ../../shared/side' },
+        @{ Case = 'require() with \u{...} escapes'; File = 'Bar/src/a.js'; Text = 'const m = require("\u{2e}\u{2E}/\u{002e}\u{2e}/shared/m");'; Escape = 'src/a.js -> ../../shared/m' },
+        @{ Case = 'dynamic import()'; File = 'Bar/src/a.ts'; Text = "const d = import('\u002E./\u002e\u002e/shared/d.js');"; Escape = 'src/a.ts -> ../../shared/d.js' },
+        @{ Case = 'template-literal import with an escaped static prefix'; File = 'Bar/src/a.ts'; Text = 'export const t = (n: string) => import(`\u002e\u002e/\u002e\u002e/shared/${n}`);'; Escape = 'src/a.ts -> ../../shared/<computed> (a folder' },
+        @{ Case = 'identity escapes'; File = 'Bar/src/a.ts'; Text = "import x from '.\./.\./shared/x';"; Escape = 'src/a.ts -> ../../shared/x' },
+        @{ Case = 'line continuation (LF)'; File = 'Bar/src/a.ts'; Text = "import x from '../\`n../shared/lf';"; Escape = 'src/a.ts -> ../../shared/lf' },
+        @{ Case = 'line continuation (CRLF)'; File = 'Bar/src/a.ts'; Text = "import x from '../\`r\`n../shared/crlf';"; Escape = 'src/a.ts -> ../../shared/crlf' },
+        @{ Case = 'escaped Windows separators'; File = 'Bar/src/a.js'; Text = "const w = require('..\\..\\shared\\w');"; Escape = 'src/a.js -> ..\..\shared\w' },
+        @{ Case = 'require written with an escaped identifier'; File = 'Bar/src/a.js'; Text = "const r = \u0072equire('../../shared/r');"; Escape = 'src/a.js -> ../../shared/r' },
+        @{ Case = 'new URL asset with escapes'; File = 'Bar/src/a.ts'; Text = "const u = new URL('\u002e\u002e/\u002e\u002e/shared/w.js', import.meta.url);"; Escape = 'src/a.ts -> ../../shared/w.js' },
+        @{ Case = 'require.context with escapes'; File = 'Bar/src/a.js'; Text = "const c = require.context('\x2e\x2e/\x2e\x2e/shared');"; Escape = 'src/a.js -> ../../shared (a folder' },
+        @{ Case = 'JSON tsconfig extends'; File = 'Bar/tsconfig.json'; Text = '{ "extends": "\u002e\u002e/tsconfig.base.json" }'; Escape = 'tsconfig.json -> ../tsconfig.base.json' },
+        @{ Case = 'JSON tsconfig baseUrl'; File = 'Bar/tsconfig.json'; Text = '{ "compilerOptions": { "baseUrl": "\u002e\u002e" } }'; Escape = 'tsconfig.json -> ..' },
+        @{ Case = 'JSON tsconfig paths'; File = 'Bar/tsconfig.json'; Text = '{ "compilerOptions": { "paths": { "@shared/*": ["\u002e\u002e\/shared/*"] } } }'; Escape = 'tsconfig.json -> ../shared/*' },
+        @{ Case = 'JSON file: dependency'; File = 'Bar/package.json'; Text = '{ "dependencies": { "s": "file:\u002e\u002e/shared" } }'; Escape = 'package.json -> ../shared' },
+        @{ Case = 'JSON absolute path in pbiviz.json'; File = 'Bar/pbiviz.json'; Text = '{ "visual": {}, "assets": { "icon": "\u002ficons/x.png" } }'; Escape = 'pbiviz.json -> /icons/x.png' }
+    ) {
+        $w = New-TG5 @{ $File = $Text }
+        $s = Get-PbivizDependencyEscapes -Worktree $w -Visual 'Bar'
+        (Get-TG4Verdict $s) | Should -BeFalse
+        (@($s.Escapes) -join ' || ') | Should -Match ([regex]::Escape($Escape)) -Because "uncertain: $($s.Uncertain -join '; ')"
+    }
+
+    It 'fails closed on an unsupported, malformed or ambiguous escape: <Case>' -TestCases @(
+        @{ Case = 'malformed \x escape'; File = 'Bar/src/a.ts'; Text = "import x from '\x2e\x2/shared/x';"; Match = 'src/a\.ts:1: import/export from request with an unsupported or malformed escape sequence \(malformed hexadecimal escape' },
+        @{ Case = 'malformed \u escape'; File = 'Bar/src/a.js'; Text = "const m = require('\u002e\u002/x');"; Match = 'require\(\) request with an unsupported or malformed escape sequence \(malformed or out-of-range Unicode escape' },
+        @{ Case = 'out-of-range \u{...} escape'; File = 'Bar/src/a.ts'; Text = "const d = import('\u{110000}/x');"; Match = 'malformed or out-of-range Unicode escape' },
+        @{ Case = 'legacy octal escape (mode-dependent)'; File = 'Bar/src/a.js'; Text = "const m = require('\56\56/\56\56/shared/x');"; Match = 'legacy octal or decimal escape' },
+        @{ Case = 'non-octal decimal escape \8'; File = 'Bar/src/a.ts'; Text = "import x from '\8/x';"; Match = 'legacy octal or decimal escape' },
+        @{ Case = 'unpaired surrogate'; File = 'Bar/src/a.ts'; Text = "import x from '\uD800/x';"; Match = 'unpaired surrogate' },
+        @{ Case = 'unterminated request string'; File = 'Bar/src/a.ts'; Text = "import x from '../../shared/x`nexport class V {}"; Match = 'unterminated string literal' },
+        @{ Case = 'escape an untagged template rejects'; File = 'Bar/src/a.ts'; Text = 'export const t = (n: string) => import(`\01/${n}`);'; Match = 'legacy octal or decimal escape' },
+        @{ Case = 'JSON escape outside RFC 8259'; File = 'Bar/tsconfig.json'; Text = '{ "extends": "\x2e\x2e/base.json" }'; Match = 'tsconfig\.json:1: JSON string .* is not valid in JSON' },
+        @{ Case = 'malformed JSON \u escape'; File = 'Bar/tsconfig.json'; Text = '{ "compilerOptions": { "baseUrl": "\u002" } }'; Match = 'malformed Unicode escape' },
+        @{ Case = 'unpaired surrogate in JSON'; File = 'Bar/tsconfig.json'; Text = '{ "compilerOptions": { "paths": { "a": ["\uDC00/x"] } } }'; Match = 'unpaired surrogate' },
+        @{ Case = 'escape in a CSS url()'; File = 'Bar/style/b.css'; Text = ".a { background: url('\2e\2e/\2e\2e/shared/i.png'); }"; Match = 'escape sequences in style requests are not decoded' },
+        @{ Case = 'backslash in a triple-slash reference'; File = 'Bar/src/a.ts'; Text = '/// <reference path="\u002e\u002e/x.d.ts" />'; Match = 'a backslash in a triple-slash reference is not interpreted' },
+        @{ Case = 'control character in a request'; File = 'Bar/src/a.ts'; Text = "import x from './\u0000x';"; Match = 'request contains control characters' }
+    ) {
+        $w = New-TG5 @{ $File = $Text }
+        $s = Get-PbivizDependencyEscapes -Worktree $w -Visual 'Bar'
+        $s.Complete | Should -BeFalse -Because "escapes: $($s.Escapes -join '; ')"
+        (Get-TG4Verdict $s) | Should -BeFalse
+        (@($s.Uncertain) -join ' || ') | Should -Match $Match
+    }
+
+    It 'keeps passing legitimate internal requests written with escapes, valid JSON escapes, and mode-dependent escapes outside requests' {
+        $w = New-TG5 @{
+            'Bar/src/visual.ts'       = @'
+import { x } from '\u002e/util';
+import { y } from "\x2e/\x75til";
+export { x as z } from '.\/util';
+import '\u{2e}/\u{2e}\u{2e}/style/visual.less';
+const t = (l: string) => import(`\u002e/locales/${l}.json`);
+const c = (l: string) => import('\u002e/locales/' + l + '.json');
+const r = \u0072equire('./util');
+const s = 'text \n with \t valid \u00e9 escapes \x41 and \0';
+export class Visual {}
+'@
+            'Bar/src/legacy.js'       = "var msg = '\101\102'; // legacy octal outside any request (sloppy-mode script)`nmodule.exports = msg;"
+            'Bar/src/globals.d.ts'    = 'declare const G: number;'
+            'Bar/src/refs.ts'         = '/// <reference path="globals.d.ts" />' + "`nexport const g = 1;"
+            'Bar/src/locales/en.json' = '{ "hello": "H\u00e9llo \"quoted\" \\ back\/slash \n" }'
+            'Bar/style/visual.less'   = '.a { color: red; }'
+            'Bar/tsconfig.json'       = '{ "compilerOptions": { "outDir": "\u002e/.tmp/build/" }, "files": ["\u002e/src/visual.ts"] }'
+        }
+        $s = Get-PbivizDependencyEscapes -Worktree $w -Visual 'Bar'
+        $s.Complete | Should -BeTrue -Because ($s.Uncertain -join '; ')
+        @($s.Escapes).Count | Should -Be 0 -Because ($s.Escapes -join '; ')
+        (Get-TG4Verdict $s) | Should -BeTrue
+        $s.References | Should -BeGreaterThan 9
+    }
+
+    It 'G4 BLOCKS a Level 3 candidate whose escaped import reaches an unapproved shared file, and passes once that file is allowlisted' {
+        $r = New-TL3
+        Write-TFile $r 'shared/probe.mjs' 'export const label = 1;'
+        Save-TAll $r 'shared' | Out-Null
+        TGit $r branch -f PBVIZ_Team_Prod HEAD | Out-Null
+        Write-TFile $r 'shared/probe.mjs' 'export const label = 2;'
+        Write-TFile $r 'Bar/src/visual.ts' ("import { label } from '\u002e\u002e/\u002e\u002e/shared/probe.mjs';" + "`nexport class Visual {}")
+        Set-TVersion $r 'Bar' 'barGuid0001' '1.0.0.2'
+        Save-TAll $r 'bar imports shared code through an escaped path' | Out-Null
+        $p = Invoke-TPromotion -Repo $r
+        $p.Gates.Status | Should -Be 'BLOCKED'
+        $g4 = Get-TGate $p.Gates 'G4'
+        $g4.Pass | Should -BeFalse
+        $g4.Detail | Should -Match 'not allowlisted: src/visual\.ts -> \.\./\.\./shared/probe\.mjs'
+        (Remove-PbivizPromotionWorktree -Root $r -WorktreeDir $p.Candidate.Worktree -DiscardApproval 'APPROVED:DISCARD-CANDIDATE:release/pbiviz/Bar/1.0.0.2').Status | Should -Be 'PASS'
+        TGit $r branch '-D' 'release/pbiviz/Bar/1.0.0.2' | Out-Null
+        $q = Invoke-TPromotion -Repo $r -Allowlist @('shared/probe.mjs')
+        $q.Gates.Status | Should -Be 'PASS' -Because $q.Gates.Reason
+        (Get-TGate $q.Gates 'G4').Pass | Should -BeTrue
+    }
+}

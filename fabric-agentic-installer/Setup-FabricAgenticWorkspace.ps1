@@ -4383,8 +4383,9 @@ function Get-PbivizPackageLocation {
 # The single definition of "validated": Add-PbivizRelease writes it, G6 and the integrity check
 # re-derive it from the recorded evidence. Validated = package identity verified from its content,
 # build evidence binding these exact bytes to the source revision, lint PASS, unit PASS, toolchain
-# versions recorded and an approving review bound to the source revision. BUILT is YES only with
-# that build evidence - never from the package metadata alone. Validated never implies HOST
+# versions recorded and an approving review bound to the source revision. Test results and the
+# review are caller attestations (checked for form and commit, never run or authenticated here).
+# BUILT is YES only with that build evidence - never from the package metadata alone. Validated never implies HOST
 # TESTED, CERTIFICATION READY or MICROSOFT CERTIFIED: the five quality labels are derived
 # separately, and missing evidence stays visible as a gap.
 function Get-PbivizValidationVerdict {
@@ -4846,7 +4847,8 @@ function Add-PbivizLegacyArchive {
 # .css; resolve.modules = node_modules lookup (no aliases, so TypeScript `paths` never reach the
 # bundle); AMD parsing off; powerbi-visuals-api and Node core modules are externals; fonts and
 # images referenced by url() are inlined; pbiviz.json / tsconfig.json / capabilities.json are read
-# as <name>.mjs (JavaScript) first when such a file exists. Requests are classified, never run.
+# as <name>.mjs (JavaScript) first when such a file exists. Requests are classified, never run;
+# string literals are decoded by the rules of their language before any path is classified.
 $script:PbivizCodeExts       = @('.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs')
 $script:PbivizStyleExts      = @('.less', '.css', '.scss')
 $script:PbivizResolveExts    = @('.tsx', '.ts', '.jsx', '.js', '.mjs', '.css', '.less', '.json', '.d.ts')
@@ -4854,14 +4856,73 @@ $script:PbivizBuiltinModules = @('powerbi-visuals-api', 'assert', 'buffer', 'chi
 $script:PbivizExecConfigs    = @('pbiviz.mjs', 'tsconfig.mjs', 'capabilities.mjs')
 $script:PbivizRegexPrecede   = @('return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void', 'throw', 'case', 'do', 'else', 'yield', 'await')
 $script:PbivizTemplateStops  = [char[]]@([char]92, [char]96, [char]36)
-$script:PbivizJsTokenRx      = New-Object regex '\G(?:(?<ws>\s+)|(?<lc>//[^\r\n]*)|(?<bc>/\*[\s\S]*?(?:\*/|\z))|(?<str>''(?:[^''\\\r\n]|\\[\s\S])*(?:''|(?=[\r\n])|\z)|"(?:[^"\\\r\n]|\\[\s\S])*(?:"|(?=[\r\n])|\z))|(?<bt>`)|(?<id>[\p{L}\p{Nl}$_][\p{L}\p{Nl}\p{Mn}\p{Mc}\p{Nd}\p{Pc}$]*)|(?<num>\d[\w.]*)|(?<p>[\s\S]))'
+$script:PbivizJsTokenRx      = New-Object regex '\G(?:(?<ws>\s+)|(?<lc>//[^\r\n]*)|(?<bc>/\*[\s\S]*?(?:\*/|\z))|(?<str>''(?:[^''\\\r\n]|\\(?:\r\n|[\s\S]))*(?:''|(?=[\r\n])|\z)|"(?:[^"\\\r\n]|\\(?:\r\n|[\s\S]))*(?:"|(?=[\r\n])|\z))|(?<bt>`)|(?<id>(?:[\p{L}\p{Nl}$_]|\\u(?:[0-9A-Fa-f]{4}|\{[0-9A-Fa-f]+\}))(?:[\p{L}\p{Nl}\p{Mn}\p{Mc}\p{Nd}\p{Pc}$\u200C\u200D]|\\u(?:[0-9A-Fa-f]{4}|\{[0-9A-Fa-f]+\}))*)|(?<num>\d[\w.]*)|(?<p>[\s\S]))'
+$script:PbivizJsStringClosedRx = New-Object regex '^(?:''(?:[^''\\\r\n]|\\(?:\r\n|[\s\S]))*''|"(?:[^"\\\r\n]|\\(?:\r\n|[\s\S]))*")$'
 $script:PbivizJsRegexRx      = New-Object regex '\G/(?:[^/\\\[\r\n]|\\.|\[(?:[^\]\\\r\n]|\\.)*\])+/[A-Za-z]*'
+$script:PbivizHex4Rx         = New-Object regex '\G[0-9A-Fa-f]{4}'
+$script:PbivizHex2Rx         = New-Object regex '\G[0-9A-Fa-f]{2}'
+$script:PbivizHexBraceRx     = New-Object regex '\G\{([0-9A-Fa-f]+)\}'
+
+# Decodes the body of a string literal by the rules of its language: Js = ECMAScript string literal,
+# Template = cooked text of an untagged template literal, Json = RFC 8259. Escapes whose meaning
+# depends on the parse mode (legacy octal, \8, \9), malformed escapes and unpaired surrogates are
+# returned in Error, never guessed.
+function ConvertFrom-PbivizEscapedText {
+    param([string]$Text, [ValidateSet('Js', 'Template', 'Json')][string]$Rules)
+    if ($Text.IndexOf([char]92) -lt 0 -and ($Rules -ne 'Template' -or $Text.IndexOf([char]13) -lt 0)) { return [pscustomobject]@{ Value = $Text; Error = $null } }
+    $sb = New-Object System.Text.StringBuilder ($Text.Length)
+    $n = $Text.Length; $i = 0
+    $fail = { param($what) [pscustomobject]@{ Value = $null; Error = $what } }
+    while ($i -lt $n) {
+        $c = $Text[$i]
+        if ($c -ne [char]92) {
+            if ($Rules -eq 'Template' -and $c -eq [char]13) { [void]$sb.Append([char]10); $i++; if ($i -lt $n -and $Text[$i] -eq [char]10) { $i++ }; continue }
+            [void]$sb.Append($c); $i++; continue
+        }
+        if ($i + 1 -ge $n) { return (& $fail 'a backslash ends the string') }
+        $e = [int]$Text[$i + 1]
+        $shown = $Text.Substring($i, [Math]::Min(8, $n - $i))
+        $i += 2
+        $cp = -1
+        if ($e -eq 0x75) {
+            $h = $script:PbivizHex4Rx.Match($Text, $i)
+            if ($Rules -ne 'Json' -and -not $h.Success) {
+                $h = $script:PbivizHexBraceRx.Match($Text, $i)
+                if ($h.Success -and $h.Groups[1].Value.Length -le 8) { $cp = [Convert]::ToInt32($h.Groups[1].Value, 16) }
+                if ($cp -lt 0 -or $cp -gt 0x10FFFF) { return (& $fail "malformed or out-of-range Unicode escape '$shown'") }
+                $i += $h.Length
+            } elseif (-not $h.Success) { return (& $fail "malformed Unicode escape '$shown'") }
+            else { $cp = [Convert]::ToInt32($h.Value, 16); $i += 4 }
+        } elseif ($Rules -eq 'Json') {
+            $k = '"\/bfnrt'.IndexOf([char]$e)
+            if ($k -lt 0) { return (& $fail "escape '$shown' is not valid in JSON") }
+            $cp = @(0x22, 0x5C, 0x2F, 8, 12, 10, 13, 9)[$k]
+        } elseif ($e -eq 0x78) {
+            $h = $script:PbivizHex2Rx.Match($Text, $i)
+            if (-not $h.Success) { return (& $fail "malformed hexadecimal escape '$shown'") }
+            $cp = [Convert]::ToInt32($h.Value, 16); $i += 2
+        } elseif ($e -eq 0x30 -and -not ($i -lt $n -and [int]$Text[$i] -ge 0x30 -and [int]$Text[$i] -le 0x39)) { $cp = 0 }
+        elseif ($e -ge 0x30 -and $e -le 0x39) { return (& $fail "legacy octal or decimal escape '$shown' (its meaning depends on the parse mode; invalid in modules and template literals)") }
+        elseif ($e -eq 10 -or $e -eq 0x2028 -or $e -eq 0x2029) { continue }
+        elseif ($e -eq 13) { if ($i -lt $n -and $Text[$i] -eq [char]10) { $i++ }; continue }
+        else {
+            $k = 'bfnrtv'.IndexOf([char]$e)
+            $cp = if ($k -ge 0) { @(8, 12, 10, 13, 9, 11)[$k] } else { $e }
+        }
+        if ($cp -le 0xFFFF) { [void]$sb.Append([char]$cp) } else { [void]$sb.Append([char]::ConvertFromUtf32($cp)) }
+    }
+    $v = $sb.ToString()
+    for ($k = 0; $k -lt $v.Length; $k++) {
+        if ([char]::IsHighSurrogate($v[$k]) -and $k + 1 -lt $v.Length -and [char]::IsLowSurrogate($v[$k + 1])) { $k++; continue }
+        if ([char]::IsSurrogate($v[$k])) { return (& $fail 'an escape produces an unpaired surrogate') }
+    }
+    return [pscustomobject]@{ Value = $v; Error = $null }
+}
 
 function ConvertFrom-PbivizJsString {
     param([string]$Token)
-    $body = $Token.Substring(1)
-    if ($body.Length -gt 0 -and $body[$body.Length - 1] -eq $Token[0]) { $body = $body.Substring(0, $body.Length - 1) }
-    return [regex]::Replace($body, '\\([\s\S])', '$1')
+    if (-not $script:PbivizJsStringClosedRx.IsMatch($Token)) { return [pscustomobject]@{ Value = $null; Error = 'unterminated string literal' } }
+    return (ConvertFrom-PbivizEscapedText -Text $Token.Substring(1, $Token.Length - 2) -Rules 'Js')
 }
 
 # Significant tokens of JavaScript/TypeScript: comments and whitespace dropped, strings and template
@@ -4881,15 +4942,27 @@ function Get-PbivizJsTokens {
         if ($g['ws'].Success -or $g['bc'].Success) { $pos += $m.Length; continue }
         if ($g['lc'].Success) {
             $r = [regex]::Match($m.Value, '^///\s*<reference\s+(path|types)\s*=\s*(["''])(.*?)\2')
-            if ($r.Success) { $Refs.Add([pscustomobject]@{ Pos = $pos; Form = "/// <reference $($r.Groups[1].Value)>"; Kind = 'static'; Spec = $r.Groups[3].Value }) }
+            if ($r.Success) {
+                $rv = $r.Groups[3].Value
+                $Refs.Add([pscustomobject]@{ Pos = $pos; Form = "/// <reference $($r.Groups[1].Value)>"; Kind = $(if ($rv.Contains('\')) { 'malformed' } else { 'static' }); Spec = $(if ($rv.Contains('\')) { "'$rv' - a backslash in a triple-slash reference is not interpreted" } else { $rv }) })
+            }
             $pos += $m.Length; continue
         }
-        if ($g['str'].Success) { $types.Add('s'); $vals.Add((ConvertFrom-PbivizJsString $m.Value)); $poss.Add($pos); $pos += $m.Length; continue }
+        if ($g['str'].Success) {
+            $d = ConvertFrom-PbivizJsString $m.Value
+            if ($d.Error) { $types.Add('e'); $vals.Add($d.Error) } else { $types.Add('s'); $vals.Add($d.Value) }
+            $poss.Add($pos); $pos += $m.Length; continue
+        }
         if ($g['bt'].Success) {
             $tpl = Read-PbivizJsTemplate -Text $Text -Start $pos -Lists $Lists -Refs $Refs
-            $types.Add($(if ($tpl.Subst) { 't' } else { 's' })); $vals.Add($tpl.Prefix); $poss.Add($pos); $pos = $tpl.End; continue
+            if ($tpl.Error) { $types.Add('e'); $vals.Add($tpl.Error) } else { $types.Add($(if ($tpl.Subst) { 't' } else { 's' })); $vals.Add($tpl.Prefix) }
+            $poss.Add($pos); $pos = $tpl.End; continue
         }
-        if ($g['id'].Success) { $types.Add('i'); $vals.Add($m.Value); $poss.Add($pos); $pos += $m.Length; continue }
+        if ($g['id'].Success) {
+            $idv = $m.Value
+            if ($idv.IndexOf([char]92) -ge 0) { $d = ConvertFrom-PbivizEscapedText -Text $idv -Rules 'Js'; if (-not $d.Error) { $idv = $d.Value } }
+            $types.Add('i'); $vals.Add($idv); $poss.Add($pos); $pos += $m.Length; continue
+        }
         if ($g['num'].Success) { $types.Add('n'); $vals.Add($m.Value); $poss.Add($pos); $pos += $m.Length; continue }
         $c = $m.Value
         if ($c -eq '/') {
@@ -4909,23 +4982,30 @@ function Get-PbivizJsTokens {
     return $len
 }
 
-# A template literal: its text up to the first substitution (the static prefix a bundler can use).
+# A template literal: the cooked text up to the first substitution (the static prefix a bundler can
+# use); Error when that text has an escape an untagged template rejects, or the literal is open.
 function Read-PbivizJsTemplate {
     param([string]$Text, [int]$Start, $Lists, $Refs)
     $sb = New-Object System.Text.StringBuilder
-    $i = $Start + 1; $len = $Text.Length; $subst = $false
+    $i = $Start + 1; $len = $Text.Length; $subst = $false; $end = $len; $closed = $false
     while ($i -lt $len) {
         $j = $Text.IndexOfAny($script:PbivizTemplateStops, $i)
         if ($j -lt 0) { if (-not $subst) { [void]$sb.Append($Text, $i, $len - $i) }; $i = $len; break }
         if (-not $subst) { [void]$sb.Append($Text, $i, $j - $i) }
         $c = $Text[$j]
-        if ($c -eq [char]96) { return [pscustomobject]@{ End = $j + 1; Prefix = $sb.ToString(); Subst = $subst } }
-        if ($c -eq [char]92) { if (-not $subst -and $j + 1 -lt $len) { [void]$sb.Append($Text[$j + 1]) }; $i = $j + 2; continue }
+        if ($c -eq [char]96) { $end = $j + 1; $closed = $true; break }
+        if ($c -eq [char]92) {
+            $k = [Math]::Min($len, $j + 2)
+            if ($k -lt $len -and $Text[$j + 1] -eq [char]13 -and $Text[$k] -eq [char]10) { $k++ }
+            if (-not $subst) { [void]$sb.Append($Text, $j, $k - $j) }
+            $i = $k; continue
+        }
         if ($j + 1 -lt $len -and $Text[$j + 1] -eq [char]123) { $subst = $true; $i = Get-PbivizJsTokens -Text $Text -Start ($j + 2) -StopAtBrace $true -Lists $Lists -Refs $Refs; continue }
         if (-not $subst) { [void]$sb.Append([char]36) }
         $i = $j + 1
     }
-    return [pscustomobject]@{ End = $len; Prefix = $sb.ToString(); Subst = $subst }
+    $d = ConvertFrom-PbivizEscapedText -Text $sb.ToString() -Rules 'Template'
+    return [pscustomobject]@{ End = $end; Prefix = $d.Value; Subst = $subst; Error = $(if (-not $closed) { 'unterminated template literal' } else { $d.Error }) }
 }
 
 # Every request webpack 5 / ts-loader can take from JavaScript or TypeScript: import / export ...
@@ -4945,6 +5025,7 @@ function Get-PbivizJsReferences {
         $argOf = {
             param($at, [string]$form, [string]$kind)
             if ($at -ge $n) { return [pscustomobject]@{ Pos = $tp[$n - 1]; Form = $form; Kind = 'dynamic'; Spec = $null } }
+            if ($tt[$at] -eq 'e') { return [pscustomobject]@{ Pos = $tp[$at]; Form = $form; Kind = 'malformed'; Spec = $tv[$at] } }
             $next = if ($at + 1 -lt $n -and $tt[$at + 1] -eq 'p') { $tv[$at + 1] } else { '' }
             if ($tt[$at] -eq 's' -and ($next -eq ')' -or $next -eq ',')) { return [pscustomobject]@{ Pos = $tp[$at]; Form = $form; Kind = $kind; Spec = $tv[$at] } }
             if (($tt[$at] -eq 's' -and $next -eq '+') -or $tt[$at] -eq 't') { return [pscustomobject]@{ Pos = $tp[$at]; Form = $form; Kind = 'template'; Spec = $tv[$at] } }
@@ -4957,8 +5038,10 @@ function Get-PbivizJsReferences {
             if ($i -gt 0 -and $tt[$i - 1] -eq 'p' -and $tv[$i - 1] -eq '.') { continue }
             if ($w -ceq 'from') {
                 if ($i + 1 -lt $n -and $tt[$i + 1] -eq 's') { $refs.Add([pscustomobject]@{ Pos = $tp[$i + 1]; Form = 'import/export from'; Kind = 'static'; Spec = $tv[$i + 1] }) }
+                elseif ($i + 1 -lt $n -and $tt[$i + 1] -eq 'e') { $refs.Add([pscustomobject]@{ Pos = $tp[$i + 1]; Form = 'import/export from'; Kind = 'malformed'; Spec = $tv[$i + 1] }) }
             } elseif ($w -ceq 'import') {
                 if ($i + 1 -lt $n -and $tt[$i + 1] -eq 's') { $refs.Add([pscustomobject]@{ Pos = $tp[$i + 1]; Form = 'import'; Kind = 'static'; Spec = $tv[$i + 1] }) }
+                elseif ($i + 1 -lt $n -and $tt[$i + 1] -eq 'e') { $refs.Add([pscustomobject]@{ Pos = $tp[$i + 1]; Form = 'import'; Kind = 'malformed'; Spec = $tv[$i + 1] }) }
                 elseif (& $isP ($i + 1) '(') { $refs.Add((& $argOf ($i + 2) 'import()' 'static')) }
                 elseif ((& $isP ($i + 1) '.') -and $i + 5 -lt $n -and $tv[$i + 2] -ceq 'meta' -and (& $isP ($i + 3) '.') -and $tv[$i + 4] -ceq 'webpackContext' -and (& $isP ($i + 5) '(')) { $refs.Add((& $argOf ($i + 6) 'import.meta.webpackContext()' 'context')) }
             } elseif ($w -ceq 'require') {
@@ -5004,24 +5087,28 @@ function Get-PbivizStyleReferences {
     foreach ($m in [regex]::Matches($clean, '\burl\(\s*(["'']?)(.*?)\1\s*\)')) { $refs.Add([pscustomobject]@{ Pos = $m.Index; Form = 'url()'; Spec = $m.Groups[2].Value }) }
     foreach ($r in $refs) {
         $s = $r.Spec
-        $kind = if ($s -match '^(?i:data:|https?:|//|#|about:)' -or -not $s) { 'external' } elseif ($s -match '@\{|#\{|^[@$]|\bvar\(') { 'dynamic' } else { 'static' }
+        $kind = if ($s -match '^(?i:data:|https?:|//|#|about:)' -or -not $s) { 'external' } elseif ($s.Contains('\')) { 'malformed' } elseif ($s -match '@\{|#\{|^[@$]|\bvar\(') { 'dynamic' } else { 'static' }
+        if ($kind -eq 'malformed') { $r.Spec = "'$s' - escape sequences in style requests are not decoded" }
         $r | Add-Member -NotePropertyName Kind -NotePropertyValue $kind
     }
     return $refs.ToArray()
 }
 
-# Path-like strings of a JSON file: relative (./, ../ or a '..' segment) or absolute (drive, UNC, or
-# a leading '/' in configuration files), optionally behind npm's file:, link: or portal:.
+# Path-like strings of a JSON file, decoded by RFC 8259 first: relative (./, ../ or a '..' segment) or
+# absolute (drive, UNC, or a leading '/' in configuration files), optionally behind npm's file:,
+# link: or portal:. A string that cannot be decoded is returned with Error set.
 function Get-PbivizJsonPathStrings {
     param([string]$Text, [bool]$Config)
     $out = New-Object System.Collections.Generic.List[object]
     foreach ($m in [regex]::Matches($Text, '"((?:[^"\\]|\\.)*)"')) {
-        $s = [regex]::Replace($m.Groups[1].Value, '\\(["\\/])', '$1')
+        $d = ConvertFrom-PbivizEscapedText -Text $m.Groups[1].Value -Rules 'Json'
+        if ($d.Error) { $out.Add([pscustomobject]@{ Pos = $m.Index; Raw = $m.Groups[1].Value; Path = $null; Absolute = $false; Error = $d.Error }); continue }
+        $s = $d.Value
         if ($s -match '://') { continue }
         $p = $s -replace '^(?:file|link|portal):', ''
         $abs = ($p -match '^(?:[A-Za-z]:[\\/]|\\\\|//)') -or ($Config -and $p -match '^/[^/]')
         $rel = (-not $abs) -and ($p -match '^\.{1,2}(?:[\\/]|$)' -or $p -match '(?:^|[\\/])\.\.(?:[\\/]|$)')
-        if ($abs -or $rel) { $out.Add([pscustomobject]@{ Pos = $m.Index; Raw = $s; Path = $p; Absolute = $abs }) }
+        if ($abs -or $rel) { $out.Add([pscustomobject]@{ Pos = $m.Index; Raw = $s; Path = $p; Absolute = $abs; Error = $null }) }
     }
     return $out.ToArray()
 }
@@ -5085,12 +5172,16 @@ function Get-PbivizRequestVerdict {
     param($Ctx, [string]$FileRel, [string]$DirRel, [int]$Line, [string]$Form, [string]$Kind, [string]$Spec, [string]$Mode)
     $at = "${FileRel}:$Line"
     if ($Kind -eq 'dynamic') { return @{ Uncertain = "${at}: $Form with a computed request - it cannot be resolved statically" } }
+    if ($Kind -eq 'malformed') { return @{ Uncertain = "${at}: $Form request with an unsupported or malformed escape sequence ($Spec) - it cannot be classified" } }
     $raw = [string]$Spec
+    if ($raw -match '[\x00-\x1F\x7F]') { return @{ Uncertain = "${at}: $Form request contains control characters - it cannot be classified" } }
     if ($raw.Contains('!')) { return @{ Uncertain = "${at}: $Form uses inline loader syntax '$raw'" } }
     if ($raw.StartsWith('#')) { return @{ Uncertain = "${at}: package.json subpath import '$raw' - its target is not analysed" } }
     $s = ($raw -split '[?#]', 2)[0]
     $isRel = $s -match '^\.{1,2}(?:[\\/]|$)'
     $isAbs = $s -match '^(?:[A-Za-z]:[\\/]|\\\\|/)'
+    # TypeScript resolves a reference path against the referencing file, with or without './'.
+    if ($Form -like '/// <reference path*' -and -not $isRel -and -not $isAbs) { $s = "./$s"; $isRel = $true }
     $inVisual = { param($r) ($null -ne $r) -and ($r.Equals($Ctx.Visual, [StringComparison]::OrdinalIgnoreCase) -or $r.StartsWith("$($Ctx.Visual)/", [StringComparison]::OrdinalIgnoreCase)) }
     $packageVerdict = {
         param([string]$Request, [string[]]$Names)
@@ -5211,6 +5302,7 @@ function Get-PbivizDependencyEscapes {
                 $cfg = $e.Name -match '^(?i:tsconfig.*|jsconfig.*|pbiviz|package|package-lock|npm-shrinkwrap|dependencies)\.json$'
                 foreach ($j in @(Get-PbivizJsonPathStrings -Text $text -Config $cfg)) {
                     $res.References++
+                    if ($j.Error) { & $note (Get-PbivizRequestVerdict -Ctx $ctx -FileRel $fileRel -DirRel $dirRel -Line (Get-PbivizLineAt $text $j.Pos) -Form "JSON string `"$($j.Raw)`"" -Kind 'malformed' -Spec $j.Error -Mode 'json'); continue }
                     & $note (Get-PbivizRequestVerdict -Ctx $ctx -FileRel $fileRel -DirRel $dirRel -Line (Get-PbivizLineAt $text $j.Pos) -Form 'path in JSON' -Kind 'static' -Spec $(if ($j.Absolute) { $j.Path } elseif ($j.Path -match '^\.{1,2}(?:[\\/]|$)') { $j.Path } else { "./$($j.Path)" }) -Mode 'json')
                 }
                 continue
@@ -5232,7 +5324,9 @@ function Get-PbivizDependencyEscapes {
             foreach ($m in [regex]::Matches($text, $rawRx)) {
                 foreach ($gi in 1..4) {
                     if (-not $m.Groups[$gi].Success) { continue }
-                    $sp = $m.Groups[$gi].Value
+                    $dsp = ConvertFrom-PbivizEscapedText -Text $m.Groups[$gi].Value -Rules 'Js'
+                    if ($dsp.Error) { continue }
+                    $sp = $dsp.Value
                     if ($sp -notmatch '^(?:\.|[A-Za-z]:[\\/]|\\\\|/)') { continue }
                     $v = Get-PbivizRequestVerdict -Ctx $ctx -FileRel $fileRel -DirRel $dirRel -Line (Get-PbivizLineAt $text $m.Index) -Form 'import' -Kind 'static' -Spec $sp -Mode 'code'
                     if ($v -and $v.Escape) { & $note $v }
@@ -8598,13 +8692,19 @@ A passing `pbiviz package` is not a test pass, not a security audit, not host va
 never Microsoft certification.
 
 `validated: true` in a release manifest means exactly: the package identity was verified from
-its content, the helper's build evidence binds those exact bytes to the source commit, lint PASS,
-unit PASS, the `powerbi-visuals-tools` and Node versions are recorded, and an APPROVE (or APPROVE
-WITH NONBLOCKING NOTES) review names the exact source commit. BUILT is YES only with that build
-evidence, never from the package metadata. Anything missing keeps `validated: false` and is
-listed in `validationGaps`; a FAIL or a BLOCK verdict stops the release. Results are PASS / FAIL /
-NOT RUN only - never fill a missing result with PASS. `validated` never implies HOST TESTED,
-CERTIFICATION READY or MICROSOFT CERTIFIED.
+its content, the helper's build evidence binds those exact bytes to the source commit, lint and
+unit are recorded as PASS, the `powerbi-visuals-tools` and Node versions are recorded, and an
+APPROVE (or APPROVE WITH NONBLOCKING NOTES) review is recorded for the exact source commit. BUILT
+is YES only with that build evidence, never from the package metadata. Anything missing keeps
+`validated: false` and is listed in `validationGaps`; a FAIL or a BLOCK verdict stops the release.
+Results are PASS / FAIL / NOT RUN only - never fill a missing result with PASS. `validated` never
+implies HOST TESTED, CERTIFICATION READY or MICROSOFT CERTIFIED.
+
+The test results and the review verdict are ATTESTATIONS: the helper records them as 083 and 084
+reported them (through 086) and checks their vocabulary and the reviewed commit, but it does not
+run the tests, read their logs or authenticate the reviewer. Only the build evidence and the
+package identity are established by the helper itself. Report lint, unit and review results as
+"attested by 083 / 084", never as independently verified execution evidence.
 
 Only a `validated: true` release is an OFFICIAL RELEASE. A `validated: false` pair is a
 DEVELOPMENT/TEST CANDIDATE: it may be kept at Level 1/2, but it is never promoted to Prod (Level 3
@@ -8710,7 +8810,8 @@ A request in plain words is not a token.
   (build evidence), then `Add-PbivizRelease -Root <root> -Visual <v> -SourceSha <HEAD>` adds the
   new release pair; the release commit adds exactly those two files. Pass the evidence exactly as
   received: `-Tests @{ lint; unit; host; certification }` (PASS / FAIL / NOT RUN),
-  `-Review @{ reviewer; verdict; sourceSha }` (084's verdict for this exact commit). The
+  `-Review @{ reviewer; verdict; sourceSha }` (084's verdict for this exact commit); both are
+  recorded as attestations - the helper does not run the tests or authenticate the reviewer. The
   toolchain comes from the build evidence (`-ToolsVersion` / `-NodeVersion` only cross-check it).
   Never fill a gap: a missing item leaves `validated: false` with the gap listed and the pair is a
   DEVELOPMENT/TEST CANDIDATE; a FAIL, a BLOCK verdict, an invented `package` result, a review of
@@ -8843,8 +8944,10 @@ candidate tree exactly, with no unstaged edits and no untracked non-ignored file
   package is re-checked against the archived bytes. No Prod commit, PR or tag inside the file:
   those are derived or external.
 - `validated: true` only with: package identity verified, build evidence for those exact bytes at
-  the source commit, lint PASS, unit PASS, toolchain recorded, an approving review of the exact
-  source commit. It never implies host testing or any certification.
+  the source commit, lint and unit recorded as PASS, toolchain recorded, an approving review
+  recorded for the exact source commit. Test results and review verdicts are attestations recorded
+  as supplied by 083 / 084 - the helper neither runs the tests nor authenticates the reviewer. It
+  never implies host testing or any certification.
 - Reporting rule: call a release an official production release - and distribute it with
   `APPROVED:DISTRIBUTE` - only when `Test-PbivizReleaseIntegrity` returns Status PASS
   (Verification COMPLETE) with ReleaseClass OFFICIAL RELEASE at the Prod commit (Level 3) or the
@@ -10277,7 +10380,7 @@ $agentKnowledge = @{
             'Planner (081) first, except bounded maintenance audits (085) and pure ALM requests (086). Require the PBIVIZ_PLAN in its payload (archetype, grain, roles, measure aggregation classes, interactions, acceptance cases) before implementation.',
             'One writer per visual: 082 for new/feature work OR 085 for maintenance, never both on the same visual. Name the version-bump owner (082 or 085) in every implementation WORK ORDER; 086 verifies versions and never edits them.',
             'After a build dispatch 083 (Tester) and 084 (Reviewer) in parallel - both are read-only on the project. Route failures back to the writer as a prioritised defect list; keep fix cycles bounded.',
-            'ALM work goes to 086 only, never concurrently with 082/085 on the same visual. 086 starts every task with `Get-PbivizRepoState` from `.github/agent-docs/Pbiviz-Alm.ps1`; Level 1 (local), Level 2 (remote) and Level 3 (DEV/TEST/PROD) are derived from the repository, not assumed. For a release, pass 083''s lint/unit/host/certification results and 084''s REVIEW VERDICT (with the reviewed source commit) to 086 verbatim - missing evidence stays missing and the release is recorded as validated: false. 086 builds the release package itself with `Invoke-PbivizBuild` (the build evidence that makes BUILT = YES). A validated: false release is a DEVELOPMENT/TEST CANDIDATE: never promoted to Prod (Level 3 requires validated: true), never presented or distributed as an official release.',
+            'ALM work goes to 086 only, never concurrently with 082/085 on the same visual. 086 starts every task with `Get-PbivizRepoState` from `.github/agent-docs/Pbiviz-Alm.ps1`; Level 1 (local), Level 2 (remote) and Level 3 (DEV/TEST/PROD) are derived from the repository, not assumed. For a release, pass 083''s lint/unit/host/certification results and 084''s REVIEW VERDICT (with the reviewed source commit) to 086 verbatim - missing evidence stays missing and the release is recorded as validated: false. Those results and the verdict are recorded as attestations; the helper does not re-run or authenticate them, so report them as attested by 083 / 084. 086 builds the release package itself with `Invoke-PbivizBuild` (the build evidence that makes BUILT = YES). A validated: false release is a DEVELOPMENT/TEST CANDIDATE: never promoted to Prod (Level 3 requires validated: true), never presented or distributed as an official release.',
             'Keep the quality labels separate - CODE REVIEWED / BUILT / HOST TESTED / CERTIFICATION READY / MICROSOFT CERTIFIED - each with its own evidence; host checks stay NOT RUN unless executed in Power BI Desktop or Service.',
             'Report integration (importing a released `.pbiviz` into a PBIR report, report QA) is handed back to the Master for 020 (022 import, 026 QA); never call another team''s workers.',
             'Return one WORK RESULT: project path, changed paths, toolchain provenance (node / npm / pbiviz versions), commands with exit codes, package SHA-256 if built, quality labels, the Git level and commit/remote state from 086, open approvals.'
@@ -10430,7 +10533,7 @@ $agentKnowledge = @{
             'Level 1: status, diff, history. Checkpoint = stage one visual by path, show the staged list, check Git identity, commit `<visual>: <summary> (v<version>)`; refuse when unrelated visuals are staged. Restore = `git restore --source=<sha> -- <paths>` or `git revert <sha>`.',
             'Level 2 connect (`APPROVED:CONNECT:<url>`): `Test-PbivizRemoteUrl`, `git ls-remote --symref`, then `Connect-PbivizRemoteHistory -Fetch`; it applies the adoption case table (empty remote, related history, unrelated history merged with clean abort, unborn + empty, unborn + files = NEEDS CHECKPOINT) and asserts the outcome. Push only with `APPROVED:PUSH:<branch>`; daily sync = one-branch fetch + ff-only merge.',
             'Level 3 migration (`APPROVED:BRANCHES:<repo>`): create PBVIZ_Team_Dev at origin/main and PBVIZ_Team_Prod at the user-confirmed commit (or empty), PBVIZ_Team_Test only on request; `main` untouched; branch policies as a checklist, applied only with `APPROVED:POLICY:<branch>` and provider permission.',
-            'Selective promotion: `New-PbivizPromotionCandidate` (temp worktree from Prod, source-scope file lists, never releases/), build with `Invoke-PbivizBuild -Worktree <candidate>` (or `-Root` on the clean Dev checkout at the source commit, then pass that `dist/` package with `-PackagePath`), `Add-PbivizRelease -Worktree` with the evidence exactly as received (`-Tests` lint/unit/host/certification from 083, `-Review` reviewer/verdict/sourceSha from 084 - never fill a gap; the toolchain comes from the build evidence). Level 3 accepts only `validated: true`: an incomplete release is BLOCKED before anything is written - report the gaps, never work around them. Then `Test-PbivizPromotionGates` (G0-G6 must all PASS), commit on the release branch, then push / open the PR only with `APPROVED:PUSH` and `APPROVED:PR`.',
+            'Selective promotion: `New-PbivizPromotionCandidate` (temp worktree from Prod, source-scope file lists, never releases/), build with `Invoke-PbivizBuild -Worktree <candidate>` (or `-Root` on the clean Dev checkout at the source commit, then pass that `dist/` package with `-PackagePath`), `Add-PbivizRelease -Worktree` with the evidence exactly as received (`-Tests` lint/unit/host/certification from 083, `-Review` reviewer/verdict/sourceSha from 084 - never fill a gap; they are recorded as attestations, not re-run or authenticated by the helper; the toolchain comes from the build evidence). Level 3 accepts only `validated: true`: an incomplete release is BLOCKED before anything is written - report the gaps, never work around them. Then `Test-PbivizPromotionGates` (G0-G6 must all PASS), commit on the release branch, then push / open the PR only with `APPROVED:PUSH` and `APPROVED:PR`.',
             'Merge only with `APPROVED:MERGE:<repo>#<pr>` AND the provider reporting every required review and check satisfied (`gh pr view --json reviewDecision,mergeStateStatus,statusCheckRollup` or `az repos pr policy list`); never `--admin`, never `--bypass-policy`, never vote on your own PR.',
             'After the merge write nothing to Prod: report the Prod commit from `Get-PbivizReleaseProvenance`, verify it with `Test-PbivizReleaseIntegrity` and report its Status, Verification and ReleaseClass verbatim: only Status PASS (Verification COMPLETE) with ReleaseClass OFFICIAL RELEASE is a fully verified official release; PARTIAL (COMMIT ONLY, source revision NOT AVAILABLE) is reported as commit evidence only, never as verified; a DEVELOPMENT/TEST CANDIDATE is never presented or distributed as a production release. Tag only with `APPROVED:TAG` and provider permission, then `Remove-PbivizPromotionWorktree` (a committed candidate is removed without force; an uncommitted one only with `-DiscardApproval APPROVED:DISCARD-CANDIDATE:<branch>` from the user; a refusal is final - report it, never force).',
             'Level 1/2 release: `Invoke-PbivizBuild -Root` on the clean checkout, then `Add-PbivizRelease -Root` adds the new release pair with the same evidence parameters; without complete evidence the pair is kept as a DEVELOPMENT/TEST CANDIDATE (validated: false). `Invoke-PbivizBuild` never overwrites an existing `dist/<guid>.<version>.pbiviz`: ask the user before moving such a development build out of `dist/`, never delete it. A package outside `<Visual>/dist/` is used only with the user''s `APPROVED:EXTERNAL-PACKAGE:<visual>:<sha256>` for those exact bytes. Legacy dist packages are archived only on request, per visual (`Add-PbivizLegacyArchive`, validated: false; a package whose content does not match its file name is skipped).',

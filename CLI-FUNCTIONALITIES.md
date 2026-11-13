@@ -782,7 +782,8 @@ Node with the path it is given, not with the PowerShell location.
 
 | Term | Exactly what it means |
 |---|---|
-| **OFFICIAL RELEASE** | The manifest says `validated: true`, which the helper sets only when all of these hold: the package identity was verified from its content, the helper's build evidence binds those exact bytes to the source commit, lint PASS, unit PASS, the `powerbi-visuals-tools` and Node versions are recorded, and an `APPROVE` (or `APPROVE WITH NONBLOCKING NOTES`) review names the exact source commit. It never implies host testing or any certification. |
+| **OFFICIAL RELEASE** | The manifest says `validated: true`, which the helper sets only when all of these hold: the package identity was verified from its content, the helper's build evidence binds those exact bytes to the source commit, lint and unit are recorded as PASS, the `powerbi-visuals-tools` and Node versions are recorded, and an `APPROVE` (or `APPROVE WITH NONBLOCKING NOTES`) review is recorded for the exact source commit. It never implies host testing or any certification. |
+| **Recorded attestations** (`tests`, `review`) | The lint/unit/host/certification results and the review verdict are recorded exactly as the caller supplies them (normally 083 and 084 through 086). `Add-PbivizRelease` checks their vocabulary, that the review names the release source commit and that nothing FAILED or was BLOCKED; it does **not** run the tests, read their logs or authenticate the reviewer. A recorded PASS is an attestation by the agent that reported it, not execution evidence produced by the helper. Only the build evidence and the package identity are established by the helper itself. |
 | **DEVELOPMENT/TEST CANDIDATE** | `validated: false`, with every missing item listed in `validationGaps`. Allowed at Level 1/2 only; Level 3 never promotes it (`Add-PbivizRelease -Worktree` blocks it before writing, G6 blocks it in the candidate). It is never presented or distributed as a production release. |
 | **Verified local build** (`BuildEvidence = VERIFIED`) | The helper's own build record exists for exactly these package bytes: `Invoke-PbivizBuild` ran the visual's project-local CLI on this machine on the source revision. It is what the helper observed here, not a reproducible-build attestation, and it does not vouch for the contents of `node_modules`. |
 | **Package identity inspection** (`package.identity = VERIFIED`) | GUID, version and resource read from the `.pbiviz` content (`package.json` and `resources/<guid>.pbiviz.json`) and matched against `pbiviz.json` at the source commit. It says nothing about how or from what the package was built: BUILT is never derived from package metadata. |
@@ -825,9 +826,11 @@ Expected outcomes:
   build fails, times out, leaves processes running, changes the repository state, or produces no
   package or a package with another identity.
 - `Add-PbivizRelease` PASS: the pair is written and staged, `BuildEvidence = VERIFIED`,
-  `PackageSource = build output`. With the complete evidence above, `Validated = True` and
+  `PackageSource = build output`. With the complete recorded evidence above, `Validated = True` and
   `ReleaseClass = OFFICIAL RELEASE`; with anything missing (for example no review),
   `Validated = False`, `ReleaseClass = DEVELOPMENT/TEST CANDIDATE` and `ValidationGaps` lists it.
+  `Validated = True` therefore rests on the helper's own build evidence plus the attestations it
+  was given; report the lint, unit and review results as attested by 083 and 084.
 - Then commit exactly the two staged files (the helper never commits), and check the release
   commit: `Test-PbivizReleaseIntegrity -Root $root -Visual 'Bar' -Version <v> -Commit HEAD`. Report
   an official release only for `Status = PASS`, `Verification = COMPLETE`,
