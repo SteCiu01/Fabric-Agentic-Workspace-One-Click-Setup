@@ -3,7 +3,7 @@
 [![Latest Release](https://img.shields.io/github/v/release/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup?include_prereleases&label=version)](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/releases)
 [![Validate](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/actions/workflows/validate.yml/badge.svg)](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/actions/workflows/validate.yml)
 
-**Release:** v0.8.0 (not yet published — the latest published release is v0.7.3)
+**Version:** v0.8.0
 
 Used regularly by the maintainer in real Fabric work. Contributions and feedback welcome.
 
@@ -20,8 +20,6 @@ Used regularly by the maintainer in real Fabric work. Contributions and feedback
 <p align="center">
   <img src="assets/architecture-overview.png" alt="Fabric Agentic Workspace — Architecture Overview" width="100%"/>
 </p>
-
-> The overview image predates the custom visual team; the current organisation chart is in [3.4](#34-the-agent-organisation).
 
 ---
 
@@ -600,28 +598,9 @@ This workspace targets **VS Code GitHub Copilot Chat / Agent Mode**: the install
 
 ## 3.4 The agent organisation
 
-```mermaid
-flowchart TD
-    M[000 Fabric Workspace Master]
-    M --> A[001 Solution Architect]
-    M --> Q[002 Integration QA]
-    M --> L10[010 Semantic Model]
-    M --> L20[020 Reporting]
-    M --> L30[030 Data Engineering]
-    M --> L40[040 Administration & Governance]
-    M --> L50[050 ALM & DevOps]
-    M --> L60[060 Applications & Integration]
-    M --> L70[070 Capability Maintenance]
-    M --> L80[080 PBIVIZ Development]
-    L10 --> W10[011-016 six workers]
-    L20 --> W20[021-026 six workers]
-    L30 --> W30[031-038 eight workers]
-    L40 --> W40[041-043 three workers]
-    L50 --> W50[051-055 five workers]
-    L60 --> W60[061-063 three workers]
-    L70 --> W70[071-076 six workers]
-    L80 --> W80[081-086 six workers]
-```
+<p align="center">
+  <img src="assets/agent-organisation.png" alt="Agent organisation: the Fabric Workspace Master, the Solution Architect and Integration QA &amp; Change Controller, and the eight Team Leads with the delegated specialists assigned to each" width="100%"/>
+</p>
 
 11 dropdown entries (Master, two reviewers, eight Team Leads) and 43 delegated workers.
 

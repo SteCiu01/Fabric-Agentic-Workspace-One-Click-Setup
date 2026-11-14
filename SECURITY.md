@@ -3,13 +3,14 @@
 
 ## Supported Versions
 
-Security fixes and maintenance updates target the latest **published** release.
+Security fixes and maintenance updates target the **latest published release** only. The current release, and whether it is published as a stable release or as a prerelease, is identified on the [GitHub Releases](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/releases) page.
 
-| Version | Status | Supported |
-|---|---|---|
-| v0.8.0 | Not published | :x: Not yet |
-| v0.7.3 | Latest published release | :white_check_mark: |
-| v0.7.2 and earlier | Superseded | :x: — upgrade to the latest release |
+| What you run | Security support |
+|---|---|
+| The latest published release | :white_check_mark: Fixes are delivered in a subsequent release |
+| The latest published release when it is marked as a prerelease | :white_check_mark: Same best-effort support; prereleases are evolving and may change without notice |
+| Any earlier release or prerelease | :x: Upgrade to the latest published release |
+| Unpublished source (development branches, local working copies) | :x: Not a supported release |
 
 Keep your workspace up to date by downloading the latest published installer and re-running it.
 
