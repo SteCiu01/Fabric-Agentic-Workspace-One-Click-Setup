@@ -2364,6 +2364,68 @@ Describe 'Build isolation contains the SDK''s known side effects (Canary D2, fin
         Test-Path -LiteralPath $x.Records | Should -BeFalse
     }
 
+    It 'BLOCKS before the CLI starts when Cert:\CurrentUser\My cannot be read; nothing is run or recorded' {
+        $x = New-TIso
+        function Get-PbivizUserCertThumbprints { return $null }
+        Install-TFakeTools -Dir $x.Repo -Mode 'probe'
+        $b = Invoke-PbivizBuild -Root $x.Repo -Visual 'Bar'
+        $b.Status | Should -Be 'BLOCKED'
+        $b.Reason | Should -Match 'Cert:\\CurrentUser\\My cannot be read, so a certificate the SDK might create during the build could not be detected - refusing to run pbiviz package'
+        Test-Path -LiteralPath (Join-Path $x.Tools 'probe.json') | Should -BeFalse -Because 'the CLI never started'
+        Test-Path -LiteralPath $x.HomeRoot | Should -BeFalse
+        Test-Path -LiteralPath $x.Records | Should -BeFalse
+    }
+
+    It 'FAILS without build evidence when Cert:\CurrentUser\My cannot be read after the build' {
+        $x = New-TIso
+        $calls = @{ n = 0 }
+        function Get-PbivizUserCertThumbprints { $calls.n++; if ($calls.n -eq 1) { return , [string[]]@('AAAA') } else { return $null } }
+        Install-TFakeTools -Dir $x.Repo
+        $b = Invoke-PbivizBuild -Root $x.Repo -Visual 'Bar'
+        $b.Status | Should -Be 'FAILED'
+        $b.Reason | Should -Match 'Cert:\\CurrentUser\\My could not be read after the build, so a certificate the SDK might have created could not be ruled out - no build evidence recorded'
+        Test-Path -LiteralPath $x.Records | Should -BeFalse
+        Test-Path -LiteralPath $x.HomeRoot | Should -BeFalse
+    }
+
+    It 'compares an empty but readable store like any other: <Case>' -TestCases @(
+        @{ Case = 'still empty after the build'; After = @(); Status = 'PASS'; Match = 'Cert:\\CurrentUser\\My unchanged' },
+        @{ Case = 'a certificate added during the build'; After = @('BBBB'); Status = 'FAILED'; Match = 'a new certificate appeared in Cert:\\CurrentUser\\My during the build \(BBBB\)' }
+    ) {
+        $x = New-TIso
+        $calls = @{ n = 0; after = [string[]]$After }
+        function Get-PbivizUserCertThumbprints { $calls.n++; if ($calls.n -eq 1) { return , [string[]]@() } else { return , $calls.after } }
+        Install-TFakeTools -Dir $x.Repo
+        $b = Invoke-PbivizBuild -Root $x.Repo -Visual 'Bar'
+        $b.Status | Should -Be $Status -Because $b.Reason
+        "$($b.Reason) $($b.Evidence -join ' ')" | Should -Match $Match
+        Test-Path -LiteralPath $x.Records | Should -Be ($Status -eq 'PASS')
+    }
+
+    It 'reads the store as a string array: empty for an empty store, $null only when it cannot be opened (read-only)' {
+        $real = Get-PbivizUserCertThumbprints
+        $null -eq $real | Should -BeFalse -Because 'the current user''s store is readable here'
+        $real -is [string[]] | Should -BeTrue
+        Mock New-Object -ParameterFilter { $TypeName -like '*X509Store' } -MockWith {
+            $o = [pscustomobject]@{ Certificates = [System.Security.Cryptography.X509Certificates.X509Certificate2Collection]::new() }
+            $o | Add-Member -MemberType ScriptMethod -Name Open -Value { param($Flags) if ($Flags -ne [System.Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly) { throw 'opened for writing' } }
+            $o | Add-Member -MemberType ScriptMethod -Name Close -Value { }
+            return $o
+        }
+        $empty = Get-PbivizUserCertThumbprints
+        $null -eq $empty | Should -BeFalse -Because 'an empty store was read successfully'
+        $empty -is [string[]] | Should -BeTrue
+        $empty.Count | Should -Be 0
+        Mock New-Object -ParameterFilter { $TypeName -like '*X509Store' } -MockWith {
+            $o = [pscustomobject]@{ Certificates = $null }
+            $o | Add-Member -MemberType ScriptMethod -Name Open -Value { param($Flags) throw 'Access is denied.' }
+            $o | Add-Member -MemberType ScriptMethod -Name Close -Value { }
+            return $o
+        }
+        Get-PbivizUserCertThumbprints | Should -BeNullOrEmpty
+        $null -eq (Get-PbivizUserCertThumbprints) | Should -BeTrue
+    }
+
     It 'FAILS without build evidence when the SDK tries to install the API package' {
         $x = New-TIso
         Install-TFakeTools -Dir $x.Repo -Mode 'install-api'
@@ -2399,10 +2461,15 @@ Describe 'The toolchain preflight blocks every dependency download pbiviz packag
             New-TVisual $r 'Bar' 'barGuid0001' '1.0.0.1'
             if ($PbivizJson) { Write-TFile $r 'Bar/pbiviz.json' $PbivizJson }
             if ($Lock) {
-                $declared = "{ ""powerbi-visuals-api"": ""$($Lock.ApiDeclared)"", ""powerbi-visuals-tools"": ""$($Lock.ToolsDeclared)"" }"
-                $lockDeclared = "{ ""powerbi-visuals-api"": ""$($Lock.LockApiDeclared)"", ""powerbi-visuals-tools"": ""$($Lock.ToolsDeclared)"" }"
-                Write-TFile $r 'Bar/package.json' "{ ""name"": ""bar"", ""version"": ""1.0.0"", ""devDependencies"": $declared }"
-                Write-TFile $r 'Bar/package-lock.json' "{ ""name"": ""bar"", ""version"": ""1.0.0"", ""lockfileVersion"": 3, ""requires"": true, ""packages"": { """": { ""name"": ""bar"", ""version"": ""1.0.0"", ""devDependencies"": $lockDeclared }, ""node_modules/powerbi-visuals-api"": { ""version"": ""$($Lock.ApiLocked)"", ""dev"": true }, ""node_modules/powerbi-visuals-tools"": { ""version"": ""$($Lock.ToolsLocked)"", ""dev"": true } } }"
+                # A $null declaration leaves the package out of that side; ApiSection moves the API to "dependencies" on both sides.
+                $decl = { param($api) $s = @(); if ($api -and $Lock.ApiSection) { $s += """$($Lock.ApiSection)"": { ""powerbi-visuals-api"": ""$api"" }" }
+                    $dev = @("""powerbi-visuals-tools"": ""$($Lock.ToolsDeclared)"""); if ($api -and -not $Lock.ApiSection) { $dev = @("""powerbi-visuals-api"": ""$api""") + $dev }
+                    $s += """devDependencies"": { $($dev -join ', ') }"; $s -join ', ' }
+                $declared = & $decl $Lock.ApiDeclared
+                $lockDeclared = & $decl $Lock.LockApiDeclared
+                $rootEntry = if ($Lock.NoRoot) { '' } else { """"": { ""name"": ""bar"", ""version"": ""1.0.0"", $lockDeclared }, " }
+                Write-TFile $r 'Bar/package.json' "{ ""name"": ""bar"", ""version"": ""1.0.0"", $declared }"
+                Write-TFile $r 'Bar/package-lock.json' "{ ""name"": ""bar"", ""version"": ""1.0.0"", ""lockfileVersion"": 3, ""requires"": true, ""packages"": { $rootEntry""node_modules/powerbi-visuals-api"": { ""version"": ""$($Lock.ApiLocked)"", ""dev"": true }, ""node_modules/powerbi-visuals-tools"": { ""version"": ""$($Lock.ToolsLocked)"", ""dev"": true } } }"
             }
             $head = Save-TAll $r 'base'
             return [pscustomobject]@{ Repo = $r; Head = $head; Tools = (Join-Path $r 'Bar\node_modules\powerbi-visuals-tools'); HomeRoot = (Join-Path $r '.git\pbiviz-build-home'); Records = (Join-Path $r '.git\pbiviz-builds') }
@@ -2416,13 +2483,19 @@ Describe 'The toolchain preflight blocks every dependency download pbiviz packag
         @{ Case = 'a pbiviz.json without apiVersion'; Api = '5.11.0'; Lock = $null; Pbiviz = "{`n  ""visual"": { ""name"": ""Bar"", ""guid"": ""barGuid0001"", ""version"": ""1.0.0.1"" }`n}`n"; Match = 'pbiviz\.json has no apiVersion: pbiviz package would run npm install --save powerbi-visuals-api@latest' },
         @{ Case = 'an installed API other than the locked one'; Api = '5.11.1'; Lock = 'api-drift'; Pbiviz = $null; Match = 'node_modules holds powerbi-visuals-api 5\.11\.1 but package-lock\.json locks 5\.11\.0' },
         @{ Case = 'installed tools other than the locked ones'; Api = '5.11.0'; Lock = 'tools-drift'; Pbiviz = $null; Match = 'node_modules holds powerbi-visuals-tools 7\.2\.2 but package-lock\.json locks 7\.2\.1' },
-        @{ Case = 'a package.json that disagrees with package-lock.json'; Api = '5.11.0'; Lock = 'manifest-drift'; Pbiviz = $null; Match = "package\.json and package-lock\.json disagree on powerbi-visuals-api \('~5\.12\.0' vs '~5\.11\.0'\)" }
+        @{ Case = 'a package.json that disagrees with package-lock.json'; Api = '5.11.0'; Lock = 'manifest-drift'; Pbiviz = $null; Match = "package\.json and package-lock\.json disagree on powerbi-visuals-api \('~5\.12\.0' vs '~5\.11\.0'\)" },
+        @{ Case = 'a lockfile root entry missing the declared API'; Api = '5.11.0'; Lock = 'root-without-api'; Pbiviz = $null; Match = "package\.json declares powerbi-visuals-api '~5\.11\.0' but the root entry of package-lock\.json does not: the lockfile was not regenerated" },
+        @{ Case = 'a lockfile without a root entry'; Api = '5.11.0'; Lock = 'no-root'; Pbiviz = $null; Match = "package-lock\.json has no root package entry although package\.json declares powerbi-visuals-tools '\^7\.2\.2'" },
+        @{ Case = 'a lockfile root entry declaring an API package.json does not'; Api = '5.11.0'; Lock = 'manifest-without-api'; Pbiviz = $null; Match = "the root entry of package-lock\.json declares powerbi-visuals-api '~5\.11\.0' but package\.json does not" }
     ) {
         $lockSpec = $null
         if ($Lock) {
             $lockSpec = $script:GoodLock.Clone()
             if ($Lock -eq 'tools-drift') { $lockSpec.ToolsLocked = '7.2.1' }
             if ($Lock -eq 'manifest-drift') { $lockSpec.ApiDeclared = '~5.12.0' }
+            if ($Lock -eq 'root-without-api') { $lockSpec.LockApiDeclared = $null }
+            if ($Lock -eq 'no-root') { $lockSpec.NoRoot = $true }
+            if ($Lock -eq 'manifest-without-api') { $lockSpec.ApiDeclared = $null }
         }
         $x = New-TPre -PbivizJson $Pbiviz -Lock $lockSpec
         Install-TFakeTools -Dir $x.Repo -Mode 'probe' -ApiVersion $Api
@@ -2438,9 +2511,12 @@ Describe 'The toolchain preflight blocks every dependency download pbiviz packag
 
     It 'builds with a compatible installed toolchain: <Case>' -TestCases @(
         @{ Case = 'another patch of the same API major.minor, no lockfile'; Api = '5.11.4'; Lock = $false; Match = 'no package-lock\.json' },
-        @{ Case = 'the versions package-lock.json locks'; Api = '5.11.0'; Lock = $true; Match = 'are the versions package-lock\.json locks' }
+        @{ Case = 'the versions package-lock.json locks'; Api = '5.11.0'; Lock = 'good'; Match = 'are the versions package-lock\.json locks' },
+        @{ Case = 'the API in dependencies and the tools in devDependencies'; Api = '5.11.0'; Lock = 'split'; Match = 'are the versions package-lock\.json locks' }
     ) {
-        $x = New-TPre -Lock $(if ($Lock) { $script:GoodLock } else { $null })
+        $lockSpec = $null
+        if ($Lock) { $lockSpec = $script:GoodLock.Clone(); if ($Lock -eq 'split') { $lockSpec.ApiSection = 'dependencies' } }
+        $x = New-TPre -Lock $lockSpec
         Install-TFakeTools -Dir $x.Repo -ApiVersion $Api
         $b = Invoke-PbivizBuild -Root $x.Repo -Visual 'Bar'
         $b.Status | Should -Be 'PASS' -Because $b.Reason

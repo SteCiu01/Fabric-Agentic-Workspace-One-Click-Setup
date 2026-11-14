@@ -941,12 +941,15 @@ manifest still yields the same fingerprint and shared blobs.
 - **Toolchain preflight** - before the CLI starts, `Invoke-PbivizBuild` refuses (BLOCKED, nothing
   run or written) every case in which `pbiviz package` would itself download or change
   dependencies. `powerbi-visuals-tools` (verified with 7.2.1) runs `npm list powerbi-visuals-api` on every package and
-  install that package over the network, rewriting `package.json`, `package-lock.json` and
+  installs that package over the network, rewriting `package.json`, `package-lock.json` and
   `node_modules`, when `node_modules/powerbi-visuals-api` is missing, `pbiviz.json` has no
   `apiVersion` (then `@latest`) or the installed major.minor differs from `apiVersion` (then
   `~<apiVersion>`). The preflight blocks those three cases and, when the visual has a
-  `package-lock.json`, also a lockfile that disagrees with `package.json` on `powerbi-visuals-tools`
-  / `powerbi-visuals-api` or locks other versions than the installed ones. The fix is the user's
+  `package-lock.json` (version 2 or 3), also a lockfile whose root entry disagrees with
+  `package.json` on `powerbi-visuals-tools` / `powerbi-visuals-api` - a different range, a
+  declaration on only one side, or no root entry at all - or that locks other versions than the
+  installed ones. A visual without a lockfile, or with a version-1 lockfile, is built without that
+  cross-check, and the build evidence says so. The fix is the user's
   `APPROVED:INSTALL:<Name>` and `npm ci`, or a source commit that corrects `apiVersion` - never a
   helper workaround. Another patch of the same API major.minor is accepted, as the SDK accepts it.
 - **Isolation of the CLI** - the SDK verifies a dev-server certificate under
@@ -967,10 +970,13 @@ manifest still yields the same fingerprint and shared blobs.
   SDK certificate setting (`certificateFolder`, `certificate`, `privateKey`, `pfx`, `passphrase`
   in the toolchain's `config.json`) must be a single safe file name, distinct from the others,
   whose resolved path lies directly in the disposable certificate folder - otherwise BLOCKED. The
+  build is also BLOCKED before the CLI starts when `Cert:\CurrentUser\My` cannot be read (an empty
+  store is fine), because a certificate the SDK might add could not be detected. The
   build is FAILED with no evidence when the guard was called, the SDK rejected or regenerated the
-  certificate, the placeholder changed, a new certificate appeared in `Cert:\CurrentUser\My` (the
-  store is only read; the helper never deletes a certificate), or the SDK tried to install a
-  dependency. The caller's environment is restored and the home removed in every case.
+  certificate, the placeholder changed, a new certificate appeared in `Cert:\CurrentUser\My` or the
+  store could not be read after the run (the store is only read; the helper never deletes a
+  certificate), or the SDK tried to install a dependency. The caller's environment is restored and
+  the home removed in every case.
 - **What isolation does not cover** - it contains the SDK's known side effects; it is not an
   operating-system sandbox. The CLI, ESLint, webpack and every package in `node_modules` run with
   the user's rights and can read or write anything the user can. The SDK's certificate check starts

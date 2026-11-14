@@ -28,12 +28,13 @@ Describe 'Version single source of truth' {
         ($script:Manifest.schemaVersion -is [int] -or $script:Manifest.schemaVersion -is [long]) | Should -BeTrue
     }
 
-    It 'README status heading matches the installer version (no doc drift)' {
+    It 'README release line names the installer version (no doc drift)' {
         $readmePath = Join-Path $PSScriptRoot '..\README.md'
         (Test-Path $readmePath) | Should -BeTrue
         $readme = Get-Content $readmePath -Raw
         $ver = $script:Manifest.productVersion
-        $readme | Should -Match ([regex]::Escape("Current status (v$ver)")) -Because 'the README status heading must track the current version'
+        @([regex]::Matches($readme, '(?m)^\*\*Release:\*\*')).Count | Should -Be 1 -Because 'the README states its release in exactly one line'
+        $readme | Should -Match ("(?m)^\*\*Release:\*\* v" + [regex]::Escape($ver) + '\b') -Because 'the README release line must track the current version'
     }
 
     It 'CHANGELOG top entry matches the installer version (no doc drift)' {
@@ -62,12 +63,17 @@ Describe 'Version single source of truth' {
         $security = Get-Content (Join-Path $PSScriptRoot '..\SECURITY.md') -Raw
         $row = @(($security -split "`r?`n") | Where-Object { $_ -match "^\|\s*v$([regex]::Escape($ver))\b" })
         $row.Count | Should -Be 1 -Because 'SECURITY.md must state the support status of the current version'
+        $release = @(($readme -split "`r?`n") | Where-Object { $_ -match '^\*\*Release:\*\*' })
+        $release.Count | Should -Be 1
         if ($changelog -match ("(?m)^## \[v" + [regex]::Escape($ver) + "\] - Unreleased")) {
-            $row[0] | Should -Not -Match 'white_check_mark' -Because 'an unreleased candidate is not a supported release'
+            $row[0] | Should -Not -Match 'white_check_mark' -Because 'an unreleased version is not a supported release'
             $row[0] | Should -Match 'not published'
-            $readme | Should -Match 'development candidate' -Because 'the README must not present an unreleased version as released'
+            $release[0] | Should -Match 'not yet published' -Because 'the README must not present an unreleased version as released'
         } else {
+            $changelog | Should -Match ("(?m)^## \[v" + [regex]::Escape($ver) + "\] - \d{4}-\d{2}-\d{2}\s*$") -Because 'a published version carries its release date'
             $row[0] | Should -Match 'white_check_mark' -Because 'a released version is the supported one'
+            $row[0] | Should -Not -Match 'not published'
+            $release[0] | Should -Not -Match 'not yet published' -Because 'a published release is no longer described as unpublished'
         }
     }
 }

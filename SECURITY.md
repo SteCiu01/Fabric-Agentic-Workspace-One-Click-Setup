@@ -3,21 +3,15 @@
 
 ## Supported Versions
 
-Fabric Agentic Workspace — One-Click Setup is currently under active development and distributed as a **prerelease**.
-
-Security fixes and maintenance updates are targeted at the latest **published** prerelease.
+Security fixes and maintenance updates target the latest **published** release.
 
 | Version | Status | Supported |
 |---|---|---|
-| v0.7.3 | Latest published prerelease (the current baseline) | :white_check_mark: |
-| v0.8.0 | Unreleased development candidate on the `feature/v0.8.0-pbiviz` branch: implemented, manual (Canary) acceptance done, final release checks pending, **not published** | Not yet — becomes supported only when it is released |
-| v0.7.2 and earlier prereleases | Superseded | :x: — upgrade to v0.7.3 |
+| v0.8.0 | Not published | :x: Not yet |
+| v0.7.3 | Latest published release | :white_check_mark: |
+| v0.7.2 and earlier | Superseded | :x: — upgrade to the latest release |
 
-When v0.8.0 is released, this table is updated in the same release: v0.8.0 becomes the supported version and v0.7.3 moves to "upgrade recommended".
-
-Users are encouraged to keep their workspace up to date by downloading the latest published installer and re-running the setup process.
-
-**Note:** Prerelease status indicates that the project is still evolving. Security and reliability improvements are ongoing, and production readiness is not guaranteed.
+Keep your workspace up to date by downloading the latest published installer and re-running it.
 
 ## Reporting a Vulnerability
 
@@ -70,7 +64,7 @@ The project aims to follow these security principles:
 
 These principles describe the project's intended security model and do not constitute a guarantee that every implementation is free from vulnerabilities.
 
-## Custom visual (PBIVIZ) development — what the safeguards cover (v0.8.0 candidate)
+## Custom visual (PBIVIZ) development safeguards
 
 **User approval boundaries.** Agents stop and ask for an explicit token before they install or download packages (`APPROVED:INSTALL:<visual>`), connect a remote, push, open or merge a pull request, tag, distribute a release, archive a package from outside the build output (bound to its SHA-256) or discard an uncommitted release candidate. A request in plain words is not a token. A merge additionally needs every required review and check reported satisfied by the provider.
 
@@ -78,9 +72,9 @@ These principles describe the project's intended security model and do not const
 
 **Remote mutation controls.** The helper itself never pushes, opens pull requests, merges, tags or distributes; those are separate agent actions, each gated by its own token. After a merge nothing is written to the production branch: provenance and integrity are derived and re-checked.
 
-**Local build isolation.** A release build (`Invoke-PbivizBuild`) runs the visual's own `powerbi-visuals-tools` with a disposable profile in the repository's Git directory, a public-only placeholder certificate, a guard that stops the SDK's certificate generation (also against a same-named file in the visual folder), offline npm with a disposable cache and a private TEMP, under process-tree supervision with a timeout. It is blocked before the CLI starts when the SDK would itself download or change dependencies, and it fails without evidence on any sign of a certificate change, a new certificate in the current user's store or an attempted dependency install. The caller's environment is restored and the disposable folder removed.
+**Local build isolation.** A release build (`Invoke-PbivizBuild`) runs the visual's own `powerbi-visuals-tools` with a disposable profile in the repository's Git directory, a public-only placeholder certificate, a guard that stops the SDK's certificate generation (also against a same-named file in the visual folder), offline npm with a disposable cache and a private TEMP, under process-tree supervision with a timeout. It is blocked before the CLI starts when the SDK would itself download or change dependencies or when the current user's certificate store cannot be read, and it fails without evidence on any sign of a certificate change, a new certificate in the current user's store, an unreadable store after the run or an attempted dependency install. The caller's environment is restored and the disposable folder removed.
 
-**Certificate and profile side effects.** Release builds do not use the user's `%USERPROFILE%\pbiviz-certs` folder or create certificates; the current user's certificate store is only read. *Development* commands run outside the helper (`pbiviz start`, a development `pbiviz package`) behave as the SDK intends: they use and may regenerate the developer certificate in the real profile and, with PowerShell 7 installed, may add a certificate to the current user's store.
+**Certificate, profile and dependency side effects outside release builds.** Release builds do not use the user's `%USERPROFILE%\pbiviz-certs` folder or create certificates; the current user's certificate store is only read. *Development* commands run outside the helper (`pbiviz start`, a development `pbiviz package`) behave as the SDK intends: they use and may regenerate the developer certificate in the real profile, may add a certificate to the current user's store when PowerShell 7 is installed, and may install `powerbi-visuals-api` from the npm registry when the installed version does not match `pbiviz.json`.
 
 **What is not guaranteed.** The build isolation contains the SDK's known side effects; it is **not** an operating-system sandbox. The visual's toolchain (the CLI, ESLint, webpack and every package in `node_modules`) runs with the user's rights and can read or write anything the user can; the SDK's certificate check starts Windows PowerShell, which loads the user's PowerShell profile. Recorded lint, unit and review results are attestations by the agents that reported them, not evidence the helper produced. The dependency check (G4) is a static classification of the visual's own files, not a proof about the bundle, and does not inspect `node_modules`.
 
@@ -106,11 +100,11 @@ This project does not replace organizational security controls, Microsoft Fabric
 
 Agent-generated commands and modifications should be reviewed according to their potential impact, particularly when interacting with production environments or sensitive organizational data.
 
-The project is provided without any guarantee of complete security. Users remain responsible for evaluating its suitability for their environment and applying appropriate safeguards.
+The project is under active development and provided without any guarantee of complete security or production readiness. Users remain responsible for evaluating its suitability for their environment and applying appropriate safeguards.
 
 ## Security Updates
 
-Confirmed vulnerabilities affecting maintained versions may be addressed through subsequent prerelease updates.
+Confirmed vulnerabilities affecting maintained versions may be addressed through subsequent releases.
 
 Security-related fixes will be documented in the project's changelog or release notes when disclosure is appropriate.
 

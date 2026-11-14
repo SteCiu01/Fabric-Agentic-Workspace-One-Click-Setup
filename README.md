@@ -3,8 +3,9 @@
 [![Latest Release](https://img.shields.io/github/v/release/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup?include_prereleases&label=version)](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/releases)
 [![Validate](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/actions/workflows/validate.yml/badge.svg)](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/actions/workflows/validate.yml)
 
-Pre-release — used regularly by the maintainer in real Fabric work, evolving fast.
-Contributions and feedback welcome.
+**Release:** v0.8.0 (not yet published — the latest published release is v0.7.3)
+
+Used regularly by the maintainer in real Fabric work. Contributions and feedback welcome.
 
 **Bootstrap a Fabric-ready Copilot agent workspace for VS Code.**
 
@@ -20,7 +21,7 @@ Contributions and feedback welcome.
   <img src="assets/architecture-overview.png" alt="Fabric Agentic Workspace — Architecture Overview" width="100%"/>
 </p>
 
-> The overview image shows the v0.7 organisation (historical: it predates the PBIVIZ team). The current organisation chart is in [3.4](#34-the-agent-organisation).
+> The overview image predates the custom visual team; the current organisation chart is in [3.4](#34-the-agent-organisation).
 
 ---
 
@@ -65,7 +66,7 @@ Contributions and feedback welcome.
 - [3.8 How it works under the hood](#38-how-it-works-under-the-hood)
 - [3.9 A bit of history](#39-a-bit-of-history-how-fabricpower-bi-work-used-to-flow)
 - [3.10 Quality & validation](#310-quality--validation)
-- [3.11 Current status (v0.8.0)](#311-current-status-v080)
+- [3.11 Validation, compatibility and known limitations](#311-validation-compatibility-and-known-limitations)
 - [3.12 Disclaimer](#312-disclaimer)
 - [Contributing](#contributing) · [Files in this repository](#files-in-this-repository) · [License](#license) · [Third-party notices](#third-party-notices)
 
@@ -215,7 +216,7 @@ Writes/merges `copilot-instructions.md`, `AGENTS.md`, `.gitignore` rules, `.vsco
 
 The decision is recorded in the gitignored `.github/agent-docs/local/pbiviz-workspace.json` (keys added later by agents are preserved).
 
-**The one prompt that matters (v0.7.2):**
+**The one prompt that matters:**
 
 ```
   AGENT TEAM IN EVERY VS CODE WINDOW (recommended)
@@ -246,12 +247,12 @@ It never installs agents or skills anywhere else, never changes what built-in Co
 
 **VS Code Profiles:** each profile has its own `settings.json`; the installer lists them so you can add the same two keys there.
 
-**If you answer n** — the team still works in windows opened with *File > Open Folder* or from the installer's own workspace file, and the installer falls back to the v0.7.1 behaviour: it lists your saved `.code-workspace` files that open this folder and lack either setting and offers to add only what is missing to each (`Update their settings block (adds only what is missing)? (Y/n)`). Untitled *Add Folder* workspaces cannot be patched that way.
+**If you answer n** — the team still works in windows opened with *File > Open Folder* or from the installer's own workspace file, and the installer falls back to patching saved workspace files: it lists your saved `.code-workspace` files that open this folder and lack either setting and offers to add only what is missing to each (`Update their settings block (adds only what is missing)? (Y/n)`). Untitled *Add Folder* workspaces cannot be patched that way.
 
 ### Step 9 of 9 — Finishing Up
 
 1. `git init` if needed; initial commit, or an update commit limited to installer-owned paths (skipped with a warning if `git user.name/email` is not set).
-2. `Setup complete! v0.8.0` and the workspace path; with a PBIVIZ folder also `PBIVIZ: <folder> | n visual(s) | git: main, 1 commit(s), clean | Level 1 (local only - not an off-device backup)`.
+2. `Setup complete! v<version>` and the workspace path; with a PBIVIZ folder also `PBIVIZ: <folder> | n visual(s) | git: main, 1 commit(s), clean | Level 1 (local only - not an off-device backup)`.
 3. `Press Enter to open VS Code...` → opens the multi-root workspace.
 
 > Re-ran with VS Code already open? Run **Developer: Reload Window** so the agent dropdown rebuilds.
@@ -321,9 +322,9 @@ Same cause — `chat.agentSkillsLocations` is window-scoped too. The user-level 
 
 **Agent dropdown is stale after an update.** **Developer: Reload Window**.
 
-**Step 4 said `Could not create a worktree for '<branch>'; skipped` for every branch.** Fixed in v0.7.3: the cause was Windows' 260-character path limit on default Git (`Filename too long`, now printed under the skipped line). Re-run the installer — it sets `core.longpaths=true` on the existing mirror and creates the missing branch folders; nothing else changes. If a branch is still skipped, the printed git line tells you why.
+**Step 4 said `Could not create a worktree for '<branch>'; skipped` for every branch.** The usual cause is Windows' 260-character path limit on default Git (`Filename too long`, printed under the skipped line). Re-run the installer — it sets `core.longpaths=true` on the existing mirror and creates the missing branch folders; nothing else changes. If a branch is still skipped, the printed git line tells you why.
 
-**Step 2 said `No real Python found` although Python is installed, or sat on `Trying winget: Python.Python.3.12` for ages.** Fixed in v0.7.3: Python is now found off PATH (registry / install folders) and the winget attempt is bounded. If it still reports no Python, yours is older than 3.10 or newer than 3.14 — the installer says so and installs 3.12 alongside, or you can add a supported Python yourself and re-run.
+**Step 2 said `No real Python found` although Python is installed.** The installer looks on PATH, in the PEP 514 registry and in the usual install folders, and gives up on winget after 4 minutes. If it still reports no Python, yours is older than 3.10 or newer than 3.14 — the installer says so and installs 3.12 alongside, or you can add a supported Python yourself and re-run.
 
 **A tool failed to install on a corporate / locked-down PC.**
 TLS inspection, endpoint security, winget policy, PATH delays or missing elevation can interrupt an otherwise valid install. Not blocking for full-local work.
@@ -503,7 +504,7 @@ Power BI custom visual SDK projects (TypeScript, `capabilities.json`, `pbiviz.js
 
 **The workflow.** Plan (081) → develop (082, or 085 for maintenance of an existing visual - never both on one visual) → test (083) and review (084) in parallel → release (086 builds the package with `Invoke-PbivizBuild` and archives it with `Add-PbivizRelease`) → report integration (Reporting team). 080 dispatches each step, keeps one writer per visual and returns one consolidated result. 083 reports every check it could not run as `NOT RUN`; 084 returns `APPROVE`, `BLOCK` or `APPROVE WITH NONBLOCKING NOTES` for one exact source commit.
 
-**Using a packaged visual in a PBIP/PBIR report.** Use only packages from `<Visual>/releases/` whose integrity check is `PASS` with release class `OFFICIAL RELEASE`. 080 never edits reports: it hands the integration back to the Master, who routes it to 020 (022 adds the visual to the PBIR report, 026 runs report QA); in Power BI Desktop the equivalent is *Visualizations → Get more visuals → Import a visual from a file*. A file-imported visual lives inside each report, so every report that uses it has to be re-imported after a new release. This handoff was not demonstrated end to end in the v0.8.0 acceptance ([3.11](#311-current-status-v080)).
+**Using a packaged visual in a PBIP/PBIR report.** Use only packages from `<Visual>/releases/` whose integrity check is `PASS` with release class `OFFICIAL RELEASE`. 080 never edits reports: it hands the integration back to the Master, who routes it to 020 (022 adds the visual to the PBIR report, 026 runs report QA); in Power BI Desktop the equivalent is *Visualizations → Get more visuals → Import a visual from a file*. A file-imported visual lives inside each report, so every report that uses it has to be re-imported after a new release. This agent handoff has not yet been exercised end to end ([3.11](#311-validation-compatibility-and-known-limitations)).
 
 **What needs your approval.** Agents stop and ask for an exact token; a request in plain words is not a token.
 
@@ -552,9 +553,9 @@ At Levels 1 and 2 a release without complete evidence is kept as a **development
 
 **With a Test stage.** There is one release candidate per visual and version, always cut from Prod. Pull request 1 takes it to `PBVIZ_Team_Test`, where it is host-tested from Test's archive; pull request 2 takes the *same, unchanged* branch to Prod. A release rejected in Test is fixed with a new Dev commit and a new version. When Test still holds the rejected source, 086 reconciles only that visual through a local `test-sync/<visual>/<version>` branch and stops if anything else differs; the rejected pair stays in Test's archive as history and never reaches Prod ([CLI-FUNCTIONALITIES.md §29.7](CLI-FUNCTIONALITIES.md)).
 
-**What a release build does on your machine.** `Invoke-PbivizBuild` first refuses (BLOCKED, nothing run) when `pbiviz package` would itself download or change dependencies — a missing or mismatching `powerbi-visuals-api`, no `apiVersion` in `pbiviz.json`, or a lockfile that disagrees with `package.json` or the installed toolchain; the fix needs `APPROVED:INSTALL:<visual>`. It then runs the visual's CLI inside a Windows job object (on exit or timeout every process it started is stopped; a timeout or a process left running is a failed build with no evidence) with a disposable profile, a guard against certificate creation, offline npm and a private TEMP. It does not touch your `%USERPROFILE%\pbiviz-certs` folder or create certificates in your certificate store; any sign that the SDK tried is a failed build with no evidence. It is **not** a sandbox: the visual's toolchain and its packages still run with your rights. Archiving is transactional: a release or legacy archive that fails after writing removes exactly what it wrote and staged (pre-existing files are never touched); if a written file was changed meanwhile it is kept and the result is `FAILED` with `ROLLBACK INCOMPLETE`. Step-by-step commands: [CLI-FUNCTIONALITIES.md §29](CLI-FUNCTIONALITIES.md).
+**What a release build does on your machine.** `Invoke-PbivizBuild` first refuses (BLOCKED, nothing run) when `pbiviz package` would itself download or change dependencies — a missing or mismatching `powerbi-visuals-api`, no `apiVersion` in `pbiviz.json`, or a lockfile that disagrees with `package.json` or the installed toolchain; the fix needs `APPROVED:INSTALL:<visual>`. It then runs the visual's CLI inside a Windows job object (on exit or timeout every process it started is stopped; a timeout or a process left running is a failed build with no evidence) with a disposable profile, a guard against certificate creation, offline npm and a private TEMP. It does not touch your `%USERPROFILE%\pbiviz-certs` folder or create certificates in your certificate store; a certificate store it cannot read, or any sign that the SDK tried, ends the build without evidence. It is **not** a sandbox: the visual's toolchain and its packages still run with your rights. Archiving is transactional: a release or legacy archive that fails after writing removes exactly what it wrote and staged (pre-existing files are never touched); if a written file was changed meanwhile it is kept and the result is `FAILED` with `ROLLBACK INCOMPLETE`. Step-by-step commands: [CLI-FUNCTIONALITIES.md §29](CLI-FUNCTIONALITIES.md).
 
-**Known limitations.** Release builds are Windows-only. G4 is a static classification of the visual's own files, not a proof about the bundle, and does not analyse `node_modules`. Lint, unit and review results are recorded as attestations by 083/084, not re-run by the helper. The Test-stage reconciliation is a documented Git procedure, rehearsed on local branches only. Tooltips, context menu, high contrast and the per-project `pbiviz` MCP server were not exercised in the v0.8.0 acceptance.
+**Known limitations.** Release builds are Windows-only. G4 is a static classification of the visual's own files, not a proof about the bundle, and does not analyse `node_modules`. Lint, unit and review results are recorded as attestations by 083/084, not re-run by the helper. The Test-stage reconciliation is a documented Git procedure, rehearsed on local branches only. Full list: [3.11](#311-validation-compatibility-and-known-limitations).
 
 ---
 
@@ -572,7 +573,7 @@ So I built a multi-agent workspace that brings everything together. A **master a
 
 As I went deeper I realised the **agent → tools → skills** chain matters as much as the agents themselves. So each agent now owns a **minimum, deterministic set of tools** — the right CLI for its workload and the MCP servers where they help — instead of a vague "all tools to everyone" pile. Tool availability is discovered once and recorded in a machine-specific `tool-status.json` inventory. An agent then checks what's actually installed, uses it if present, and **falls back cleanly when it isn't** — which is what keeps the whole thing working on locked-down corporate PCs. A custom **`fabric-cli-policy`** skill encodes the decision rule: prefer `fab`, with `az` as a documented fallback. And each agent loads **only the skills its current subtask needs**.
 
-This is a **starting point, not a finished system.** V0.6 evolved the previous nine-agent set into a **Master-led organisation**: two cross-domain reviewers, seven Team Leads, and 37 focused workers, plus a **Capability Maintenance** team. V0.7 fine-tunes how that organisation works together: nested delegation is configured by the installer, every agent carries specialist knowledge drawn from the custom, Microsoft and Kurt skills, the teams share one WORK ORDER / WORK RESULT contract, destructive work is gated behind explicit approval tokens, and the vendor skill refresh is more robust. V0.8 adds an eighth team for Power BI custom visual (`.pbiviz`) development, with its own six skills and a deterministic Git helper for local, remote and team-level versioning.
+The organisation has grown from an initial nine-agent set into a **Master-led team**: two cross-domain reviewers, eight Team Leads — including **Capability Maintenance** and **Power BI custom visual (`.pbiviz`) development** — and 43 focused workers. Nested delegation is configured by the installer, every agent carries specialist knowledge drawn from the custom, Microsoft and Kurt skills, the teams share one WORK ORDER / WORK RESULT contract, and destructive work is gated behind explicit approval tokens. It keeps evolving with real use.
 
 Then I thought: *this should be replicable*. So I packaged everything into a one-click installer and a shareable agent configuration.
 
@@ -681,7 +682,7 @@ The 43 workers inherit the same gates and loading rules with a narrower artifact
 | **Skill precedence on conflict** | Explicit tie-break | House style (`fabric-tmdl`) wins on *how we do it here*; upstream wins on *is this valid* |
 | **Resilient discovery** | Don't fail because an upstream folder moved | Paths re-resolved every run; renames matched by prefix; missing → keyword discovery |
 
-> **The standout: the team works as a team.** Nested delegation is configured by the installer, every hop speaks the same contract, only the agent you selected talks to you, and destructive work stops until you hand over a literal token. Verified end-to-end — including a live Fabric publish — for v0.7.0.
+> **The standout: the team works as a team.** Nested delegation is configured by the installer, every hop speaks the same contract, only the agent you selected talks to you, and destructive work stops until you hand over a literal token. Verified end to end in real use, including a live Fabric publish.
 
 ## 3.7 Skills — where they come from
 
@@ -714,7 +715,7 @@ Before the Fabric VS Code extension and AI agents there were two places to build
 - **JSON Schema** (`schema/agent-manifest.schema.json`, draft-07) — shape of every agent entry; validated in CI.
 - **Pester suite** (`tests/`) — manifest integrity (54 agents, 3/8/43 tiers, unique ids), hierarchy (single root, no cycles), least-privilege tools, version/doc consistency, generated-file **content** (Knowledge/Playbook/Return-contract, approval-token rule, resolved skill refs, granted tools), emitted settings, vendor refresh failure paths, business-repository branch mirroring under default Git with >260-char paths (plus the phantom `origin` branch and skip diagnostics), Python detection with fake interpreters (Store stub rejected, supported version preferred, cached probe, bounded winget), optional-CLI detection (a warning on stderr is not a missing CLI; an existing CLI is never reinstalled), update-mode safety (JSONC, workspace merge, purge containment, saved-workspace detection/patch idempotency), the status script run offline, and the real installer driven through the Step 1 prompts.
 - **Real generator smoke test** (`tests/Generated.Tests.ps1`) — `-EmitAgentsTo` dry-run asserting on actual generated files.
-- **PBIVIZ suites** — `PBIVIZ.Alm.Tests.ps1` runs the shipped Git helper against throwaway repositories and bare remotes under TEMP (remote adoption, archive protection, selective promotion, binary-safe file lists, candidate state, post-merge provenance, safe candidate cleanup, package-content identity and evidence-based `validated`, manifest/package/commit integrity, pruned and fail-closed dependency scan with negative cases for every request form G4 classifies, helper builds with build evidence, process-tree termination of a detached child that inherits the build's output handles, failure-injected rollback of release and legacy archiving, the Level 3 `validated: true` gate, external-package approval, complete vs commit-only integrity, and the regressions from the v0.8.0 Canary and final hardening: build isolation from the user profile and certificate store, the toolchain preflight that blocks SDK-initiated downloads, lock-based cleanup of build homes with a parallel build, archive-only integrity, the Test-stage `test-sync` procedure and gate output in Windows PowerShell 5.1). Builds in these suites use a stand-in Node script for the project-local `pbiviz` CLI, not the real `powerbi-visuals-tools` (the real SDK was exercised in the Canary acceptance, [3.11](#311-current-status-v080)); `PBIVIZ.Install.Tests.ps1` drives the Step 1 prompt and exercises the Level 1 decision tree (including the exhaustive nested-repository scan), the outer ignore rule and the comment-preserving `mcp.json` merge.
+- **PBIVIZ suites** — `PBIVIZ.Alm.Tests.ps1` runs the shipped Git helper against throwaway repositories and bare remotes under TEMP (remote adoption, archive protection, selective promotion, binary-safe file lists, candidate state, post-merge provenance, safe candidate cleanup, package-content identity and evidence-based `validated`, manifest/package/commit integrity, pruned and fail-closed dependency scan with negative cases for every request form G4 classifies, helper builds with build evidence, process-tree termination of a detached child that inherits the build's output handles, failure-injected rollback of release and legacy archiving, the Level 3 `validated: true` gate, external-package approval, complete vs commit-only integrity, build isolation from the user profile and certificate store, the toolchain preflight that blocks SDK-initiated downloads, lock-based cleanup of build homes with a parallel build, archive-only integrity, the Test-stage `test-sync` procedure and gate output in Windows PowerShell 5.1). Builds in these suites use a stand-in Node script for the project-local `pbiviz` CLI, not the real `powerbi-visuals-tools` (the real SDK is covered by acceptance testing, [3.11](#311-validation-compatibility-and-known-limitations)); `PBIVIZ.Install.Tests.ps1` drives the Step 1 prompt and exercises the Level 1 decision tree (including the exhaustive nested-repository scan), the outer ignore rule and the comment-preserving `mcp.json` merge.
 - **CI** (`.github/workflows/validate.yml`) — PowerShell 7 on every push/PR; badge above.
 - **Install-time self-test + integrity manifest** — `guardrail-status.json` and SHA-256 `installed-manifest.json`.
 
@@ -723,52 +724,57 @@ Run locally: double-click `tests/Run-Tests.bat`, or
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Import-Module Pester; Invoke-Pester -Path '.\tests' -Output Detailed"
 ```
 
-Not covered: a full end-to-end install against live Fabric/VS Code, and the *behavioural* quality of prompts — validated by real-world use (v0.7.0: single-team TMDL edit, multi-team Architect → Leads → QA with a live publish and regression DAX, and a destructive-action approval bubble).
+Not covered by the suite: a full end-to-end install against live Fabric/VS Code, and the *behavioural* quality of prompts — both are validated by real-world use ([3.11](#311-validation-compatibility-and-known-limitations)).
 
-## 3.11 Current status (v0.8.0)
+## 3.11 Validation, compatibility and known limitations
 
-> **v0.8.0 is an unreleased development candidate** (branch `feature/v0.8.0-pbiviz`). **v0.7.3 is the latest published release.** v0.8.0 stays a development candidate until the final release checks pass and the maintainer authorises the release. Three words are used precisely below: *implemented* = built and covered by the automated suites; *Canary-verified* = exercised once, end to end, in a disposable installation on one Windows machine with the real tools, a real Azure DevOps remote and Power BI Desktop; *not exercised* = neither.
+The product is validated in two ways: the automated suite ([3.10](#310-quality--validation)) and acceptance testing in a disposable installation on Windows with the real tools, a real Azure DevOps remote and Power BI Desktop. Acceptance testing is evidence from real runs, not a formal certification.
 
-**v0.8.0 manual acceptance (Canary, November 2026).** This is evidence from one real run, not a formal certification:
+**Compatibility**
 
-| Area | Result |
+| Component | Supported / verified |
 |---|---|
-| Installation | Fresh install and installer re-run completed (54 agents, 9 custom skills, PBIVIZ folder; the re-run preserved the PBIVIZ repository and local customisations). The first attempt exposed defect D1 (an existing `az` was reinstalled machine-wide), now fixed. |
-| PBIVIZ team | Genuine invocations of every worker 080–086 (080 ×10, 081 ×1, 082 ×7, 083 ×11, 084 ×12, 085 ×1, 086 ×19). Observations: a worker occasionally ended without a WORK RESULT or returned nothing (re-dispatched once, then completed); review findings existed only in WORK RESULTs, so a later re-review could not see them (the Lead now carries them forward). |
-| Packaging | Real `powerbi-visuals-tools` 7.2.1 builds with helper build evidence for two visuals (five releases). |
-| Power BI Desktop | Import, rendering, visual and page filters, slicer interaction, resizing, empty and edge states and formatting PASS (Desktop 2.158). Accessibility only partially verified (labels and keyboard focusability). Tooltips, context menu and high-contrast behaviour **not exercised**. |
-| Levels 1, 2 and 3 | Canary-verified: checkpoints and releases; an Azure DevOps remote with a two-way collaborator round trip; DEV/TEST/PROD with pull requests, selective single-visual promotion, rollback by forward version and isolation of a second visual. The Test-stage reconciliation (`test-sync`) was rehearsed on local branches only. |
-| Not exercised | The per-project `pbiviz` MCP server; a complete 080 → Master → 020 Reporting handoff (the test report was integrated by hand); provider branch policies with real reviewers; PowerShell 7. |
-| Isolation incident | Before defect D2 was fixed, one early Canary build rewrote the real `%USERPROFILE%\pbiviz-certs` passphrase file (the SDK's own certificate check). Release builds now run isolated from the user profile (D2, hardened again in the final pass); the real certificate store was unchanged throughout. |
+| Installer | Windows 10/11 with Windows PowerShell 5.1 (CI also runs the suite on PowerShell 7); the created workspace works on any OS |
+| VS Code | 1.117.0 or later, with GitHub Copilot and Agent Mode |
+| Python (for `fab`) | 3.10–3.14 |
+| Git | 2.28 or later for the PBIVIZ repository |
+| Custom visual toolchain | Node.js 20.19 or later and the visual's project-local `powerbi-visuals-tools` (acceptance-tested with 7.2.1) |
+| Remotes for custom visuals | Azure DevOps (acceptance-tested); GitHub (supported by the helper, not acceptance-tested) |
+| Power BI Desktop | Acceptance-tested with 2.158 |
 
-Defects found by the Canary and fixed in v0.8.0: D1 `az` probe, D2 build isolation, D3 integrity of archive-only promotions, D4 Test-stage procedure, D11 gate list in Windows PowerShell 5.1 (see [CHANGELOG](CHANGELOG.md)). Each now has a permanent automated regression test.
+**What has been validated**
 
-| Area | Status |
-|---|---|
-| Custom visual (`.pbiviz`) team | **New in v0.8.0 (candidate)** — 080 Team Lead + six workers, six embedded skills, 024 narrowed to in-report Deneb/SVG/Python/R. Implemented and Canary-verified with the observations above |
-| PBIVIZ versioning | **New in v0.8.0 (candidate)** — Level 1 local repository, Level 2 remote adoption that keeps both histories, Level 3 single-visual promotion with append-only release archive and derived provenance, helper builds with build evidence, a Prod gate that admits only validated releases. Implemented (automated suites use a stand-in for the `pbiviz` CLI) and Canary-verified with the real CLI and Azure DevOps |
-| Release build safety | **New in v0.8.0 (candidate)** — process-tree supervision, a toolchain preflight that blocks every dependency download `pbiviz package` would start, and isolation from the user profile and certificate store. Implemented and re-verified with the real `powerbi-visuals-tools` 7.2.1 |
-| Microsoft Learn MCP | **New in v0.8.0 (candidate)** — inserted into `.vscode/mcp.json` without touching your servers, comments or formatting. Implemented |
-| Business repositories on default Git | **Fixed in v0.7.3** — long Fabric item paths check out on any machine (`core.longpaths` set on the mirror the installer owns, not on your Git); phantom `origin` branch gone; a skipped branch now shows git's own error |
-| Python detection | **Widened in v0.7.3** — finds Python off PATH (PEP 514 registry, python.org/conda folders), prefers a version the Fabric CLI supports (3.10–3.14), winget attempt bounded (no more frozen installer) |
-| Works however the folder is opened | **New in v0.7.2** — opt-in user-level enablement (nested-dispatch flag + workspace-relative skill locations, edited in place); status script reports the scope in effect; v0.7.1 saved-file patching kept as fallback |
-| One-click setup | **Validated manually** on Windows 10/11 incl. a locked-down corporate laptop |
-| Session startup | **Lean since v0.7.0** — one status call incl. the saved-`.code-workspace` check, then work |
-| Hierarchical routing | **Fine-tuned v0.7.0, hardened v0.7.1** — nested delegation configured by the installer; parallel dispatch only for independent artifacts with at most one terminal user; dropped write dispatches resumed inspect-first |
-| Agent → tools → skills model | **Implemented** — Knowledge, Playbook, mandatory validation, tool ladder, Avoid list per agent |
-| Team protocol | **Implemented v0.7.0** — WORK ORDER / WORK RESULT, three loops, `APPROVED:` tokens, session ledger |
-| Tool inventory | **Implemented** — real paths/versions; refreshed every session; Capability Maintenance owns install/update |
-| Repository onboarding | **Implemented v0.6.0, fixed v0.7.3** — clone-URL only, live-branch mirroring that survives Windows' 260-char limit, safe re-runs, preserved multi-root workspace |
-| Opt-in specialist CLIs | **Implemented** — detect → explain → Y/N → best-effort; declines remembered |
-| Manifest schema + CI tests | **Implemented v0.6.1, widened v0.7.0/v0.7.1** |
-| Custom skills (TMDL, Pipelines, CLI policy) | **Used in real work** |
-| Three ways of working | **Documented and verified** — live mode exercised in v0.7.0 |
-| Vendor skill integration | **Refresh hardened v0.7.0/v0.7.1** — verified repo root + expected `origin`, explicit success/failure |
-| Idempotent re-run | **Hardened v0.7.1** — merged session workspace and JSONC settings, user-saved workspace files detected and patched merge-only, commits limited to owned paths incl. staged deletions |
-| Authoritative install + self-pruning | **v0.6.2, hardened v0.7.1** — strict manifest diff, canonical path containment |
-| Portable download/rollback safety | **v0.6.0, hardened v0.7.1** — staged extraction, checksums, rollback, cleanup after activation, winget exit-0 only |
+| Area | Automated suite | Acceptance testing |
+|---|---|---|
+| Installer and updates | Generated output, update safety, Step 1 prompts, session status, self-pruning | Fresh installs and re-runs on Windows 10/11, including a locked-down corporate laptop; re-runs preserve the PBIVIZ repository and local customisations |
+| Agent organisation and team protocol | Manifest, hierarchy, least-privilege tools, generated agent content | Single-team and multi-team work with a live Fabric publish and regression DAX; an approval-gated destructive action |
+| Business repositories and Python detection | Long paths, branch mirroring, interpreter discovery | Corporate Azure DevOps repositories with deeply nested Fabric items |
+| Custom visual team (080–086) | PBIVIZ install and helper suites | Every worker invoked in real work; two visuals and five releases built with the real `powerbi-visuals-tools` |
+| ALM Levels 1–3 | Helper against throwaway repositories and bare remotes | Local checkpoints and releases; an Azure DevOps remote with a two-way collaborator round trip; DEV/TEST/PROD with pull requests, selective single-visual promotion, rollback by forward version and isolation of a second visual |
+| Release build safety | Isolation, toolchain preflight, build-home cleanup, certificate-store checks | Real SDK builds: a normal build, a same-named `pwsh.cmd` in the visual folder, an `apiVersion` mismatch |
+| Power BI Desktop | — | Import, rendering, visual and page filters, slicer interaction, resizing, empty and edge states, formatting |
 
-Pre-release: genuinely useful today, expect rough edges. [Open an issue](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/issues).
+**Not yet exercised**
+
+- Tooltips, context menu and high-contrast behaviour of custom visuals in Power BI Desktop; accessibility is only partially verified (labels and keyboard focus).
+- The per-project `pbiviz` MCP server.
+- A complete 080 → Master → 020 Reporting handoff (report integration was tested by hand).
+- Provider branch policies with real reviewers, and a GitHub remote for custom visuals.
+- The Test-stage `test-sync` reconciliation against a real remote (rehearsed on local branches).
+- A real installation under PowerShell 7.
+
+**Known limitations**
+
+- Agent *behaviour* is prompt-driven: a dispatched agent can occasionally end without a WORK RESULT or return nothing, and its parent re-dispatches it once. Structure is covered by the automated suite; behaviour keeps being tuned from real use.
+- Custom visual release builds are Windows-only. Their isolation contains the SDK's known side effects (profile, certificates, dependency downloads); it is **not** an operating-system sandbox, and the visual's toolchain runs with your rights ([SECURITY.md](SECURITY.md)).
+- G4 is a static classification of a visual's own files, not a proof about the bundle, and does not analyse `node_modules`.
+- Lint, unit and review results are attestations recorded as the Tester and Reviewer report them; the helper does not re-run tests or authenticate reviewers.
+- `pbiviz start` and development `pbiviz package` runs outside the helper use, and may regenerate, the developer certificate in your profile, as the SDK intends.
+- A file-imported custom visual lives inside each report, so every report that uses it must be re-imported after a release.
+- Windows PowerShell 5.1 cannot list or delete paths longer than 260 characters in mirrored business repositories; use PowerShell 7 or VS Code there.
+- Behind TLS-inspection proxies, Tabular Editor 2 and `pbi-tools` may need a manual download ([1.7](#17-troubleshooting)).
+
+Found a problem? [Open an issue](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/issues).
 
 ## 3.12 Disclaimer
 
@@ -776,7 +782,7 @@ This is a **personal and community project**, not an official Microsoft product 
 
 **AI involvement:** built with significant help from **GitHub Copilot** — installer scripts, agent files, skills, documentation and much of the heavy lifting. The core ideas, design decisions and testing are the maintainer's.
 
-**Early stage — use with care:** pre-release. **Do not use in production without understanding what the scripts do.** Review the code before running it.
+**Use with care:** review the code before running it, and do not use it in production without understanding what the scripts do.
 
 **Third-party dependencies:** the two cloned repositories are independent open-source projects; this project has no control over their content or availability. See [3.7](#37-skills--where-they-come-from) for licensing.
 

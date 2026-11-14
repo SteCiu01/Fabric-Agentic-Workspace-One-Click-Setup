@@ -4317,7 +4317,14 @@ function Test-PbivizBuildToolchain {
                 if ($manifest -and $manifest.$sec -and $manifest.$sec.PSObject.Properties[$name]) { $declared = [string]$manifest.$sec.$name }
                 if ($rootLock -and $rootLock.$sec -and $rootLock.$sec.PSObject.Properties[$name]) { $lockDeclared = [string]$rootLock.$sec.$name }
             }
-            if ($declared -and $lockDeclared -and $declared -cne $lockDeclared) { $out.Reason = "package.json and package-lock.json disagree on $name ('$declared' vs '$lockDeclared'): the lockfile was not regenerated for the declared dependencies - $fix"; return $out }
+            if ($declared -cne $lockDeclared) {
+                # npm writes the root entry (packages[""]) from package.json, so any difference means the lockfile is stale.
+                $why = if (-not $rootLock) { "package-lock.json has no root package entry although package.json declares $name '$declared'" }
+                elseif (-not $lockDeclared) { "package.json declares $name '$declared' but the root entry of package-lock.json does not" }
+                elseif (-not $declared) { "the root entry of package-lock.json declares $name '$lockDeclared' but package.json does not" }
+                else { "package.json and package-lock.json disagree on $name ('$declared' vs '$lockDeclared')" }
+                $out.Reason = "${why}: the lockfile was not regenerated for the declared dependencies - $fix"; return $out
+            }
             $entry = Get-PbivizJsonMemberText -Text $packages -Name "node_modules/$name"
             $locked = if ($entry) { [string]($entry | ConvertFrom-Json).version } else { '' }
             if (-not $locked) { if ($declared) { $out.Reason = "package-lock.json does not lock $name although package.json declares it - $fix"; return $out }; continue }
@@ -4328,13 +4335,14 @@ function Test-PbivizBuildToolchain {
     return $out
 }
 
-# Thumbprints in Cert:\CurrentUser\My (read-only), or $null when the store cannot be read.
+# Thumbprints in Cert:\CurrentUser\My (read-only) as a string array - empty for an empty store - or
+# $null when the store cannot be read.
 function Get-PbivizUserCertThumbprints {
     $store = $null
     try {
         $store = New-Object System.Security.Cryptography.X509Certificates.X509Store('My', 'CurrentUser')
         $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly)
-        return @($store.Certificates | ForEach-Object { $_.Thumbprint })
+        return , [string[]]@($store.Certificates | ForEach-Object { $_.Thumbprint })
     } catch { return $null } finally { if ($store) { $store.Close() } }
 }
 
@@ -4457,7 +4465,7 @@ function Invoke-PbivizBuild {
         $recDir = Get-PbivizBuildRecordDir -Directory $dir
         if (-not $recDir) { $res.Reason = 'cannot locate the Git directory for the build record'; return $res }
         $started = [DateTime]::UtcNow
-        # Isolation (Canary D2). On every run `pbiviz package` resolves a dev-server certificate under
+        # Isolation. On every run `pbiviz package` resolves a dev-server certificate under
         # os.homedir()\<certificateFolder>: it checks the PFX with Windows PowerShell and, when that fails,
         # deletes the certificate files and generates a new certificate with `pwsh New-SelfSignedCertificate
         # -CertStoreLocation Cert:\CurrentUser\My`. A package needs no TLS material, so the CLI runs with:
@@ -4472,9 +4480,10 @@ function Invoke-PbivizBuild {
         #  - npm offline with a disposable cache (logs included), no update check: the SDK's npm calls
         #    cannot reach the registry; the caller's user npmrc is kept (npm_config_userconfig);
         #  - TEMP/TMP inside the home.
-        # Fail closed: no placeholder -> no build; the guard called, a certificate rejected or generated,
-        # the placeholder changed, a dependency install attempted or a new certificate in
-        # Cert:\CurrentUser\My -> FAILED without build evidence. The caller's environment is restored and
+        # Fail closed: no placeholder or an unreadable Cert:\CurrentUser\My -> no build; the guard called, a
+        # certificate rejected or generated, the placeholder changed, a dependency install attempted or a new
+        # certificate in (or an unreadable) Cert:\CurrentUser\My after the run -> FAILED without build evidence.
+        # The caller's environment is restored and
         # the home removed whatever happens. This contains the SDK's KNOWN side effects; it is not an
         # operating-system sandbox: the CLI and its packages still run with the user's rights.
         $sdkCfg = $null
@@ -4505,10 +4514,12 @@ function Invoke-PbivizBuild {
         if (-not (Test-PbivizSamePath (Split-Path $certDir -Parent) $profileDir)) { $bad += 'certificateFolder' }
         foreach ($p in @($certDir) + @($certFiles.Values)) { foreach ($c in $control) { if (Test-PbivizSamePath $p $c) { $bad += "$p" } } }
         if ($bad.Count) { $res.Reason = "the SDK certificate settings resolve outside the disposable certificate folder or onto an isolation file ($($bad -join ', ')) - refusing to run pbiviz package"; return $res }
+        $storeBefore = Get-PbivizUserCertThumbprints
+        if ($null -eq $storeBefore) { $res.Reason = 'Cert:\CurrentUser\My cannot be read, so a certificate the SDK might create during the build could not be detected - refusing to run pbiviz package'; return $res }
         $envNames = @('USERPROFILE', 'HOME', 'PATH', 'PATHEXT', 'NoDefaultCurrentDirectoryInExePath', 'PBIVIZ_PWSH_GUARD_MARKER', 'TEMP', 'TMP', 'npm_config_userconfig', 'npm_config_cache', 'npm_config_offline', 'npm_config_update_notifier', 'npm_config_audit', 'npm_config_fund')
         $savedEnv = @{}
         foreach ($n in $envNames) { $savedEnv[$n] = [Environment]::GetEnvironmentVariable($n, 'Process') }
-        $rsa = $null; $self = $null; $pub = $null; $certProblem = $null; $depProblem = $null; $run = $null; $lockStream = $null; $storeBefore = $null; $storeAfter = $null; $guarded = $null
+        $rsa = $null; $self = $null; $pub = $null; $certProblem = $null; $depProblem = $null; $run = $null; $lockStream = $null; $storeAfter = $null; $guarded = $null
         try {
             [void][IO.Directory]::CreateDirectory($buildHome)
             $lockStream = [IO.File]::Open((Join-Path $buildHome 'owner.lock'), [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
@@ -4532,15 +4543,15 @@ function Invoke-PbivizBuild {
                 npm_config_userconfig = $(if ($savedEnv.npm_config_userconfig) { $savedEnv.npm_config_userconfig } elseif ($savedEnv.USERPROFILE) { Join-Path $savedEnv.USERPROFILE '.npmrc' } else { $null })
                 npm_config_cache = (Join-Path $buildHome 'npm-cache'); npm_config_offline = 'true'; npm_config_update_notifier = 'false'; npm_config_audit = 'false'; npm_config_fund = 'false'
             }
-            $storeBefore = Get-PbivizUserCertThumbprints
             foreach ($n in $childEnv.Keys) { [Environment]::SetEnvironmentVariable($n, $childEnv[$n], 'Process') }
             $run = Invoke-PbivizProcess -FilePath $node.Source -Arguments @($cli, 'package') -WorkingDirectory $visualDir -TimeoutSeconds $TimeoutSeconds
             foreach ($n in $envNames) { [Environment]::SetEnvironmentVariable($n, $savedEnv[$n], 'Process') }
             $storeAfter = Get-PbivizUserCertThumbprints
             $outText = "$($run.Out)`n$($run.Err)"
-            $newCerts = if ($null -ne $storeBefore -and $null -ne $storeAfter) { @($storeAfter | Where-Object { $storeBefore -notcontains $_ }) } else { @() }
+            $newCerts = if ($null -ne $storeAfter) { @($storeAfter | Where-Object { $storeBefore -notcontains $_ }) } else { @() }
             if (Test-Path -LiteralPath $guardMarker) { $certProblem = 'the SDK tried to start pwsh to generate a certificate (the guard stopped it)' }
             elseif ($newCerts.Count) { $certProblem = "a new certificate appeared in Cert:\CurrentUser\My during the build ($($newCerts -join ', ')) - it was NOT removed: check it and delete it yourself if pbiviz created it" }
+            elseif ($null -eq $storeAfter) { $certProblem = 'Cert:\CurrentUser\My could not be read after the build, so a certificate the SDK might have created could not be ruled out' }
             elseif ($outText -match 'Generating a new certificate|Certificate verification error|Create certificate error') { $certProblem = 'the SDK rejected the placeholder certificate and tried to generate one' }
             elseif (-not (Test-Path -LiteralPath $certFiles.pfx) -or (Get-PbivizFileSha256 $certFiles.pfx) -ne $pfxHash) { $certProblem = 'the placeholder certificate was removed or changed during the build' }
             if ($outText -match 'Installing API:|npm install (--save )?powerbi-visuals-api') { $depProblem = 'the SDK tried to install powerbi-visuals-api (npm install, kept offline by the helper)' }
@@ -4554,7 +4565,7 @@ function Invoke-PbivizBuild {
             try { [IO.Directory]::Delete($homeRoot, $false) } catch { }
         }
         if ($certProblem -or $depProblem) { $res.Status = 'FAILED'; $res.ExitCode = $run.ExitCode; $res.Reason = "$(@($certProblem, $depProblem | Where-Object { $_ }) -join '; ') - no build evidence recorded; move any dist/$canon out of dist/ before building again"; return $res }
-        $res.Evidence.Add("isolation: disposable profile, guard first on PATH ($($guarded.Dropped) PowerShell 7 folder(s) left out), current-directory command search off, npm offline with a disposable cache; home removed; Cert:\CurrentUser\My $(if ($null -eq $storeBefore -or $null -eq $storeAfter) { 'could not be read (not compared)' } else { 'unchanged' })")
+        $res.Evidence.Add("isolation: disposable profile, guard first on PATH ($($guarded.Dropped) PowerShell 7 folder(s) left out), current-directory command search off, npm offline with a disposable cache; home removed; Cert:\CurrentUser\My unchanged")
         $finished = [DateTime]::UtcNow
         $res.ExitCode = $run.ExitCode
         $log = "$($run.Out)`n$($run.Err)"
@@ -8914,15 +8925,18 @@ read in place, never copied.
   itself download or rewrite dependencies: `powerbi-visuals-api` missing from `node_modules`, no
   `apiVersion` in `pbiviz.json`, an installed API whose major.minor differs from `apiVersion` (the
   SDK would run `npm install --save powerbi-visuals-api@~<apiVersion>`), or a `package-lock.json`
-  that disagrees with `package.json` or with the installed `powerbi-visuals-tools` /
+  whose root entry disagrees with `package.json` (a different range, a declaration on only one side,
+  no root entry) or that does not match the installed `powerbi-visuals-tools` /
   `powerbi-visuals-api`. The fix is `npm ci` after `APPROVED:INSTALL:<visual>` (or a source commit
-  that corrects `apiVersion`) - never a workaround.
+  that corrects `apiVersion`) - never a workaround. A `Cert:\CurrentUser\My` that cannot be read
+  also BLOCKS the build (an empty store is fine).
 - The CLI runs isolated from the user profile: a disposable home in the Git directory (the SDK's
   certificate check finds a public-only placeholder PFX), a guard `pwsh.cmd` first on PATH with
   current-directory command search off and PowerShell 7 folders left out of PATH (the SDK cannot
   create a certificate in `Cert:\CurrentUser\My`), npm offline with a disposable cache, TEMP
   inside that home. The guard firing, a rejected or regenerated certificate, a new certificate in
-  `Cert:\CurrentUser\My` (reported, never removed by the helper) or an attempted dependency install
+  `Cert:\CurrentUser\My` (reported, never removed by the helper), a store that cannot be read after
+  the run or an attempted dependency install
   is FAILED with no build evidence. This contains the SDK's KNOWN side effects; it is not an
   operating-system sandbox: the CLI, ESLint, webpack and every package in `node_modules` still run
   with the user's rights, and the SDK's certificate check starts Windows PowerShell, which loads the
@@ -9098,11 +9112,13 @@ A request in plain words is not a token.
   another commit or a package built from another commit is BLOCKED.
 - `Invoke-PbivizBuild` first runs a toolchain preflight: BLOCKED when `pbiviz package` would itself
   download or rewrite dependencies (missing or mismatching `powerbi-visuals-api`, no `apiVersion`,
-  a lockfile that disagrees with `package.json` or the installed toolchain) - report the reason and
-  the `APPROVED:INSTALL:<visual>` it names. The CLI then runs isolated from the user profile
+  a lockfile whose root entry disagrees with `package.json` - including a declaration on only one
+  side or no root entry - or that does not match the installed toolchain) - report the reason and
+  the `APPROVED:INSTALL:<visual>` it names. It is also BLOCKED when `Cert:\CurrentUser\My` cannot be
+  read: report it to the user, never work around it. The CLI then runs isolated from the user profile
   (pbiviz-release-safety, Packages); an isolation failure (guard called, certificate rejected or
-  created, dependency install attempted) is FAILED with no evidence - report it, never retry around
-  it, and never delete a certificate yourself.
+  created, the certificate store unreadable after the run, dependency install attempted) is FAILED
+  with no evidence - report it, never retry around it, and never delete a certificate yourself.
 
 ## Level 2 -- connect without losing history
 Principle: no operation moves an existing local branch to a commit that does not contain its
@@ -10858,7 +10874,7 @@ $agentKnowledge = @{
             'After the merge write nothing to Prod: report the Prod commit from `Get-PbivizReleaseProvenance`, verify it with `Test-PbivizReleaseIntegrity` and report its Status, Verification and ReleaseClass verbatim: only Status PASS (Verification COMPLETE) with ReleaseClass OFFICIAL RELEASE is a fully verified official release; PARTIAL (COMMIT ONLY, source revision NOT AVAILABLE) is reported as commit evidence only, never as verified; a DEVELOPMENT/TEST CANDIDATE is never presented or distributed as a production release. Tag only with `APPROVED:TAG` and provider permission, then `Remove-PbivizPromotionWorktree` (a committed candidate is removed without force; an uncommitted one only with `-DiscardApproval APPROVED:DISCARD-CANDIDATE:<branch>` from the user; a refusal is final - report it, never force).',
             'Level 1/2 release: `Invoke-PbivizBuild -Root` on the clean checkout, then `Add-PbivizRelease -Root` adds the new release pair with the same evidence parameters; without complete evidence the pair is kept as a DEVELOPMENT/TEST CANDIDATE (validated: false). `Invoke-PbivizBuild` never overwrites an existing `dist/<guid>.<version>.pbiviz`: ask the user before moving such a development build out of `dist/`, never delete it. A package outside `<Visual>/dist/` is used only with the user''s `APPROVED:EXTERNAL-PACKAGE:<visual>:<sha256>` for those exact bytes. Legacy dist packages are archived only on request, per visual (`Add-PbivizLegacyArchive`, validated: false; a package whose content does not match its file name is skipped).',
             'Report the four states separately - code versioned, package released, code promoted, distributed; distribution only on explicit request (`APPROVED:DISTRIBUTE:<destination>`) and only for a fully verified OFFICIAL RELEASE.',
-            'Failures are reported, never worked around: a FAILED `Invoke-PbivizBuild` (build error, timeout, a process of its tree left running, incomplete output, the pwsh guard called, the placeholder certificate rejected, a new certificate in Cert:\CurrentUser\My, an attempted dependency install) recorded no evidence - report the reason verbatim and never delete a certificate yourself. A BLOCKED toolchain preflight (pbiviz package would itself download or rewrite dependencies) names `APPROVED:INSTALL:<visual>`: return NEEDS APPROVAL, never edit `apiVersion` or dependencies yourself. A failed `Add-PbivizRelease` / `Add-PbivizLegacyArchive` has already rolled back its own writes ("rolled back: nothing this call wrote or staged was left behind"); `ROLLBACK INCOMPLETE` is FAILED - report the files it names and stop, never delete them yourself. G4 "dependencies resolve outside the visual folder" or "analysis incomplete (fail closed)" is BLOCKED: report the listed requests to 080 (an approved allowlist covers single files a static request resolves to - never folders, computed requests or undeclared packages).'
+            'Failures are reported, never worked around: a FAILED `Invoke-PbivizBuild` (build error, timeout, a process of its tree left running, incomplete output, the pwsh guard called, the placeholder certificate rejected, a new certificate in Cert:\CurrentUser\My or the store unreadable after the run, an attempted dependency install) recorded no evidence - report the reason verbatim and never delete a certificate yourself. A build BLOCKED because Cert:\CurrentUser\My cannot be read is reported to the user as it is, never worked around. A BLOCKED toolchain preflight (pbiviz package would itself download or rewrite dependencies) names `APPROVED:INSTALL:<visual>`: return NEEDS APPROVAL, never edit `apiVersion` or dependencies yourself. A failed `Add-PbivizRelease` / `Add-PbivizLegacyArchive` has already rolled back its own writes ("rolled back: nothing this call wrote or staged was left behind"); `ROLLBACK INCOMPLETE` is FAILED - report the files it names and stop, never delete them yourself. G4 "dependencies resolve outside the visual folder" or "analysis incomplete (fail closed)" is BLOCKED: report the listed requests to 080 (an approved allowlist covers single files a static request resolves to - never folders, computed requests or undeclared packages).'
         )
         validate = @(
             'Every history-changing helper call returned PASS with its postcondition evidence (no commit loss, accounted refs); backup refs created are reported.',

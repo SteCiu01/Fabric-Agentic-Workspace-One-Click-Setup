@@ -1,8 +1,7 @@
 # Contributing to Fabric Agentic Workspace One-Click Setup
 
-First off — thank you for considering contributing! This project is in
-**pre-release** and actively looking for feedback, ideas, and improvements
-from the community.
+First off — thank you for considering contributing! This project is actively
+looking for feedback, ideas, and improvements from the community.
 
 ## How can I contribute?
 
@@ -43,8 +42,8 @@ agent workflows or specialist agents.
 ### What's a good first contribution?
 
 Look for issues labelled [`good first issue`](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/labels/good%20first%20issue)
-or check the [current status table in the README](README.md#311-current-status-v080)
-for areas marked "not exercised".
+or check [Validation, compatibility and known limitations](README.md#311-validation-compatibility-and-known-limitations)
+in the README for areas that have not yet been exercised.
 
 Some ideas:
 - Cross-platform setup script (bash/zsh for macOS/Linux)
