@@ -559,13 +559,20 @@ function Test-CliResilient {
         param([string]$CommandName)
         $cmd = Get-Command $CommandName -ErrorAction SilentlyContinue
         if (-not $cmd) { return $false }
+        # A warning on stderr (e.g. az "Unable to check if your CLI is up-to-date") must not count as
+        # "not runnable": under the script-wide ErrorActionPreference=Stop, PowerShell 5.1 turns native
+        # stderr into a terminating error even with 2>$null.
+        $prevEap = $ErrorActionPreference
         try {
+            $ErrorActionPreference = 'Continue'
             $output = & $cmd.Source --version 2>$null | Out-String
-            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($output)) { return $false }
+            $code = $LASTEXITCODE
+            $ErrorActionPreference = $prevEap
+            if ($code -ne 0 -or [string]::IsNullOrWhiteSpace($output)) { return $false }
             # Same-named impostors exist (pyinvoke ships a `fab`): require the product's own banner.
             if ($VersionPattern -and ($output -notmatch $VersionPattern)) { return $false }
             return $true
-        } catch { return $false }
+        } catch { return $false } finally { $ErrorActionPreference = $prevEap }
     }
     for ($i = 0; $i -lt $Retries; $i++) {
         if (& $isRunnable $Name) { return $true }
@@ -4316,7 +4323,76 @@ function Invoke-PbivizBuild {
         $recDir = Get-PbivizBuildRecordDir -Directory $dir
         if (-not $recDir) { $res.Reason = 'cannot locate the Git directory for the build record'; return $res }
         $started = [DateTime]::UtcNow
-        $run = Invoke-PbivizProcess -FilePath $node.Source -Arguments @($cli, 'package') -WorkingDirectory $visualDir -TimeoutSeconds $TimeoutSeconds
+        # D2 (Canary patch): `pbiviz package` resolves a dev-server certificate under
+        # os.homedir()\pbiviz-certs on every run and, when none is valid, generates one - on Windows with
+        # `pwsh New-SelfSignedCertificate -CertStoreLocation Cert:\CurrentUser\My`. A package needs no TLS
+        # material. The child gets a disposable profile in the Git directory (pbiviz-build-home, never
+        # inside the build-record folder, so a failed build still leaves no record folder), seeded with a
+        # public-only placeholder PFX (ephemeral key, no private key in the file, nothing imported into
+        # any store), and a guard `pwsh.cmd` first on its PATH that only records a call and fails.
+        # Fail closed: no seed -> no build; any sign that the SDK rejected the placeholder or tried to
+        # generate a certificate -> FAILED without build evidence. The caller's environment is restored
+        # and the folder removed, whatever happens.
+        # npm: on every package the SDK runs `npm list powerbi-visuals-api version` and, when the installed
+        # API major.minor differs from pbiviz.json apiVersion (or the package is missing), installs
+        # powerbi-visuals-api@~<apiVersion> with --save - a network install that rewrites package.json,
+        # package-lock.json and node_modules. Those npm calls keep the caller's user npmrc (registry, proxy,
+        # CA) through npm_config_userconfig, never a file in the disposable home.
+        $sdkCfg = $null
+        try { $sdkCfg = ([IO.File]::ReadAllText((Join-Path $visualDir 'node_modules\powerbi-visuals-tools\config.json')).TrimStart([char]0xFEFF) | ConvertFrom-Json).server } catch { }
+        $certFolder = if ($sdkCfg -and $sdkCfg.certificateFolder) { [string]$sdkCfg.certificateFolder } else { 'pbiviz-certs' }
+        $pfxName = if ($sdkCfg -and $sdkCfg.pfx) { [string]$sdkCfg.pfx } else { 'PowerBICustomVisualTest_public.pfx' }
+        $passName = if ($sdkCfg -and $sdkCfg.passphrase) { [string]$sdkCfg.passphrase } else { 'PowerBICustomVisualTestPass.txt' }
+        foreach ($n in @($certFolder, $pfxName, $passName)) {
+            if ($n -notmatch '^[A-Za-z0-9][A-Za-z0-9 ._-]{0,99}$' -or $n.Contains('..') -or $n.EndsWith('.') -or $n.EndsWith(' ') -or $n.Split('.')[0].Trim() -match '^(?i:con|prn|aux|nul|com[0-9]|lpt[0-9])$') { $res.Reason = "the SDK certificate setting '$n' is not a single safe file name - refusing to run pbiviz package"; return $res }
+        }
+        if (-not ('System.Security.Cryptography.X509Certificates.CertificateRequest' -as [type])) { $res.Reason = 'the placeholder certificate cannot be created here (CertificateRequest unavailable): pbiviz package would try to generate a certificate in Cert:\CurrentUser\My - refusing to build'; return $res }
+        $homeRoot = Join-Path (Split-Path $recDir -Parent) 'pbiviz-build-home'
+        if ((Test-Path -LiteralPath $homeRoot) -and ((Get-Item -LiteralPath $homeRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { $res.Reason = "the build-home folder $homeRoot is a link - refusing to run pbiviz package"; return $res }
+        # Only folders older than any live build (timeout + margin) and never links: a concurrent build keeps its own.
+        $staleAge = [TimeSpan]::FromSeconds($TimeoutSeconds + 600)
+        foreach ($stale in @(Get-ChildItem -LiteralPath $homeRoot -Directory -Filter 'home-*' -ErrorAction SilentlyContinue | Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and ([DateTime]::UtcNow - $_.LastWriteTimeUtc) -gt $staleAge })) {
+            try { Remove-Item -LiteralPath $stale.FullName -Recurse -Force -ErrorAction Stop; $res.Evidence.Add("removed a disposable build home left by an interrupted run: $($stale.Name)") }
+            catch { $res.Evidence.Add("a disposable build home left by an interrupted run could not be removed: $($stale.Name): $($_.Exception.Message)") }
+        }
+        $buildHome = Join-Path $homeRoot ('home-' + [guid]::NewGuid().ToString('N').Substring(0, 12))
+        $certDir = Join-Path $buildHome $certFolder
+        $guardDir = Join-Path $buildHome 'guard-bin'
+        $guardMarker = Join-Path $buildHome 'pwsh-guard-called.txt'
+        $savedProfile = $env:USERPROFILE; $savedHome = $env:HOME; $savedPath = $env:PATH; $savedMarker = $env:PBIVIZ_PWSH_GUARD_MARKER; $savedNpmrc = $env:npm_config_userconfig
+        $rsa = $null; $self = $null; $pub = $null; $certProblem = $null; $run = $null
+        try {
+            [void][IO.Directory]::CreateDirectory($certDir); [void][IO.Directory]::CreateDirectory($guardDir)
+            [IO.File]::WriteAllText((Join-Path $guardDir 'pwsh.cmd'), "@echo called>> `"%PBIVIZ_PWSH_GUARD_MARKER%`"`r`n@exit /b 1`r`n", (New-Object Text.ASCIIEncoding))
+            $pass = [guid]::NewGuid().ToString('N')
+            $rsa = New-Object System.Security.Cryptography.RSACng 2048
+            $req = New-Object System.Security.Cryptography.X509Certificates.CertificateRequest('CN=pbiviz-build-placeholder', $rsa, [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+            $self = $req.CreateSelfSigned([DateTimeOffset]::UtcNow.AddMinutes(-5), [DateTimeOffset]::UtcNow.AddDays(7))
+            $pub = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList @(, $self.RawData)
+            $pfxBytes = $pub.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Pkcs12, $pass)
+            $pfxFile = Join-Path $certDir $pfxName
+            [IO.File]::WriteAllBytes($pfxFile, $pfxBytes)
+            [IO.File]::WriteAllText((Join-Path $certDir $passName), $pass)
+            $pfxHash = Get-PbivizSha256Hex $pfxBytes
+            $env:USERPROFILE = $buildHome; $env:HOME = $buildHome
+            $env:PATH = "$guardDir;$savedPath"; $env:PBIVIZ_PWSH_GUARD_MARKER = $guardMarker
+            # npm calls the SDK may make keep the caller's user npmrc (registry, proxy, CA) despite the swapped home.
+            if (-not $savedNpmrc -and $savedProfile) { $env:npm_config_userconfig = Join-Path $savedProfile '.npmrc' }
+            $run = Invoke-PbivizProcess -FilePath $node.Source -Arguments @($cli, 'package') -WorkingDirectory $visualDir -TimeoutSeconds $TimeoutSeconds
+            if (Test-Path -LiteralPath $guardMarker) { $certProblem = 'the SDK tried to start pwsh to generate a certificate' }
+            elseif ("$($run.Out)`n$($run.Err)" -match 'Generating a new certificate|Certificate verification error|Create certificate error') { $certProblem = 'the SDK rejected the placeholder certificate and tried to generate one' }
+            elseif (-not (Test-Path -LiteralPath $pfxFile) -or (Get-PbivizFileSha256 $pfxFile) -ne $pfxHash) { $certProblem = 'the placeholder certificate was removed or changed during the build' }
+        } finally {
+            $env:USERPROFILE = $savedProfile; $env:HOME = $savedHome; $env:PATH = $savedPath; $env:PBIVIZ_PWSH_GUARD_MARKER = $savedMarker; $env:npm_config_userconfig = $savedNpmrc
+            foreach ($o in @($pub, $self, $rsa)) { if ($o) { try { $o.Dispose() } catch { } } }
+            if (Test-Path -LiteralPath $buildHome) {
+                try { Remove-Item -LiteralPath $buildHome -Recurse -Force -ErrorAction Stop }
+                catch { $res.Evidence.Add("the disposable build home could not be removed now; the next build sweeps it: $($_.Exception.Message)") }
+            }
+            # Only an empty folder is removed (a concurrent build keeps its home and the folder).
+            try { [IO.Directory]::Delete($homeRoot, $false) } catch { }
+        }
+        if ($certProblem) { $res.Status = 'FAILED'; $res.ExitCode = $run.ExitCode; $res.Reason = "$certProblem - no build evidence recorded; move any dist/$canon out of dist/ before building again"; return $res }
         $finished = [DateTime]::UtcNow
         $res.ExitCode = $run.ExitCode
         $log = "$($run.Out)`n$($run.Err)"
@@ -5344,8 +5420,11 @@ function Get-PbivizDependencyEscapes {
 # G0-G6. The verdict never depends on pathspec matching: the complete staged diff is parsed once.
 function Test-PbivizPromotionGates {
     param([string]$Worktree, [string]$Visual, [string]$TargetRef = $null, [string[]]$Allowlist = @(), [switch]$ArchiveOnly)
-    $res = [pscustomobject][ordered]@{ Status = 'BLOCKED'; Reason = ''; Gates = (New-Object System.Collections.Generic.List[object]); Changes = @() }
-    $add = { param($id, $pass, $detail) $res.Gates.Add([pscustomobject]@{ Gate = $id; Pass = [bool]$pass; Detail = [string]$detail }) }
+    # Gates is returned as a plain array: a List[object] makes the usual consumer idiom @($g.Gates)
+    # throw 'Argument types do not match' in Windows PowerShell 5.1 (List[string] and List[psobject]
+    # are not affected), so evidence lines lost the gate list while Status still read PASS.
+    $res = [pscustomobject][ordered]@{ Status = 'BLOCKED'; Reason = ''; Gates = @(); Changes = @() }
+    $add = { param($id, $pass, $detail) $res.Gates += [pscustomobject]@{ Gate = $id; Pass = [bool]$pass; Detail = [string]$detail } }
     try {
         $syntax = Test-PbivizNameSyntax $Visual
         $cs = if ($ArchiveOnly) { Test-PbivizCandidateState -Worktree $Worktree } else { Test-PbivizCandidateState -Worktree $Worktree -AfterRelease }
@@ -5550,7 +5629,11 @@ function Test-PbivizReleaseIntegrity {
         $shared = @(@($man.sharedFiles) | Where-Object { $_ })
         if ($man) {
             if ([string]$man.visual -cne $Visual) { $problems.Add("manifest names visual '$($man.visual)'") }
-            if ((Get-PbivizSourceFingerprint -Root $Root -TreeIsh $sha -Visual $Visual) -ne [string]$man.sourceFingerprint) { $problems.Add("source scope at $($sha.Substring(0, 12)) differs from the manifest fingerprint") }
+            # An archive-only promotion carries the release pair without the visual's source: the source
+            # binding is then proven at the source revision below, never skipped silently.
+            $hasSource = [bool](@($entries | Where-Object { Test-PbivizSourceScope -Path $_.Path -Visual $Visual }).Count)
+            if (-not $hasSource) { $res.Evidence.Add("no $Visual source at $($sha.Substring(0, 12)) (archive-only): the source binding is verified at the source revision") }
+            elseif ((Get-PbivizSourceFingerprint -Root $Root -TreeIsh $sha -Visual $Visual) -ne [string]$man.sourceFingerprint) { $problems.Add("source scope at $($sha.Substring(0, 12)) differs from the manifest fingerprint") }
             foreach ($sf in $shared) {
                 $e = Find-PbivizEntry -Entries $entries -Path ([string]$sf.path)
                 $have = if ($e) { $e.Object } else { '' }
@@ -5565,7 +5648,8 @@ function Test-PbivizReleaseIntegrity {
         $res.CommitEvidence = 'VERIFIED'
         $res.Validated = ($man.validated -eq $true)
         $res.ReleaseClass = if ($res.Validated) { $script:PbivizOfficialClass } else { $script:PbivizCandidateClass }
-        $res.Evidence.Add("commit ${sha}: source fingerprint, shared files and the archived pair (hash, size, package content claims, build evidence, validation claim) match the manifest")
+        if ($hasSource) { $res.Evidence.Add("commit ${sha}: source fingerprint, shared files and the archived pair (hash, size, package content claims, build evidence, validation claim) match the manifest") }
+        else { $res.Evidence.Add("commit ${sha} (archive-only): shared files and the archived pair (hash, size, package content claims, build evidence, validation claim) match the manifest; the source fingerprint is NOT compared at this commit - only at the source revision") }
         $res.Evidence.Add("release class: $($res.ReleaseClass)$(if (-not $res.Validated) { ' - never presented or distributed as an official production release' })")
         $src = Resolve-PbivizCommit -Root $Root -Ref ([string]$man.sourceSha)
         if (-not $src) {
@@ -6139,7 +6223,11 @@ if (-not (Test-CliResilient -Name 'fab' -VersionPattern '(?im)^\s*fab version'))
 
 # az CLI -- OPTIONAL (fallback). Only needed for SQL/TDS (sqlcmd -G) and non-Fabric
 # token audiences (Storage, database.windows.net). fab covers the rest.
-if (-not (Test-CliResilient -Name 'az')) {
+$azRunnable = Test-CliResilient -Name 'az'
+if (-not $azRunnable -and (Get-Command az -ErrorAction SilentlyContinue)) {
+    # Present on PATH but the version probe failed: never reinstall machine-wide over an existing CLI.
+    Write-Host "  az CLI: found, but 'az --version' did not answer cleanly - not reinstalling (optional, fallback)" -ForegroundColor Yellow
+} elseif (-not $azRunnable) {
     Write-Host "  az CLI: not found (optional, fallback)" -ForegroundColor Yellow
     Write-Host "         Only needed for SQL/TDS (sqlcmd) and non-Fabric token audiences; fab covers the rest." -ForegroundColor DarkGray
     Write-Host "    Installing az CLI automatically..." -ForegroundColor White
@@ -8920,6 +9008,37 @@ ARCHIVE = `<Visual>/releases/**` (Prod is authoritative; the Dev archive is neve
    branch. A committed candidate is removed without force; an uncommitted candidate only with
    `APPROVED:DISCARD-CANDIDATE:<branch>`; unexpected staged, unstaged or untracked data or an
    operation in progress is refused, approval or not. The release branch is always kept.
+
+Test stage (when `PBVIZ_Team_Test` exists). The release branch name is fixed per visual and
+version (`release/pbiviz/<visual>/<version>`), so there is ONE candidate per release, always cut
+from the Prod tip (TGT). Never cut a second candidate from the Test tip: the helper refuses the
+existing branch, and a Test-based candidate could carry Test-only history into Prod. Flow:
+(a) create, build, gate and commit the candidate against Prod as above, then push the release
+branch (`APPROVED:PUSH`); (b) pull request 1: the release branch -> `PBVIZ_Team_Test`
+(`APPROVED:PR`; `APPROVED:MERGE` after review); (c) `Test-PbivizReleaseIntegrity` on the Test
+merge commit, then host-test the package taken from Test's archive; (d) pull request 2: the SAME
+branch, unchanged, -> `PBVIZ_Team_Prod`. A defect found in Test is a new Dev commit and a new
+version - never an edit of the release branch; the rejected pair stays in Test's archive as
+history and is never promoted.
+Test carries a rejected candidate: after a rejected Test release of the same visual, Test still
+holds that visual's rejected source. Pull request 1 of the next version may then conflict, or
+merge cleanly yet leave rejected source behind (step (c) fails on the fingerprint). The rule is
+the same in both cases: on Test, the visual's WHOLE source scope (plus its allowlisted shared
+files - the `sharedFiles` paths recorded in this version's `.release.json`) must equal the release
+branch. Never resolve it in the provider's web conflict editor
+(it commits the resolution onto the release branch, i.e. merges Test into it). Mechanism: a
+local integration branch `test-sync/<visual>/<version>` from the Test tip; `git merge --no-ff
+--no-commit <release branch>`; `git checkout <release branch> -- <visual> <each allowlisted
+shared file>` and `git rm` every
+file of the visual outside `<visual>/releases/` that exists only on Test (release pairs that
+exist only on Test stay - the archive is append-only and cannot conflict); stop and report if
+any other path differs from a clean merge;
+commit, push (`APPROVED:PUSH`) and open pull request 1 from the integration branch instead
+(`APPROVED:PR`, `APPROVED:MERGE`). Step (c) must then show the merge commit's source fingerprint
+equal to the manifest's. The release branch itself stays unchanged for pull request 2. Never
+merge Test into the release branch or into Prod. Step 7 applies per target: provenance and
+`Test-PbivizReleaseIntegrity` on the Test merge commit after pull request 1, and on the Prod
+merge commit after pull request 2; only the Prod result makes an OFFICIAL RELEASE distributable.
 
 - Mixed Dev commits are safe: only the selected visual's files are restored.
 - A shared dependency outside the visual is BLOCKED unless it is a single allowlisted file that a
