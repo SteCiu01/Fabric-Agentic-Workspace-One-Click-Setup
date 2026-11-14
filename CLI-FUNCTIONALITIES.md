@@ -778,6 +778,59 @@ Git call goes through one function with literal pathspecs, UTF-8 output and no p
 Pass absolute folder paths (`(Resolve-Path <folder>).ProviderPath`): the helper starts Git and
 Node with the path it is given, not with the PowerShell location.
 
+### 29.0 The three levels in practice
+
+The level is derived from the repository (`Get-PbivizRepoState -Root $root`: `main` without a
+remote = 1, a remote = 2, `PBVIZ_Team_*` branches = 3), never assumed. 086 runs every step below;
+the Git commands are plain Git, the rest are helper functions.
+
+**Level 1 - local repository.**
+- Created by the installer (Step 8) with `Initialize-PbivizRepository`: `git init -b main`, a
+  repository-local `core.longpaths`, `.gitignore` and `.gitattributes`, and - only for a brand-new
+  empty folder with a Git identity - one configuration-only baseline commit. An existing
+  repository is reused and never committed to.
+- A new visual is created by 082 (`pbiviz new`, section 28, only after `APPROVED:INSTALL:<Name>`).
+- Checkpoint - one visual per commit, after checking the Git identity:
+
+```powershell
+git -C $root status --short -- 'Bar'
+git -C $root add -- 'Bar'
+git -C $root diff --cached --name-only       # only Bar/ paths; unstage and stop if another visual appears
+git -C $root commit -m 'Bar: first working version (v1.0.0.0)'
+```
+
+- Restore: `git -C $root restore --source=<sha> -- Bar` (working tree only) or
+  `git -C $root revert <sha>` (a new commit). Releases: 29.2. Level 1 has no off-device copy.
+
+**Level 2 - remote collaboration** (after `APPROVED:CONNECT:<url>`):
+
+```powershell
+Test-PbivizRemoteUrl -Url $url               # True only for a GitHub / Azure DevOps repository URL
+git -C $root remote add origin $url
+$a = Connect-PbivizRemoteHistory -Root $root -Remote origin -Branch main -Fetch
+$a.Status, $a.Case, $a.Reason, $a.BackupRef, ($a.ConflictPaths -join ', '), ($a.Collisions -join ', ')
+```
+
+`Case` is one of: `empty-remote` (nothing changed; push `main` only with `APPROVED:PUSH:main`),
+`up-to-date`, `fast-forward` (related history), `unrelated-merge` (an independent remote merged
+with both root commits kept), `tracking-checkout` (an empty local repository takes the remote
+branch), `conflict` (the merge was aborted and HEAD, index, tracked files and untracked/ignored
+files are exactly as before - the paths are listed; resolving them in local files needs
+`APPROVED:MERGE-LOCAL:<paths>`), `needs-checkpoint` (commit local files first),
+`needs-merge-decision` (diverged history: a merge needs approval) or `blocked` (for example a local
+untracked or ignored file at a path the remote tracks - move it aside, nothing was changed).
+Before any branch moves a backup ref `refs/pbiviz-backup/connect-<utc>` is written; afterwards the
+helper asserts that the old local tip is an ancestor of the new one and that no other ref changed.
+Tags are never fetched. Daily sync is the same call (one-branch fetch, fast-forward only).
+
+**Level 3 - DEV / (TEST) / PROD** (after `APPROVED:BRANCHES:<repo>`, clean and up-to-date `main`):
+`PBVIZ_Team_Dev` at `origin/main`, `PBVIZ_Team_Prod` at the commit the user confirms (or empty),
+`PBVIZ_Team_Test` on request; the local checkout switches to Dev and `main` stays untouched. Branch
+policies start as a checklist and are applied only with `APPROVED:POLICY:<branch>`. Releases made
+before Level 3 reach an empty Prod through an archive-only promotion
+(`New-PbivizPromotionCandidate -ArchiveOnly`, gates with `-ArchiveOnly`), which admits validated
+releases and labelled legacy history only. Releases: 29.3; with a Test branch: 29.7.
+
 ### 29.1 Release classes and the evidence behind them
 
 | Term | Exactly what it means |
@@ -800,6 +853,8 @@ Preconditions, each checked by the helper (BLOCKED otherwise, nothing written):
 - the visual's own `powerbi-visuals-tools` is installed in `<Name>/node_modules`. The helper never
   downloads: when it is missing the result is BLOCKED and names `APPROVED:INSTALL:<Name>` - restore
   the locked dependencies (section 28) only after the user gives that token;
+- the toolchain preflight passes (29.6): `pbiviz package` must not need to download or change
+  dependencies itself;
 - `node` is on PATH, `pbiviz.json` has a valid GUID and version at that commit, and
   `<Name>/dist/<guid>.<version>.pbiviz` does not exist yet (a package is never overwritten);
 - the version exceeds every archived version of the visual, validated and legacy (checked by
@@ -813,7 +868,8 @@ $b.Status, $b.Reason       # PASS -> $b.PackagePath, $b.Sha256, $b.SourceSha, $b
 # 083 reports lint/unit for $b.SourceSha; 084 reviews exactly $b.SourceSha.
 $r = Add-PbivizRelease -Root $root -Visual 'Bar' -SourceSha $b.SourceSha `
        -Tests  @{ lint = 'PASS'; unit = 'PASS'; host = 'NOT RUN'; certification = 'NOT RUN' } `
-       -Review @{ reviewer = '084 PBIVIZ Reviewer'; verdict = 'APPROVE'; sourceSha = $b.SourceSha }
+       -Review @{ reviewer = '084 PBIVIZ Reviewer'; verdict = 'APPROVE'; sourceSha = $b.SourceSha
+                  reviewedAt = '2026-11-14T10:00:00Z'; reference = '080 WORK RESULT, review of Bar 1.0.0.1' }
 $r.Status, $r.Validated, $r.ReleaseClass, $r.BuildEvidence, ($r.ValidationGaps -join '; ')
 $r.Staged                  # exactly Bar/releases/<guid>.<version>.pbiviz and .release.json
 ```
@@ -880,8 +936,61 @@ COMMIT evidence: fingerprint, shared-file blobs, package hash, size, content cla
 and validation claim at the given commit. SOURCE-REVISION evidence: the Dev commit named in the
 manifest still yields the same fingerprint and shared blobs.
 
-### 29.6 Build supervision, transactional archiving and G4 limits
+### 29.6 Build supervision, isolation, transactional archiving and G4 limits
 
+- **Toolchain preflight** - before the CLI starts, `Invoke-PbivizBuild` refuses (BLOCKED, nothing
+  run or written) every case in which `pbiviz package` would itself download or change
+  dependencies. `powerbi-visuals-tools` (verified with 7.2.1) runs `npm list powerbi-visuals-api` on every package and
+  install that package over the network, rewriting `package.json`, `package-lock.json` and
+  `node_modules`, when `node_modules/powerbi-visuals-api` is missing, `pbiviz.json` has no
+  `apiVersion` (then `@latest`) or the installed major.minor differs from `apiVersion` (then
+  `~<apiVersion>`). The preflight blocks those three cases and, when the visual has a
+  `package-lock.json`, also a lockfile that disagrees with `package.json` on `powerbi-visuals-tools`
+  / `powerbi-visuals-api` or locks other versions than the installed ones. The fix is the user's
+  `APPROVED:INSTALL:<Name>` and `npm ci`, or a source commit that corrects `apiVersion` - never a
+  helper workaround. Another patch of the same API major.minor is accepted, as the SDK accepts it.
+- **Isolation of the CLI** - the SDK verifies a dev-server certificate under
+  `os.homedir()\<certificateFolder>` on every package (through Windows PowerShell) and, when that
+  fails, deletes the certificate files and creates a new certificate with
+  `pwsh New-SelfSignedCertificate -CertStoreLocation Cert:\CurrentUser\My`. A package needs no TLS
+  material, so the helper runs the CLI with:
+
+  | Child setting | Value |
+  |---|---|
+  | `USERPROFILE` / `HOME` | `<git dir>\pbiviz-build-home\home-<id>\profile`, holding a public-only placeholder PFX (ephemeral key, nothing imported into any store) at the SDK's `certificateFolder` / `pfx` / `passphrase` names |
+  | `PATH` | a guard folder with `pwsh.cmd` first (it records the call and fails), then the caller's PATH without folders that hold `pwsh.exe` / `pwsh.com` |
+  | `PATHEXT` · `NoDefaultCurrentDirectoryInExePath` | `.CMD` guaranteed · `1`, so a same-named `pwsh.*` in the visual folder never runs before the guard |
+  | `npm_config_cache` · `npm_config_offline` · `npm_config_update_notifier` | a disposable cache (npm logs included) · `true` · `false`; `npm_config_userconfig` keeps the caller's user npmrc |
+  | `TEMP` / `TMP` | a folder inside the disposable home |
+
+  The guard folder, its marker, `owner.lock`, the npm cache and TEMP sit beside `profile\`, and each
+  SDK certificate setting (`certificateFolder`, `certificate`, `privateKey`, `pfx`, `passphrase`
+  in the toolchain's `config.json`) must be a single safe file name, distinct from the others,
+  whose resolved path lies directly in the disposable certificate folder - otherwise BLOCKED. The
+  build is FAILED with no evidence when the guard was called, the SDK rejected or regenerated the
+  certificate, the placeholder changed, a new certificate appeared in `Cert:\CurrentUser\My` (the
+  store is only read; the helper never deletes a certificate), or the SDK tried to install a
+  dependency. The caller's environment is restored and the home removed in every case.
+- **What isolation does not cover** - it contains the SDK's known side effects; it is not an
+  operating-system sandbox. The CLI, ESLint, webpack and every package in `node_modules` run with
+  the user's rights and can read or write anything the user can. The SDK's certificate check starts
+  Windows PowerShell, which loads the user's PowerShell profile and keeps its own caches under
+  `%LOCALAPPDATA%`. Review the dependencies of a visual like any other code you run.
+- **Network and approvals** - who may reach the network:
+
+  | Command | Network | Needs |
+  |---|---|---|
+  | `pbiviz new` (082) and dependency restore (082/085) | yes, npm registry | `APPROVED:INSTALL:<Name>` |
+  | `pbiviz package` / `pbiviz start` in a development build (082/083/085) | only when the API package is missing or mismatching - check first, otherwise NOT RUN | `APPROVED:INSTALL:<Name>` for the repair |
+  | `Invoke-PbivizBuild` (086) | no: preflight blocks, npm runs offline | - |
+  | `Connect-PbivizRemoteHistory -Fetch`, `git fetch` (086) | yes, the Git remote | `APPROVED:CONNECT:<url>` once |
+  | `git push`, pull requests, merges, tags (086) | yes, the Git provider | `APPROVED:PUSH` / `PR` / `MERGE` / `TAG` |
+
+- **Timeout and cleanup** - `-TimeoutSeconds` (default 900) bounds the CLI. Disposable homes are
+  owned through `owner.lock`, which the running build holds open: the next build removes only homes
+  whose lock is free (a finished or killed build) and lockless homes older than 24 hours, never a
+  live build's home and never through a link. A linked `pbiviz-build-home` folder is refused.
+  Recovery after a crash needs nothing: the next build sweeps the left-over home.
 - **Build supervision** - `pbiviz package` runs under process-tree supervision (Windows job
   object): the CLI starts suspended inside the job, stdin is `NUL`, stdout/stderr are drained into
   bounded buffers (4 MB per stream; the excess is counted in the log, not kept). When the CLI exits
@@ -933,6 +1042,51 @@ manifest still yields the same fingerprint and shared blobs.
 - **Results** — every function returns a status (`PASS`, `BLOCKED`, `NEEDS INPUT`,
   `NEEDS CHECKPOINT`, `CONFLICT`, `FAILED`; integrity: also `PARTIAL`; provenance: `DERIVED` /
   `NOT DERIVABLE`) with a reason and evidence; agents report it verbatim.
+
+### 29.7 Test stage - one candidate per release, rejected releases and `test-sync`
+
+With `PBVIZ_Team_Test` the release branch name stays `release/pbiviz/<Name>/<version>`, so there is
+**one candidate per visual and version, always cut from the Prod tip** (a second candidate for the
+same version is refused). Flow:
+
+1. Create, build, gate and commit the candidate against Prod (29.3); push it (`APPROVED:PUSH`).
+2. Pull request 1: the release branch -> `PBVIZ_Team_Test` (`APPROVED:PR`, then `APPROVED:MERGE`).
+3. `Test-PbivizReleaseIntegrity` on the Test merge commit; host-test the package from Test's archive.
+4. Pull request 2: the **same, unchanged** release branch -> `PBVIZ_Team_Prod`; then provenance and
+   integrity on the Prod merge commit (29.5). Only the Prod result makes an OFFICIAL RELEASE
+   distributable.
+
+A release rejected in Test is fixed with a new Dev commit and a **new version** - never by editing
+the release branch. The rejected pair stays in Test's archive as history and is never promoted.
+Test then still holds the rejected source of that visual, so pull request 1 of the next version may
+conflict, or merge cleanly yet leave rejected files behind (step 3 then FAILS on the fingerprint).
+The rule: on Test, the visual's whole source scope (plus the allowlisted shared files - the
+`sharedFiles` paths in this version's `.release.json`) must equal the release branch. 086
+reconciles it on a local integration branch, never in the provider's web conflict editor (that
+would commit the resolution onto the release branch):
+
+```powershell
+$rel = 'release/pbiviz/Bar/1.0.0.3'
+git -C $root switch -c 'test-sync/Bar/1.0.0.3' PBVIZ_Team_Test
+git -C $root merge --no-ff --no-commit $rel                 # may report conflicts: expected
+git -C $root checkout $rel -- Bar                          # plus each allowlisted shared file
+# remove every Bar file outside Bar/releases/ that exists only on Test:
+$keep  = git -C $root ls-tree -r --name-only $rel -- Bar
+$extra = git -C $root ls-files -- Bar | Where-Object { $_ -notlike 'Bar/releases/*' -and $keep -notcontains $_ }
+foreach ($p in $extra) { git -C $root rm -q -- $p }
+git -C $root diff --name-only --diff-filter=U               # must be empty
+git -C $root diff --cached --name-only PBVIZ_Team_Test      # must list Bar/ paths only
+git -C $root commit -m "Merge $rel into Test via test-sync/Bar/1.0.0.3"
+```
+
+Then push the integration branch and use it for pull request 1 (`APPROVED:PUSH`, `APPROVED:PR`,
+`APPROVED:MERGE`). Step 3 must now show `Status = PASS` with the merge commit's fingerprint equal to
+the manifest's. **Stop and report** - do not resolve by hand - when a path outside the visual (and its
+allowlisted shared files) differs from a clean merge, when an unmerged path remains, or when a
+release pair of another version would change: release pairs that exist only on Test stay as they
+are (the archive is append-only). Never merge Test into the release branch or into Prod. This
+procedure is plain Git (no helper function); it is covered by an automated regression test and was
+rehearsed on local branches, not yet against a provider's pull-request UI.
 
 ---
 

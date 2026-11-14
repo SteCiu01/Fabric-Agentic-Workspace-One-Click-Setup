@@ -178,9 +178,14 @@ BeforeAll {
     # prepared .pbiviz (identity from the current pbiviz.json) to dist/. fake-mode.txt selects
     # ok | fail (exit 1) | touch (rewrites a tracked file) | none (exit 0, no package) | hang (never ends)
     # | spawn-hang / spawn-exit (starts a DETACHED node child that inherits stdout/stderr and writes the
-    # package plus late-write.txt after 6 s; the CLI then hangs or exits 0 at once; child.pid names it).
+    # package plus late-write.txt after 6 s; the CLI then hangs or exits 0 at once; child.pid names it)
+    # | probe / sdk-cert (writes probe.json: what the SDK would see - home, PATH, PATHEXT, npm settings,
+    # the placeholder certificate per config.json; sdk-cert also prints the SDK's verification error when
+    # the placeholder is missing) | pwsh (runs `pwsh -Command ...` through cmd.exe like the SDK's
+    # certificate generation) | spawn-pwsh (shell-less spawn of pwsh, result in spawn.txt) | install-api
+    # (prints the SDK's "Installing API" line). Every probe mode then packages like ok.
     $script:FakePbivizJs = @'
-const fs = require('fs'), path = require('path');
+const fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const here = path.join(__dirname, '..');
 const modeFile = path.join(here, 'fake-mode.txt');
 const mode = fs.existsSync(modeFile) ? fs.readFileSync(modeFile, 'utf8').trim() : 'ok';
@@ -196,6 +201,23 @@ if (mode === 'spawn-hang' || mode === 'spawn-exit') {
   if (mode === 'spawn-exit') { process.exit(0); }
   setTimeout(() => process.exit(0), 600000); return;
 }
+if (mode === 'probe' || mode === 'sdk-cert') {
+  let sc = {}; try { sc = JSON.parse(fs.readFileSync(path.join(here, 'config.json'), 'utf8')).server || {}; } catch (e) { }
+  const folder = path.join(os.homedir(), sc.certificateFolder || 'pbiviz-certs');
+  const first = (process.env.PATH || '').split(';')[0];
+  const g = path.join(first, 'pwsh.cmd');
+  const probe = { homedir: os.homedir(), USERPROFILE: process.env.USERPROFILE, HOME: process.env.HOME, TEMP: process.env.TEMP, TMP: process.env.TMP,
+    PATHEXT: process.env.PATHEXT, NoDefault: process.env.NoDefaultCurrentDirectoryInExePath, pathFirst: first, path: process.env.PATH,
+    guard: fs.existsSync(g) ? fs.readFileSync(g, 'utf8') : null, npmCache: process.env.npm_config_cache, npmOffline: process.env.npm_config_offline,
+    npmNotifier: process.env.npm_config_update_notifier, npmUserconfig: process.env.npm_config_userconfig,
+    pfxExists: fs.existsSync(path.join(folder, sc.pfx || 'PowerBICustomVisualTest_public.pfx')),
+    passExists: fs.existsSync(path.join(folder, sc.passphrase || 'PowerBICustomVisualTestPass.txt')) };
+  fs.writeFileSync(path.join(here, 'probe.json'), JSON.stringify(probe));
+  if (mode === 'sdk-cert' && !(probe.pfxExists && probe.passExists)) { console.log('Certificate verification error: Error: PFX or passphrase file not found'); }
+}
+if (mode === 'pwsh') { try { cp.execSync('pwsh -Command "New-SelfSignedCertificate"', { stdio: 'pipe' }); console.log('pwsh ran'); } catch (e) { console.log('pwsh failed ' + e.status); } }
+if (mode === 'spawn-pwsh') { const r = cp.spawnSync('pwsh', ['-NoProfile'], { encoding: 'utf8', timeout: 20000 }); fs.writeFileSync(path.join(here, 'spawn.txt'), r.error ? r.error.code : ('ran ' + r.status + ' ' + (r.stdout || '').trim())); }
+if (mode === 'install-api') { console.log('Installing API: ~5.11.0...'); }
 if (mode === 'fail') { console.error('error: fake build failure'); process.exit(1); }
 const cfg = JSON.parse(fs.readFileSync('pbiviz.json', 'utf8'));
 if (mode === 'touch') { fs.writeFileSync(path.join('src', 'visual.ts'), 'rewritten by the build\n'); }
@@ -206,11 +228,14 @@ if (mode !== 'none') {
 console.log('fake pbiviz package done');
 '@
     function Install-TFakeTools {
-        param([string]$Dir, [string]$Visual = 'Bar', [string]$Mode = 'ok', [int]$Seed = 11, [string]$ToolsVersion = '7.2.2')
+        param([string]$Dir, [string]$Visual = 'Bar', [string]$Mode = 'ok', [int]$Seed = 11, [string]$ToolsVersion = '7.2.2', [string]$ApiVersion = '5.11.0', [hashtable]$CertConfig = $null)
         $tools = "$Visual/node_modules/powerbi-visuals-tools"
         Write-TFile $Dir "$tools/package.json" "{ ""name"": ""powerbi-visuals-tools"", ""version"": ""$ToolsVersion"" }"
         Write-TFile $Dir "$tools/bin/pbiviz.js" $script:FakePbivizJs
         Write-TFile $Dir "$tools/fake-mode.txt" $Mode
+        # The API package the SDK checks before every package (absent with -ApiVersion '').
+        if ($ApiVersion) { Write-TFile $Dir "$Visual/node_modules/powerbi-visuals-api/package.json" "{ ""name"": ""powerbi-visuals-api"", ""version"": ""$ApiVersion"" }" }
+        if ($CertConfig) { Write-TFile $Dir "$tools/config.json" (ConvertTo-Json @{ server = $CertConfig } -Compress) }
         $pj = [IO.File]::ReadAllText((Join-Path $Dir "$Visual\pbiviz.json")) | ConvertFrom-Json
         Write-TPackage -Path (Join-Path $Dir (($tools -replace '/', '\') + '\fixture.pbiviz')) -Guid $pj.visual.guid -Version $pj.visual.version -Seed $Seed
     }
@@ -2185,5 +2210,517 @@ export class Visual {}
         $q = Invoke-TPromotion -Repo $r -Allowlist @('shared/probe.mjs')
         $q.Gates.Status | Should -Be 'PASS' -Because $q.Gates.Reason
         (Get-TGate $q.Gates 'G4').Pass | Should -BeTrue
+    }
+}
+
+Describe 'Build isolation contains the SDK''s known side effects (Canary D2, final hardening)' {
+
+    BeforeAll {
+        function New-TIso {
+            $r = New-TRepo
+            New-TVisual $r 'Bar' 'barGuid0001' '1.0.0.1'
+            $head = Save-TAll $r 'base'
+            return [pscustomobject]@{ Repo = $r; Head = $head; Tools = (Join-Path $r 'Bar\node_modules\powerbi-visuals-tools'); HomeRoot = (Join-Path $r '.git\pbiviz-build-home'); Records = (Join-Path $r '.git\pbiviz-builds') }
+        }
+        function Read-TProbe { param($X) return ([IO.File]::ReadAllText((Join-Path $X.Tools 'probe.json')) | ConvertFrom-Json) }
+        $script:IsoEnvNames = @('USERPROFILE', 'HOME', 'PATH', 'PATHEXT', 'NoDefaultCurrentDirectoryInExePath', 'PBIVIZ_PWSH_GUARD_MARKER', 'TEMP', 'TMP', 'npm_config_userconfig', 'npm_config_cache', 'npm_config_offline', 'npm_config_update_notifier', 'npm_config_audit', 'npm_config_fund')
+        function Get-TEnvSnap { $h = @{}; foreach ($n in $script:IsoEnvNames) { $h[$n] = [Environment]::GetEnvironmentVariable($n, 'Process') }; return $h }
+        function Assert-TEnvRestored {
+            param($Before)
+            foreach ($n in $script:IsoEnvNames) { [Environment]::GetEnvironmentVariable($n, 'Process') | Should -Be $Before[$n] -Because "$n is restored after the build" }
+        }
+    }
+
+    It 'runs the CLI with a disposable profile, the guard first on PATH, no current-directory search and offline npm, then removes it all' {
+        $x = New-TIso
+        $before = Get-TEnvSnap
+        Install-TFakeTools -Dir $x.Repo -Mode 'probe'
+        $b = Invoke-PbivizBuild -Root $x.Repo -Visual 'Bar'
+        $b.Status | Should -Be 'PASS' -Because $b.Reason
+        $p = Read-TProbe $x
+        $p.homedir | Should -BeLike "$($x.HomeRoot)\home-*\profile" -Because 'os.homedir() is the disposable profile'
+        $p.USERPROFILE | Should -Be $p.homedir
+        $p.HOME | Should -Be $p.homedir
+        $p.homedir | Should -Not -Be $before.USERPROFILE
+        $p.TEMP | Should -BeLike "$($x.HomeRoot)\home-*\tmp"
+        $p.pathFirst | Should -BeLike "$($x.HomeRoot)\home-*\guard"
+        $p.guard | Should -Match 'PBIVIZ_PWSH_GUARD_MARKER'
+        $p.NoDefault | Should -Be '1'
+        @($p.PATHEXT -split ';') | Should -Contain '.CMD'
+        $p.npmCache | Should -BeLike "$($x.HomeRoot)\home-*\npm-cache"
+        $p.npmOffline | Should -Be 'true'
+        $p.npmNotifier | Should -Be 'false'
+        $p.pfxExists | Should -BeTrue -Because 'the placeholder sits where the SDK looks for it'
+        $p.passExists | Should -BeTrue
+        Test-Path -LiteralPath $x.HomeRoot | Should -BeFalse -Because 'the disposable home and its empty root are removed'
+        ($b.Evidence -join ' ') | Should -Match 'isolation: disposable profile'
+        Assert-TEnvRestored $before
+    }
+
+    It 'the guard still stops pwsh when the visual folder holds a same-named <Name> (current-directory search is off)' -TestCases @(
+        @{ Name = 'pwsh.cmd' }, @{ Name = 'pwsh.exe' }
+    ) {
+        $x = New-TIso
+        $hijack = Join-Path $x.Repo 'hijack-ran.txt'
+        if ($Name -eq 'pwsh.cmd') { Write-TFile $x.Repo 'Bar/pwsh.cmd' "@echo hijack>> `"$hijack`"`r`n@exit /b 0`r`n" }
+        else { Copy-Item -LiteralPath "$env:SystemRoot\System32\whoami.exe" -Destination (Join-Path $x.Repo 'Bar\pwsh.exe') }
+        Save-TAll $x.Repo "visual ships $Name" | Out-Null
+        $before = Get-TEnvSnap
+        Install-TFakeTools -Dir $x.Repo -Mode 'pwsh'
+        $b = Invoke-PbivizBuild -Root $x.Repo -Visual 'Bar'
+        $b.Status | Should -Be 'FAILED'
+        $b.Reason | Should -Match 'the SDK tried to start pwsh to generate a certificate \(the guard stopped it\) - no build evidence recorded'
+        Test-Path -LiteralPath $hijack | Should -BeFalse -Because 'the same-named file in the visual folder never ran'
+        Test-Path -LiteralPath $x.Records | Should -BeFalse
+        Test-Path -LiteralPath $x.HomeRoot | Should -BeFalse
+        Assert-TEnvRestored $before
+    }
+
+    It 'the guard still stops pwsh when the caller''s PATHEXT omits .CMD' {
+        $x = New-TIso
+        $saved = $env:PATHEXT
+        try {
+            $env:PATHEXT = '.COM;.EXE'
+            Install-TFakeTools -Dir $x.Repo -Mode 'pwsh'
+            $b = Invoke-PbivizBuild -Root $x.Repo -Visual 'Bar'
+            $b.Status | Should -Be 'FAILED'
+            $b.Reason | Should -Match 'the guard stopped it'
+            $env:PATHEXT | Should -Be '.COM;.EXE' -Because "the caller's PATHEXT is restored"
+        } finally { $env:PATHEXT = $saved }
+        Test-Path -LiteralPath $x.Records | Should -BeFalse
+    }
+
+    It 'leaves folders that hold a PowerShell 7 executable out of the child PATH (a shell-less spawn finds no pwsh)' {
+        $x = New-TIso
+        $ps7 = New-TDir 'ps7'
+        Copy-Item -LiteralPath "$env:SystemRoot\System32\whoami.exe" -Destination (Join-Path $ps7 'pwsh.exe')
+        $saved = $env:PATH
+        try {
+            $env:PATH = "$ps7;$saved"
+            Install-TFakeTools -Dir $x.Repo -Mode 'spawn-pwsh'
+            $b = Invoke-PbivizBuild -Root $x.Repo -Visual 'Bar'
+            $env:PATH | Should -Be "$ps7;$saved" -Because "the caller's PATH is restored"
+        } finally { $env:PATH = $saved }
+        $b.Status | Should -Be 'PASS' -Because $b.Reason
+        [IO.File]::ReadAllText((Join-Path $x.Tools 'spawn.txt')) | Should -Be 'ENOENT'
+        ($b.Evidence -join ' ') | Should -Match '[1-9]\d* PowerShell 7 folder\(s\) left out'
+    }
+
+    It 'SDK certificate settings that name isolation files stay inside the disposable certificate folder' {
+        $x = New-TIso
+        Install-TFakeTools -Dir $x.Repo -Mode 'probe' -CertConfig @{ certificateFolder = 'guard'; pfx = 'pwsh.cmd'; passphrase = 'guard-called.txt'; certificate = 'owner.lock'; privateKey = 'tmp' }
+        $b = Invoke-PbivizBuild -Root $x.Repo -Visual 'Bar'
+        $b.Status | Should -Be 'PASS' -Because $b.Reason
+        $p = Read-TProbe $x
+        $p.guard | Should -Match 'PBIVIZ_PWSH_GUARD_MARKER' -Because 'a PFX named pwsh.cmd in a certificate folder named guard did not overwrite the guard'
+        $p.pfxExists | Should -BeTrue
+    }
+
+    It 'BLOCKS SDK certificate settings that <Case>; the CLI never runs' -TestCases @(
+        @{ Case = 'climb out of the certificate folder (certificate)'; Config = @{ certificate = '..\guard\pwsh.cmd' }; Match = "certificate '\.\.\\guard\\pwsh\.cmd' is not a single safe file name" },
+        @{ Case = 'climb out of the certificate folder (privateKey)'; Config = @{ privateKey = '../../owner.lock' }; Match = "privateKey '\.\./\.\./owner\.lock' is not a single safe file name" },
+        @{ Case = 'name a nested folder'; Config = @{ certificateFolder = 'a\b' }; Match = "certificateFolder 'a\\b' is not a single safe file name" },
+        @{ Case = 'name a device'; Config = @{ certificateFolder = 'NUL' }; Match = "certificateFolder 'NUL' is not a single safe file name" },
+        @{ Case = 'name the same file twice'; Config = @{ pfx = 'cert.PFX'; passphrase = 'CERT.pfx' }; Match = 'name the same file twice' }
+    ) {
+        $x = New-TIso
+        Install-TFakeTools -Dir $x.Repo -Mode 'probe' -CertConfig $Config
+        $b = Invoke-PbivizBuild -Root $x.Repo -Visual 'Bar'
+        $b.Status | Should -Be 'BLOCKED'
+        $b.Reason | Should -Match $Match
+        Test-Path -LiteralPath (Join-Path $x.Tools 'probe.json') | Should -BeFalse
+        Test-Path -LiteralPath $x.HomeRoot | Should -BeFalse
+        Test-Path -LiteralPath $x.Records | Should -BeFalse
+    }
+
+    It 'keeps the caller''s own certificate material untouched' {
+        $x = New-TIso
+        $fakeProfile = New-TDir 'profile'
+        Write-TFile $fakeProfile 'pbiviz-certs/PowerBICustomVisualTestPass.txt' 'sentinel passphrase'
+        Write-TBytes -Path (Join-Path $fakeProfile 'pbiviz-certs\PowerBICustomVisualTest_public.pfx') -Seed 5
+        $hashes = @(Get-ChildItem -LiteralPath (Join-Path $fakeProfile 'pbiviz-certs') -File | ForEach-Object { "$($_.Name)=$(Get-PbivizFileSha256 $_.FullName)" })
+        $saved = $env:USERPROFILE
+        try {
+            $env:USERPROFILE = $fakeProfile
+            Install-TFakeTools -Dir $x.Repo -Mode 'sdk-cert'
+            $b = Invoke-PbivizBuild -Root $x.Repo -Visual 'Bar'
+            $env:USERPROFILE | Should -Be $fakeProfile
+        } finally { $env:USERPROFILE = $saved }
+        $b.Status | Should -Be 'PASS' -Because $b.Reason
+        (Read-TProbe $x).homedir | Should -Not -Be $fakeProfile
+        @(Get-ChildItem -LiteralPath (Join-Path $fakeProfile 'pbiviz-certs') -File | ForEach-Object { "$($_.Name)=$(Get-PbivizFileSha256 $_.FullName)" }) | Should -Be $hashes
+        @(Get-ChildItem -LiteralPath $fakeProfile -Recurse -Force).Count | Should -Be 3 -Because 'nothing was added to the profile'
+    }
+
+    It 'FAILS without build evidence when a new certificate appears in Cert:\CurrentUser\My (the store is only read)' {
+        $x = New-TIso
+        $calls = @{ n = 0 }
+        function Get-PbivizUserCertThumbprints { $calls.n++; if ($calls.n -eq 1) { return @('AAAA') } else { return @('AAAA', 'BBBB') } }
+        Install-TFakeTools -Dir $x.Repo
+        $b = Invoke-PbivizBuild -Root $x.Repo -Visual 'Bar'
+        $b.Status | Should -Be 'FAILED'
+        $b.Reason | Should -Match 'a new certificate appeared in Cert:\\CurrentUser\\My during the build \(BBBB\) - it was NOT removed'
+        $calls.n | Should -Be 2
+        Test-Path -LiteralPath $x.Records | Should -BeFalse
+    }
+
+    It 'FAILS without build evidence when the SDK tries to install the API package' {
+        $x = New-TIso
+        Install-TFakeTools -Dir $x.Repo -Mode 'install-api'
+        $b = Invoke-PbivizBuild -Root $x.Repo -Visual 'Bar'
+        $b.Status | Should -Be 'FAILED'
+        $b.Reason | Should -Match 'the SDK tried to install powerbi-visuals-api'
+        Test-Path -LiteralPath $x.Records | Should -BeFalse
+    }
+
+    It 'removes the disposable home after <Case> and keeps evidence only for success' -TestCases @(
+        @{ Case = 'success'; Mode = 'ok'; Status = 'PASS'; Timeout = 900 },
+        @{ Case = 'a failed build'; Mode = 'fail'; Status = 'FAILED'; Timeout = 900 },
+        @{ Case = 'a timeout'; Mode = 'hang'; Status = 'FAILED'; Timeout = 3 },
+        @{ Case = 'a guard stop'; Mode = 'pwsh'; Status = 'FAILED'; Timeout = 900 }
+    ) {
+        $x = New-TIso
+        $before = Get-TEnvSnap
+        Install-TFakeTools -Dir $x.Repo -Mode $Mode
+        $b = Invoke-PbivizBuild -Root $x.Repo -Visual 'Bar' -TimeoutSeconds $Timeout
+        $b.Status | Should -Be $Status -Because $b.Reason
+        Test-Path -LiteralPath $x.HomeRoot | Should -BeFalse
+        Test-Path -LiteralPath $x.Records | Should -Be ($Status -eq 'PASS')
+        Assert-TEnvRestored $before
+    }
+}
+
+Describe 'The toolchain preflight blocks every dependency download pbiviz package would start (final hardening P2)' {
+
+    BeforeAll {
+        function New-TPre {
+            param([string]$PbivizJson = $null, [hashtable]$Lock = $null)
+            $r = New-TRepo
+            New-TVisual $r 'Bar' 'barGuid0001' '1.0.0.1'
+            if ($PbivizJson) { Write-TFile $r 'Bar/pbiviz.json' $PbivizJson }
+            if ($Lock) {
+                $declared = "{ ""powerbi-visuals-api"": ""$($Lock.ApiDeclared)"", ""powerbi-visuals-tools"": ""$($Lock.ToolsDeclared)"" }"
+                $lockDeclared = "{ ""powerbi-visuals-api"": ""$($Lock.LockApiDeclared)"", ""powerbi-visuals-tools"": ""$($Lock.ToolsDeclared)"" }"
+                Write-TFile $r 'Bar/package.json' "{ ""name"": ""bar"", ""version"": ""1.0.0"", ""devDependencies"": $declared }"
+                Write-TFile $r 'Bar/package-lock.json' "{ ""name"": ""bar"", ""version"": ""1.0.0"", ""lockfileVersion"": 3, ""requires"": true, ""packages"": { """": { ""name"": ""bar"", ""version"": ""1.0.0"", ""devDependencies"": $lockDeclared }, ""node_modules/powerbi-visuals-api"": { ""version"": ""$($Lock.ApiLocked)"", ""dev"": true }, ""node_modules/powerbi-visuals-tools"": { ""version"": ""$($Lock.ToolsLocked)"", ""dev"": true } } }"
+            }
+            $head = Save-TAll $r 'base'
+            return [pscustomobject]@{ Repo = $r; Head = $head; Tools = (Join-Path $r 'Bar\node_modules\powerbi-visuals-tools'); HomeRoot = (Join-Path $r '.git\pbiviz-build-home'); Records = (Join-Path $r '.git\pbiviz-builds') }
+        }
+        $script:GoodLock = @{ ApiDeclared = '~5.11.0'; LockApiDeclared = '~5.11.0'; ToolsDeclared = '^7.2.2'; ApiLocked = '5.11.0'; ToolsLocked = '7.2.2' }
+    }
+
+    It 'BLOCKS <Case> before the CLI starts; nothing is run, installed or recorded' -TestCases @(
+        @{ Case = 'a missing powerbi-visuals-api'; Api = ''; Lock = $null; Pbiviz = $null; Match = 'powerbi-visuals-api is not installed in Bar/node_modules: pbiviz package would run npm install --save powerbi-visuals-api@~5\.11\.0 .*APPROVED:INSTALL:Bar' },
+        @{ Case = 'an installed API with another major.minor'; Api = '5.3.0'; Lock = $null; Pbiviz = $null; Match = 'the installed powerbi-visuals-api 5\.3\.0 does not match pbiviz\.json apiVersion 5\.11\.0 \(major\.minor\): pbiviz package would run npm install --save powerbi-visuals-api@~5\.11\.0' },
+        @{ Case = 'a pbiviz.json without apiVersion'; Api = '5.11.0'; Lock = $null; Pbiviz = "{`n  ""visual"": { ""name"": ""Bar"", ""guid"": ""barGuid0001"", ""version"": ""1.0.0.1"" }`n}`n"; Match = 'pbiviz\.json has no apiVersion: pbiviz package would run npm install --save powerbi-visuals-api@latest' },
+        @{ Case = 'an installed API other than the locked one'; Api = '5.11.1'; Lock = 'api-drift'; Pbiviz = $null; Match = 'node_modules holds powerbi-visuals-api 5\.11\.1 but package-lock\.json locks 5\.11\.0' },
+        @{ Case = 'installed tools other than the locked ones'; Api = '5.11.0'; Lock = 'tools-drift'; Pbiviz = $null; Match = 'node_modules holds powerbi-visuals-tools 7\.2\.2 but package-lock\.json locks 7\.2\.1' },
+        @{ Case = 'a package.json that disagrees with package-lock.json'; Api = '5.11.0'; Lock = 'manifest-drift'; Pbiviz = $null; Match = "package\.json and package-lock\.json disagree on powerbi-visuals-api \('~5\.12\.0' vs '~5\.11\.0'\)" }
+    ) {
+        $lockSpec = $null
+        if ($Lock) {
+            $lockSpec = $script:GoodLock.Clone()
+            if ($Lock -eq 'tools-drift') { $lockSpec.ToolsLocked = '7.2.1' }
+            if ($Lock -eq 'manifest-drift') { $lockSpec.ApiDeclared = '~5.12.0' }
+        }
+        $x = New-TPre -PbivizJson $Pbiviz -Lock $lockSpec
+        Install-TFakeTools -Dir $x.Repo -Mode 'probe' -ApiVersion $Api
+        $before = Get-TState $x.Repo
+        $b = Invoke-PbivizBuild -Root $x.Repo -Visual 'Bar'
+        $b.Status | Should -Be 'BLOCKED'
+        $b.Reason | Should -Match $Match
+        Test-Path -LiteralPath (Join-Path $x.Tools 'probe.json') | Should -BeFalse -Because 'the CLI never started'
+        Test-Path -LiteralPath $x.HomeRoot | Should -BeFalse
+        Test-Path -LiteralPath $x.Records | Should -BeFalse
+        @(Compare-PbivizWorkingState -Before $before -After (Get-TState $x.Repo)).Count | Should -Be 0
+    }
+
+    It 'builds with a compatible installed toolchain: <Case>' -TestCases @(
+        @{ Case = 'another patch of the same API major.minor, no lockfile'; Api = '5.11.4'; Lock = $false; Match = 'no package-lock\.json' },
+        @{ Case = 'the versions package-lock.json locks'; Api = '5.11.0'; Lock = $true; Match = 'are the versions package-lock\.json locks' }
+    ) {
+        $x = New-TPre -Lock $(if ($Lock) { $script:GoodLock } else { $null })
+        Install-TFakeTools -Dir $x.Repo -ApiVersion $Api
+        $b = Invoke-PbivizBuild -Root $x.Repo -Visual 'Bar'
+        $b.Status | Should -Be 'PASS' -Because $b.Reason
+        ($b.Evidence -join ' ') | Should -Match 'toolchain preflight: powerbi-visuals-api'
+        ($b.Evidence -join ' ') | Should -Match $Match
+    }
+}
+
+Describe 'Stale build homes are swept only when their build has ended (final hardening P3)' {
+
+    BeforeAll {
+        function New-TSweep {
+            $r = New-TRepo
+            New-TVisual $r 'Bar' 'barGuid0001' '1.0.0.1'
+            New-TVisual $r 'Column' 'colGuid0001' '2.0.0.1'
+            Save-TAll $r 'base' | Out-Null
+            Install-TFakeTools -Dir $r -Visual 'Bar'
+            $root = Join-Path $r '.git\pbiviz-build-home'
+            [void][IO.Directory]::CreateDirectory($root)
+            return [pscustomobject]@{ Repo = $r; HomeRoot = $root }
+        }
+        function New-THome {
+            param($X, [string]$Name, [switch]$Lock, [int]$AgeHours = 0)
+            $h = Join-Path $X.HomeRoot $Name
+            [void][IO.Directory]::CreateDirectory((Join-Path $h 'profile'))
+            if ($Lock) { [IO.File]::WriteAllText((Join-Path $h 'owner.lock'), '') }
+            if ($AgeHours) { $t = [DateTime]::UtcNow.AddHours(-$AgeHours); (Get-Item -LiteralPath $h).CreationTimeUtc = $t; (Get-Item -LiteralPath $h).LastWriteTimeUtc = $t }
+            return $h
+        }
+    }
+
+    It 'keeps a live home whose build holds its lock, however old it is and however short this build''s timeout' {
+        $x = New-TSweep
+        $live = New-THome $x 'home-live00000001' -Lock -AgeHours 72
+        $held = [IO.File]::Open((Join-Path $live 'owner.lock'), [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        try {
+            $b = Invoke-PbivizBuild -Root $x.Repo -Visual 'Bar' -TimeoutSeconds 5
+            $b.Status | Should -Be 'PASS' -Because $b.Reason
+            Test-Path -LiteralPath $live | Should -BeTrue -Because 'a concurrent build keeps its home'
+            ($b.Evidence -join ' ') | Should -Not -Match 'home-live00000001'
+        } finally { $held.Dispose() }
+        Remove-Item -LiteralPath (Join-Path $x.Repo 'Bar\dist') -Recurse -Force
+        $b2 = Invoke-PbivizBuild -Root $x.Repo -Visual 'Bar' -TimeoutSeconds 5
+        $b2.Status | Should -Be 'PASS' -Because $b2.Reason
+        Test-Path -LiteralPath $live | Should -BeFalse -Because 'once its build ended the lock is free and the home is swept'
+        ($b2.Evidence -join ' ') | Should -Match 'removed a disposable build home left by an ended run: home-live00000001'
+    }
+
+    It 'removes a home whose lock is free (an interrupted build), keeps a lockless home for 24 hours and never follows a link' {
+        $x = New-TSweep
+        $dead = New-THome $x 'home-dead00000001' -Lock
+        $fresh = New-THome $x 'home-fresh0000001'
+        $old = New-THome $x 'home-old000000001' -AgeHours 30
+        $target = New-TDir 'linktarget'
+        Write-TFile $target 'must-survive.txt' 'x'
+        $link = Join-Path $x.HomeRoot 'home-link00000001'
+        & cmd.exe /c "mklink /J `"$link`" `"$target`"" | Out-Null
+        try {
+            $b = Invoke-PbivizBuild -Root $x.Repo -Visual 'Bar'
+            $b.Status | Should -Be 'PASS' -Because $b.Reason
+            Test-Path -LiteralPath $dead | Should -BeFalse
+            Test-Path -LiteralPath $old | Should -BeFalse
+            Test-Path -LiteralPath $fresh | Should -BeTrue
+            Test-Path -LiteralPath $link | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $target 'must-survive.txt') | Should -BeTrue
+            $ev = $b.Evidence -join ' '
+            $ev | Should -Match 'home-dead00000001'
+            $ev | Should -Match 'home-old000000001'
+            $ev | Should -Match 'a link in the build-home folder was left alone: home-link00000001'
+        } finally { if (Test-Path -LiteralPath $link) { [IO.Directory]::Delete($link) } }
+    }
+
+    It 'a build running in parallel in the same repository keeps its home while another build sweeps' {
+        $x = New-TSweep
+        Install-TFakeTools -Dir $x.Repo -Visual 'Bar' -Mode 'hang'
+        Install-TFakeTools -Dir $x.Repo -Visual 'Column'
+        $job = Start-Job -ScriptBlock {
+            param($Helper, $Repo, $GitConfig)
+            $env:GIT_CONFIG_GLOBAL = $GitConfig; $env:GIT_CONFIG_NOSYSTEM = '1'
+            . $Helper
+            $r = Invoke-PbivizBuild -Root $Repo -Visual 'Bar' -TimeoutSeconds 40
+            [pscustomobject]@{ Status = $r.Status; Reason = $r.Reason }
+        } -ArgumentList $script:HelperFile, $x.Repo, $script:EmptyGitConfig
+        try {
+            $other = $null
+            $sw = [Diagnostics.Stopwatch]::StartNew()
+            while (-not $other -and $sw.Elapsed.TotalSeconds -lt 60) {
+                foreach ($h in @(Get-ChildItem -LiteralPath $x.HomeRoot -Directory -Filter 'home-*' -ErrorAction SilentlyContinue)) {
+                    $l = Join-Path $h.FullName 'owner.lock'
+                    if (-not (Test-Path -LiteralPath $l)) { continue }
+                    try { ([IO.File]::Open($l, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)).Dispose() } catch { $other = $h.FullName }
+                }
+                if (-not $other) { Start-Sleep -Milliseconds 250 }
+            }
+            $other | Should -Not -BeNullOrEmpty -Because 'the parallel build created and holds its home'
+            $b = Invoke-PbivizBuild -Root $x.Repo -Visual 'Column' -TimeoutSeconds 60
+            $b.Status | Should -Be 'PASS' -Because $b.Reason
+            Test-Path -LiteralPath $other | Should -BeTrue -Because 'the sweep never removes the home of a live build'
+            $r = Wait-Job $job -Timeout 90 | Receive-Job
+            $r.Status | Should -Be 'FAILED'
+            $r.Reason | Should -Match 'timed out after 40 s'
+            Test-Path -LiteralPath $other | Should -BeFalse -Because 'the parallel build removed its own home when it ended'
+        } finally { Stop-Job $job -ErrorAction SilentlyContinue; Remove-Job $job -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+Describe 'Archive-only promotions verify completely at the source revision (Canary D3)' {
+
+    BeforeAll {
+        # Prod starts without Bar; a validated Level 1 release of Bar on Dev reaches Prod through an
+        # archive-only promotion, so the Prod commit carries the pair but no Bar source.
+        function New-TArchiveOnly {
+            $r = New-TRepo
+            Write-TFile $r 'README.md' 'base'
+            Save-TAll $r 'base' | Out-Null
+            TGit $r branch PBVIZ_Team_Prod | Out-Null
+            TGit $r switch -q -c PBVIZ_Team_Dev | Out-Null
+            New-TVisual $r 'Bar' 'barGuid0001' '1.0.0.1'
+            $src = Save-TAll $r 'bar'
+            (Invoke-TBuild -Dir $r).Status | Should -Be 'PASS'
+            $ev = Get-TEvidence -Sha $src
+            $rel = Add-PbivizRelease -Root $r -Visual 'Bar' -SourceSha $src @ev
+            $rel.Status | Should -Be 'PASS' -Because $rel.Reason
+            $rel.Validated | Should -BeTrue
+            TGit $r commit -q -m 'release Bar 1.0.0.1' | Out-Null
+            $c = New-PbivizPromotionCandidate -Root $r -Visual 'Bar' -SourceRef PBVIZ_Team_Dev -TargetRef PBVIZ_Team_Prod -ArchiveOnly
+            $c.Status | Should -Be 'PASS' -Because $c.Reason
+            $g = Test-PbivizPromotionGates -Worktree $c.Worktree -Visual 'Bar' -TargetRef PBVIZ_Team_Prod -ArchiveOnly
+            $g.Status | Should -Be 'PASS' -Because $g.Reason
+            TGit $c.Worktree commit -q -m 'archive-only: Bar 1.0.0.1' | Out-Null
+            @(TGit $c.Worktree ls-tree '-r' --name-only HEAD -- 'Bar/src') | Where-Object { $_ } | Should -BeNullOrEmpty -Because 'the Prod commit carries no Bar source'
+            return [pscustomobject]@{ Repo = $r; Wt = $c.Worktree; Branch = $c.Branch; Src = $src; Manifest = 'Bar/releases/barGuid0001.1.0.0.1.release.json'; Package = 'Bar/releases/barGuid0001.1.0.0.1.pbiviz' }
+        }
+    }
+
+    It 'verifies a validated archive-only release COMPLETELY: commit evidence at Prod, source binding at the source revision' {
+        $x = New-TArchiveOnly
+        $i = Test-PbivizReleaseIntegrity -Root $x.Repo -Visual 'Bar' -Version '1.0.0.1' -Commit (TGit $x.Wt rev-parse HEAD)
+        $i.Status | Should -Be 'PASS' -Because $i.Reason
+        $i.Verification | Should -Be 'COMPLETE'
+        $i.CommitEvidence | Should -Be 'VERIFIED'
+        $i.SourceRevision | Should -Be 'VERIFIED'
+        $i.ReleaseClass | Should -Be 'OFFICIAL RELEASE'
+        ($i.Evidence -join ' ') | Should -Match 'archive-only\): shared files and the archived pair .* the source fingerprint is NOT compared at this commit - only at the source revision'
+    }
+
+    It 'reports PARTIAL / COMMIT ONLY when the source revision is not in the clone' {
+        $x = New-TArchiveOnly
+        $clone = New-TDir 'cl'
+        Remove-Item -LiteralPath $clone
+        TGit $script:Root clone -q --no-tags --single-branch --branch $x.Branch ('file:///' + ($x.Repo -replace '\\', '/')) $clone | Out-Null
+        $i = Test-PbivizReleaseIntegrity -Root $clone -Visual 'Bar' -Version '1.0.0.1' -Commit HEAD
+        $i.Status | Should -Be 'PARTIAL'
+        $i.Verification | Should -Be 'COMMIT ONLY'
+        $i.SourceRevision | Should -Be 'NOT AVAILABLE'
+    }
+
+    It 'FAILS an archive-only release whose <Case>' -TestCases @(
+        @{ Case = 'package bytes were altered'; Kind = 'package'; Match = 'SHA-256 differs' },
+        @{ Case = 'manifest size was edited'; Kind = 'bytes'; Match = 'package size differs from the manifest' },
+        @{ Case = 'manifest fingerprint no longer matches the source revision'; Kind = 'fingerprint'; Match = 'does not yield the manifest fingerprint' },
+        @{ Case = 'manifest claims a shared file the commit does not hold'; Kind = 'shared'; Match = "shared file 'shared/fmt\.ts' at [0-9a-f]{12} is ''" }
+    ) {
+        $x = New-TArchiveOnly
+        $mp = Join-Path $x.Wt ($x.Manifest -replace '/', '\')
+        switch ($Kind) {
+            'package' { Write-TPackage -Path (Join-Path $x.Wt ($x.Package -replace '/', '\')) -Guid 'barGuid0001' -Version '1.0.0.1' -Seed 91; TGit $x.Wt add -- $x.Package | Out-Null }
+            default {
+                $j = [IO.File]::ReadAllText($mp) | ConvertFrom-Json
+                switch ($Kind) {
+                    'bytes' { $j.bytes = 1 }
+                    'fingerprint' { $j.sourceFingerprint = ('a' * 64); $j.build.sourceFingerprint = ('a' * 64) }
+                    'shared' { $j.sharedFiles = @([pscustomobject]@{ path = 'shared/fmt.ts'; blob = ('1' * 40) }) }
+                }
+                [IO.File]::WriteAllText($mp, ($j | ConvertTo-Json -Depth 8))
+                TGit $x.Wt add -- $x.Manifest | Out-Null
+            }
+        }
+        TGit $x.Wt commit -q -m "tamper $Kind" | Out-Null
+        $i = Test-PbivizReleaseIntegrity -Root $x.Repo -Visual 'Bar' -Version '1.0.0.1' -Commit (TGit $x.Wt rev-parse HEAD)
+        $i.Status | Should -Be 'FAILED'
+        $i.Reason | Should -Match $Match
+        $i.ReleaseClass | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Test-stage reconciliation keeps rejected content out of Prod (Canary D4)' {
+
+    It 'reconciles only the selected visual on Test through test-sync, keeps the rejected pair as history and promotes the unchanged release branch' {
+        $r = New-TL3
+        TGit $r branch PBVIZ_Team_Test PBVIZ_Team_Prod | Out-Null
+        # Test also carries a tested change of another visual that reconciliation must not touch.
+        TGit $r switch -q PBVIZ_Team_Test | Out-Null
+        Write-TFile $r 'Column/src/visual.ts' 'export class Visual { testOnly = true }'
+        Save-TAll $r 'Column change on Test' | Out-Null
+        $columnOnTest = TGit $r rev-parse 'PBVIZ_Team_Test:Column'
+        $columnOnProd = TGit $r rev-parse 'PBVIZ_Team_Prod:Column'
+        TGit $r switch -q PBVIZ_Team_Dev | Out-Null
+        # V1 1.0.0.2: released to Test, then rejected there.
+        Set-TVersion $r 'Bar' 'barGuid0001' '1.0.0.2'
+        Write-TFile $r 'Bar/src/visual.ts' 'export class Visual { v = 2 }'
+        Write-TFile $r 'Bar/src/rejected-only.ts' 'export const rejected = true;'
+        Save-TAll $r 'Bar 1.0.0.2 (rejected in Test later)' | Out-Null
+        $p1 = Invoke-TPromotion -Repo $r
+        $p1.Gates.Status | Should -Be 'PASS' -Because $p1.Gates.Reason
+        TGit $p1.Candidate.Worktree commit -q -m 'release Bar 1.0.0.2' | Out-Null
+        TGit $r switch -q PBVIZ_Team_Test | Out-Null
+        TGit $r merge -q --no-ff -m 'PR1 Bar 1.0.0.2 into Test' $p1.Candidate.Branch | Out-Null
+        (Test-PbivizReleaseIntegrity -Root $r -Visual 'Bar' -Version '1.0.0.2' -Commit PBVIZ_Team_Test).Status | Should -Be 'PASS'
+        TGit $r switch -q PBVIZ_Team_Dev | Out-Null
+        # V2 1.0.0.3: the fix is a new Dev commit and a new version, cut from the Prod tip again.
+        Set-TVersion $r 'Bar' 'barGuid0001' '1.0.0.3'
+        Write-TFile $r 'Bar/src/visual.ts' 'export class Visual { v = 3 }'
+        TGit $r rm -q -- 'Bar/src/rejected-only.ts' | Out-Null
+        Save-TAll $r 'Bar 1.0.0.3 fix' | Out-Null
+        $p2 = Invoke-TPromotion -Repo $r -Seed 12
+        $p2.Gates.Status | Should -Be 'PASS' -Because $p2.Gates.Reason
+        TGit $p2.Candidate.Worktree commit -q -m 'release Bar 1.0.0.3' | Out-Null
+        $rel = $p2.Candidate.Branch
+        $relTip = TGit $r rev-parse $rel
+        # One candidate per release: a second one for the same version is refused.
+        (New-PbivizPromotionCandidate -Root $r -Visual 'Bar' -SourceRef PBVIZ_Team_Dev -TargetRef PBVIZ_Team_Prod).Status | Should -Be 'BLOCKED'
+        # A naive pull request 1 (resolving only the conflicting paths) leaves rejected source on Test.
+        TGit $r switch -q -c naive PBVIZ_Team_Test | Out-Null
+        TGitExit $r merge --no-ff --no-commit $rel | Should -Not -Be 0 -Because 'Test still holds the rejected Bar source'
+        foreach ($p in @((TGit $r diff --name-only --diff-filter=U) -split "`n" | Where-Object { $_ })) { TGit $r checkout --theirs -- $p | Out-Null; TGit $r add -- $p | Out-Null }
+        TGit $r commit -q -m 'naive resolution' | Out-Null
+        $naive = Test-PbivizReleaseIntegrity -Root $r -Visual 'Bar' -Version '1.0.0.3' -Commit HEAD
+        $naive.Status | Should -Be 'FAILED' -Because 'the rejected rejected-only.ts is still in the Bar source scope on Test'
+        # The documented mechanism: test-sync/<visual>/<version> from the Test tip.
+        TGit $r switch -q -c 'test-sync/Bar/1.0.0.3' PBVIZ_Team_Test | Out-Null
+        TGitExit $r merge --no-ff --no-commit $rel | Out-Null
+        TGit $r checkout $rel -- Bar | Out-Null
+        $relFiles = @((TGit $r ls-tree '-r' --name-only $rel -- Bar) -split "`n" | Where-Object { $_ })
+        $extra = @((TGit $r ls-files -- Bar) -split "`n" | Where-Object { $_ -and $_ -notlike 'Bar/releases/*' -and $relFiles -notcontains $_ })
+        ($extra -join '|') | Should -Be 'Bar/src/rejected-only.ts'
+        foreach ($p in $extra) { TGit $r rm -q -- $p | Out-Null }
+        @((TGit $r diff --name-only --diff-filter=U) -split "`n" | Where-Object { $_ }).Count | Should -Be 0
+        @((TGit $r diff --cached --name-only PBVIZ_Team_Test) -split "`n" | Where-Object { $_ -and -not $_.StartsWith('Bar/') }).Count | Should -Be 0 -Because 'only the selected visual is reconciled'
+        TGit $r commit -q -m 'Merge release Bar 1.0.0.3 into Test via test-sync' | Out-Null
+        TGit $r switch -q PBVIZ_Team_Test | Out-Null
+        TGit $r merge -q --no-ff -m 'PR1 test-sync/Bar/1.0.0.3 into Test' 'test-sync/Bar/1.0.0.3' | Out-Null
+        $onTest = Test-PbivizReleaseIntegrity -Root $r -Visual 'Bar' -Version '1.0.0.3' -Commit PBVIZ_Team_Test
+        $onTest.Status | Should -Be 'PASS' -Because $onTest.Reason
+        $onTest.Verification | Should -Be 'COMPLETE'
+        TGit $r ls-tree --name-only PBVIZ_Team_Test -- 'Bar/releases/barGuid0001.1.0.0.2.pbiviz' | Should -Be 'Bar/releases/barGuid0001.1.0.0.2.pbiviz' -Because 'the rejected pair stays in the Test archive as history'
+        TGit $r rev-parse 'PBVIZ_Team_Test:Column' | Should -Be $columnOnTest -Because 'the other visual on Test is untouched'
+        TGit $r rev-parse $rel | Should -Be $relTip -Because 'the release branch itself is never changed on the way to Test'
+        # Pull request 2: the SAME release branch to Prod.
+        TGit $r switch -q PBVIZ_Team_Prod | Out-Null
+        TGit $r merge -q --no-ff -m 'PR2 Bar 1.0.0.3 into Prod' $rel | Out-Null
+        $onProd = Test-PbivizReleaseIntegrity -Root $r -Visual 'Bar' -Version '1.0.0.3' -Commit PBVIZ_Team_Prod
+        $onProd.Status | Should -Be 'PASS' -Because $onProd.Reason
+        $onProd.ReleaseClass | Should -Be 'OFFICIAL RELEASE'
+        TGit $r ls-tree '-r' --name-only PBVIZ_Team_Prod -- 'Bar' | Should -Not -Match 'rejected-only|1\.0\.0\.2' -Because 'rejected content never reaches Prod'
+        TGit $r rev-parse 'PBVIZ_Team_Prod:Column' | Should -Be $columnOnProd -Because 'the Test-only change of another visual did not reach Prod'
+    }
+}
+
+Describe 'Gate results stay readable in Windows PowerShell 5.1 (Canary D11)' {
+
+    It 'returns all seven gates as a plain array for PASS and BLOCKED results' {
+        $r = New-TL3
+        Set-TVersion $r 'Bar' 'barGuid0001' '1.0.0.2'
+        Save-TAll $r 'bar v2' | Out-Null
+        $p = Invoke-TPromotion -Repo $r
+        $g = $p.Gates
+        $g.Status | Should -Be 'PASS' -Because $g.Reason
+        $g.Gates.GetType().FullName | Should -Be 'System.Object[]'
+        { @($g.Gates) } | Should -Not -Throw
+        @($g.Gates).Count | Should -Be 7
+        (@($g.Gates | ForEach-Object { $_.Gate }) -join ',') | Should -Be 'G0,G1,G2,G3,G4,G5,G6'
+        @($g.Gates | Where-Object { -not $_.Pass }).Count | Should -Be 0
+        Write-TFile $p.Candidate.Worktree 'Column/src/visual.ts' 'export class Visual { sneaked = true }'
+        TGit $p.Candidate.Worktree add -- 'Column/src/visual.ts' | Out-Null
+        $b = Test-PbivizPromotionGates -Worktree $p.Candidate.Worktree -Visual 'Bar' -TargetRef PBVIZ_Team_Prod
+        $b.Status | Should -Be 'BLOCKED'
+        $b.Gates.GetType().FullName | Should -Be 'System.Object[]'
+        @($b.Gates).Count | Should -Be 7
+        @($b.Gates | Where-Object { -not $_.Pass } | ForEach-Object { $_.Gate }) | Should -Contain 'G3'
+        (Get-TGate $b 'G3').Detail | Should -Match 'other visuals changed: Column'
     }
 }

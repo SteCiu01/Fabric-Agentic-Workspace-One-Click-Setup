@@ -33,16 +33,18 @@ agent workflows or specialist agents.
    Use prefixes: `feature/`, `fix/`, `docs/`, `chore/`
 3. **Make your changes** — keep commits focused and atomic
 4. **Test your changes**:
+   - Run the Pester suite: double-click `tests/Run-Tests.bat` (see [tests/README.md](tests/README.md) for focused runs, prerequisites and how to add a regression test)
    - Run the `.bat` installer on a clean folder to verify setup works end-to-end
    - If you modified an agent definition, test it in VS Code Copilot Chat
    - If you modified the PowerShell script, test on both PowerShell 5.1 and PowerShell 7+ if possible
+   - The PBIVIZ Git helper has a single source, the `$pbivizAlmScript` heredoc inside the installer: change it there and add a test to `tests/PBIVIZ.Alm.Tests.ps1` that fails without your change
 5. **Open a pull request** against `main`
 
 ### What's a good first contribution?
 
 Look for issues labelled [`good first issue`](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/labels/good%20first%20issue)
-or check the [current status table in the README](README.md#current-status-v010-preview)
-for areas marked "Not yet".
+or check the [current status table in the README](README.md#311-current-status-v080)
+for areas marked "not exercised".
 
 Some ideas:
 - Cross-platform setup script (bash/zsh for macOS/Linux)

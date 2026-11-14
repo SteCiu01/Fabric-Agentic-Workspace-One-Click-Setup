@@ -189,3 +189,66 @@ Describe 'Ensure-Python and Step 2 wiring (static)' {
         $script:Raw | Should -Match 'miniconda3'
     }
 }
+
+Describe 'Optional CLI detection: a warning on stderr is not a missing CLI (Canary D1)' {
+
+    BeforeAll {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:Installer, [ref]$null, [ref]$null)
+        foreach ($name in 'Test-CliResilient', 'Get-CliProbeState') {
+            $fn = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true) | Select-Object -First 1
+            $fn | Should -Not -BeNullOrEmpty -Because "$name must exist in the installer"
+            Invoke-Expression $fn.Extent.Text
+        }
+        # The probe must not widen PATH to the real machine or find a real az in the user's Python folders.
+        function Sync-ToolPaths { }
+        function Add-DirToPath { param([string]$Dir) }
+        $script:CliDir = Join-Path ([System.IO.Path]::GetTempPath()) ("fabric_cli_" + [guid]::NewGuid().ToString('N'))
+        $script:EmptyProfile = Join-Path $script:CliDir 'empty-appdata'
+        New-Item -ItemType Directory -Path $script:EmptyProfile -Force | Out-Null
+        $script:SavedAppData = $env:APPDATA; $script:SavedLocalAppData = $env:LOCALAPPDATA
+        $env:APPDATA = $script:EmptyProfile; $env:LOCALAPPDATA = $script:EmptyProfile
+        $script:AzShim = Join-Path $script:CliDir 'az.cmd'
+    }
+
+    AfterAll {
+        $env:APPDATA = $script:SavedAppData; $env:LOCALAPPDATA = $script:SavedLocalAppData
+        if ($script:CliDir -and (Test-Path -LiteralPath $script:CliDir)) { Remove-Item -LiteralPath $script:CliDir -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    AfterEach {
+        $env:Path = $script:SavedPath
+        Remove-Item -LiteralPath $script:AzShim -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'treats az that prints a warning on stderr and exits 0 as runnable, even under ErrorActionPreference Stop' {
+        Set-Content -LiteralPath $script:AzShim -Value "@echo WARNING: Unable to check if your CLI is up-to-date. Check your internet connection. 1>&2`r`n@echo azure-cli                         2.87.0`r`n@exit /b 0" -Encoding ascii
+        $env:Path = "$($script:CliDir);$env:SystemRoot\System32"
+        $ErrorActionPreference = 'Stop'
+        Get-CliProbeState -Name 'az' -Retries 1 | Should -Be 'runnable'
+    }
+
+    It 'reports az on PATH whose version probe fails as unhealthy - never as missing' {
+        Set-Content -LiteralPath $script:AzShim -Value "@echo ERROR: something broke 1>&2`r`n@exit /b 1" -Encoding ascii
+        $env:Path = "$($script:CliDir);$env:SystemRoot\System32"
+        $ErrorActionPreference = 'Stop'
+        Get-CliProbeState -Name 'az' -Retries 1 | Should -Be 'unhealthy'
+    }
+
+    It 'reports a CLI that is genuinely absent as missing' {
+        $env:Path = "$($script:CliDir);$env:SystemRoot\System32"
+        Get-CliProbeState -Name 'az' -Retries 1 | Should -Be 'missing'
+    }
+
+    It 'Step 2 acquires az only in the missing branch (never over an existing or unhealthy CLI)' {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:Installer, [ref]$null, [ref]$null)
+        $script:Raw | Should -Match "\`$azState = Get-CliProbeState -Name 'az'"
+        $if = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and $n.Clauses.Count -gt 0 -and $n.Clauses[0].Item1.Extent.Text -eq "`$azState -eq 'unhealthy'" }, $true) | Select-Object -First 1
+        $if | Should -Not -BeNullOrEmpty
+        $if.Clauses.Count | Should -Be 2
+        $if.Clauses[0].Item2.Extent.Text | Should -Not -Match 'winget|Install-AzCliViaVenv'
+        $if.Clauses[1].Item1.Extent.Text | Should -Be "`$azState -eq 'missing'"
+        $if.Clauses[1].Item2.Extent.Text | Should -Match 'winget install'
+        $if.Clauses[1].Item2.Extent.Text | Should -Match 'Install-AzCliViaVenv'
+        $if.ElseClause.Extent.Text | Should -Not -Match 'winget|Install-AzCliViaVenv'
+    }
+}
