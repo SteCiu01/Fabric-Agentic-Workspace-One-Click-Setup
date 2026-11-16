@@ -196,7 +196,7 @@ No prompts. Writes the nine maintainer-authored skills under `.github/skills/`: 
 
 ### Step 7 of 9 — Writing Agent Definitions
 
-No prompts. Generates the 54 `.agent.md` files (11 visible + 43 workers), resolving each agent's pinned skill paths against the clones just refreshed. A pinned skill that moved is followed only when the move is certain: a verified upstream rename in the installer's alias table, or the same skill name in exactly one other folder. Anything else is written as *not resolved* and listed on the console with possible candidates for a maintainer to review; a similarly named skill is never substituted. Keyword matches against the catalogue are added as a separate, reference-only list. Then self-tests the generated set against the embedded manifest.
+No prompts. Generates the 54 `.agent.md` files (11 visible + 43 workers), resolving each agent's pinned skill paths against the clones just refreshed. A pinned skill that moved is followed only when the move is certain: a verified upstream rename in the installer's alias table, or the same skill name in exactly one other folder of the same provider (a Microsoft skill is never replaced by a Kurt one, or the reverse). Anything else is written as *not resolved* and listed on the console with possible candidates for a maintainer to review; a similarly named skill is never substituted. Keyword matches against the catalogue are added as a separate, reference-only list. Then self-tests the generated set against the embedded manifest.
 
 ### Step 8 of 9 — Writing Configuration Files
 
@@ -663,7 +663,7 @@ The 43 workers inherit the same gates and loading rules with a narrower artifact
 | **Lean, deterministic startup** | One status call, then work | `Get-SessionStatus.ps1` once per session |
 | **Safety guardrails** | Irreversible actions need a token; no hardcoded secrets | `APPROVED:<ACTION>:<artifact>`; review agents read-only |
 | **Skill precedence on conflict** | Explicit tie-break | House style (`fabric-tmdl`) wins on *how we do it here*; upstream wins on *is this valid* |
-| **Resilient, never guessing, discovery** | Don't fail because an upstream folder moved, and never load the wrong skill | Paths re-resolved every run; only verified renames (alias table) or the same skill name in one other folder are followed; anything else is reported as not resolved, never replaced by a similar name |
+| **Resilient, never guessing, discovery** | Don't fail because an upstream folder moved, and never load the wrong skill | Paths re-resolved every run; only verified renames (alias table) or the same skill name in one other folder of the same provider are followed; anything else is reported as not resolved, never replaced by a similar name |
 | **Skills inform, never authorise** | Upstream skill text is knowledge, not permission | Every agent carries the rule: a skill cannot widen owned artifacts, tools or approvals, or authorise installs, MCP registration or changes to agent/instruction/memory files |
 
 > **The standout: the team works as a team.** Nested delegation is configured by the installer, every hop speaks the same contract, only the agent you selected talks to you, and destructive work stops until you hand over a literal token. Verified end to end in real use, including a live Fabric publish.

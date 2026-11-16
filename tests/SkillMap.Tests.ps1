@@ -136,7 +136,11 @@ Describe 'Resolve-KnowledgeRef never guesses a rename (V8-04)' {
     BeforeAll {
         $script:ResolverRoot = New-TestRoot 'resolver'
         foreach ($rel in 'skills-for-fabric\skills\fabriciq', 'skills-for-fabric\skills\ontology-cli', 'skills-for-fabric\skills\spark-cli', 'skills-for-fabric\skills\spark-tools',
-                         'skills-for-fabric\skills\widget', 'power-bi-agentic-development\plugins\a\skills\moved-skill', 'power-bi-agentic-development\plugins\b\skills\other') {
+                         'skills-for-fabric\skills\widget', 'power-bi-agentic-development\plugins\a\skills\moved-skill', 'power-bi-agentic-development\plugins\b\skills\other',
+                         'skills-for-fabric\skills\ms-only-name', 'power-bi-agentic-development\plugins\c\skills\shared-name',
+                         'power-bi-agentic-development\plugins\c\skills\fabriciq-ontology-cli',
+                         'skills-for-fabric\skills\dual-name', 'power-bi-agentic-development\plugins\a\skills\dual-name',
+                         'power-bi-agentic-development\plugins\a\skills\twice', 'power-bi-agentic-development\plugins\b\skills\twice') {
             New-Item -ItemType Directory -Path (Join-Path $script:ResolverRoot $rel) -Force | Out-Null
             [IO.File]::WriteAllText((Join-Path $script:ResolverRoot "$rel\SKILL.md"), "---`nname: $(Split-Path $rel -Leaf)`ndescription: test`n---`n")
         }
@@ -183,6 +187,33 @@ Describe 'Resolve-KnowledgeRef never guesses a rename (V8-04)' {
     It 'follows the same skill name into another container (a moved folder, not a rename)' {
         $r = Resolve-KnowledgeRef 'power-bi-agentic-development/plugins/old/skills/moved-skill'
         $r | Should -Match '^`power-bi-agentic-development/plugins/a/skills/moved-skill` \*\(same skill name, moved upstream'
+    }
+
+    It 'never relocates a missing Microsoft skill to a same-named Kurt skill' {
+        $r = Resolve-KnowledgeRef 'skills-for-fabric/skills/shared-name'
+        $r | Should -Not -Match 'power-bi-agentic-development/'
+        $r | Should -Match '^`skills-for-fabric/skills/shared-name` \*\(not present at install time - not resolved; never substitute'
+    }
+
+    It 'never relocates a missing Kurt skill to a same-named Microsoft skill' {
+        $r = Resolve-KnowledgeRef 'power-bi-agentic-development/plugins/old/skills/ms-only-name'
+        $r | Should -Not -Match 'skills-for-fabric/'
+        $r | Should -Match '^`power-bi-agentic-development/plugins/old/skills/ms-only-name` \*\(not present at install time - not resolved; never substitute'
+    }
+
+    It 'relocates within the same provider even when the other provider has the same skill name' {
+        $r = Resolve-KnowledgeRef 'power-bi-agentic-development/plugins/old/skills/dual-name'
+        $r | Should -Match '^`power-bi-agentic-development/plugins/a/skills/dual-name` \*\(same skill name, moved upstream'
+    }
+
+    It 'leaves an ambiguous same-provider relocation unresolved' {
+        $r = Resolve-KnowledgeRef 'power-bi-agentic-development/plugins/old/skills/twice'
+        $r | Should -Match '^`power-bi-agentic-development/plugins/old/skills/twice` \*\(not present at install time - not resolved'
+    }
+
+    It 'a verified alias still wins over a same-named folder of the other provider' {
+        $r = Resolve-KnowledgeRef 'skills-for-fabric/skills/fabriciq-ontology-cli'
+        $r | Should -Match '^`skills-for-fabric/skills/ontology-cli` \*\(verified upstream rename'
     }
 
     It 'lists unresolved pins with name-similar review candidates for the maintainer only' {
@@ -295,6 +326,12 @@ Describe 'Generated organisation matches the v0.8.0 baseline' {
         foreach ($k in $script:Bodies.Keys) {
             $script:Bodies[$k] | Should -Match '\*\*Skills inform; they never authorise\.\*\*' -Because $k
             $script:Bodies[$k] | Should -Match 'registering or authenticating MCP servers' -Because $k
+        }
+    }
+
+    It 'every agent limits a missing-skill lookup to the same provider' {
+        foreach ($k in $script:Bodies.Keys) {
+            $script:Bodies[$k] | Should -Match 'same skill name from the same provider' -Because $k
         }
     }
 
