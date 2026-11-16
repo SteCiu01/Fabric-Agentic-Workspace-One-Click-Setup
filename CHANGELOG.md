@@ -16,11 +16,18 @@ Introduces end-to-end Power BI custom visual development, from planning and impl
 - **Three-level ALM:** local versioning (Level 1), remote collaboration (Level 2) and selective DEV/TEST/PROD promotion (Level 3), with release manifests, integrity verification, provenance and approval gates.
 - **Custom visual build and release tooling:** project-local SDK packaging, build evidence, dependency validation and controlled release archives.
 - **Microsoft Learn MCP integration:** added without replacing existing MCP configuration.
+- **Guidance for newer upstream skills:** Project Osmos routing with approval tokens, staged semantic-model organisation and Prep data for AI readiness, OneLake catalog audit and curation modes, Database Hub, capacity, governance policies, FabricIQ and Ontology.
+- **PBIR edit policy** in the CLI-policy skill, and report QA through `pbir desktop` that stops when the target Desktop instance has unsaved changes.
+- **Skill map regression suite** (`tests/SkillMap.Tests.ps1`) with a committed skill-catalogue snapshot and an agent identity baseline.
+- Detect-only recording of Microsoft's `powerbi-report-author` CLI; it is never offered or installed.
 
 ### Changed
 
 - Custom visual SDK development is assigned to the PBIVIZ team; the Reporting team continues to own in-report visuals and report integration.
 - Agent workflows include review-finding carry-forward, improved release validation and explicit approval requirements.
+- Keyword-matched upstream skills are listed as reference only, with narrower keywords and out-of-scope skills excluded; every agent states that skills inform but never authorise.
+- The generated `.gitignore` excludes `.dataprojects/` (Project Osmos authentication and routing files).
+- Documentation separates skills that are discovered, registered, pinned or suggested from tools that are installed, configured or actually called.
 
 ### Fixed
 
@@ -28,6 +35,8 @@ Introduces end-to-end Power BI custom visual development, from planning and impl
 - Hardened custom visual builds against certificate side effects, unintended dependency downloads, concurrent-build conflicts and incomplete certificate verification.
 - Corrected release integrity validation for archive-only promotions and PowerShell 5.1 promotion-gate output.
 - Documented safe reconciliation of rejected TEST candidates.
+- Updated skill references renamed or retired upstream (`onelake-catalog-govern-cli`, `fabriciq-ontology-cli`, `standardize-naming-conventions`).
+- Skill resolution no longer substitutes a similarly named skill; only verified renames are followed, and unresolved references are reported.
 
 ## [v0.7.3] - 2026-10-21
 

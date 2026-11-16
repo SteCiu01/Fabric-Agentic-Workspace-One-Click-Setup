@@ -1,0 +1,990 @@
+{
+    "schemaVersion":  1,
+    "note":  "Generated-agent identities, tool grants, hierarchy and write permissions at the v0.8.0 baseline, plus the PBIVIZ team knowledge (pins, keyword suggestions, Playbook-to-end hash) emitted against tests/fixtures/skill-catalog.snapshot.json.",
+    "capturedFrom":  "7d5547c",
+    "agents":  {
+                   "000-fabric-workspace-master.agent.md":  {
+                                                                "name":  "000 - Fabric Workspace Master",
+                                                                "description":  "Classify intent, select the authoritative write surface, invoke the minimum teams, prevent conflicting writes, and own the final outcome.",
+                                                                "userInvocable":  "true",
+                                                                "tools":  [
+                                                                              "agent",
+                                                                              "read",
+                                                                              "search",
+                                                                              "execute",
+                                                                              "powerbi-modeling-mcp/*",
+                                                                              "microsoftDocs/*"
+                                                                          ],
+                                                                "agents":  [
+                                                                               "001 - Fabric Solution Architect",
+                                                                               "002 - Integration QA \u0026 Change Controller",
+                                                                               "010 - Semantic Model Team Lead",
+                                                                               "020 - Reporting Team Lead",
+                                                                               "030 - Data Engineering Team Lead",
+                                                                               "040 - Fabric Administration \u0026 Governance Team Lead",
+                                                                               "050 - ALM \u0026 DevOps Team Lead",
+                                                                               "060 - Applications \u0026 Integration Team Lead",
+                                                                               "070 - Capability Maintenance Team Lead",
+                                                                               "080 - PBIVIZ Development Team Lead"
+                                                                           ],
+                                                                "writePermission":  "orchestration only; delegate implementation."
+                                                            },
+                   "001-fabric-solution-architect.agent.md":  {
+                                                                  "name":  "001 - Fabric Solution Architect",
+                                                                  "description":  "Design artifact boundaries, dependencies, sequence, ownership, validation, rollback, and team assignments without broad implementation.",
+                                                                  "userInvocable":  "true",
+                                                                  "tools":  [
+                                                                                "agent",
+                                                                                "read",
+                                                                                "search",
+                                                                                "microsoftDocs/*"
+                                                                            ],
+                                                                  "agents":  [
+                                                                                 "010 - Semantic Model Team Lead",
+                                                                                 "020 - Reporting Team Lead",
+                                                                                 "030 - Data Engineering Team Lead",
+                                                                                 "040 - Fabric Administration \u0026 Governance Team Lead",
+                                                                                 "050 - ALM \u0026 DevOps Team Lead",
+                                                                                 "060 - Applications \u0026 Integration Team Lead",
+                                                                                 "080 - PBIVIZ Development Team Lead"
+                                                                             ],
+                                                                  "writePermission":  "read-only planning."
+                                                              },
+                   "002-integration-qa-change-controller.agent.md":  {
+                                                                         "name":  "002 - Integration QA \u0026 Change Controller",
+                                                                         "description":  "Validate cross-artifact references, environment and branch alignment, security, privacy, coherent diffs, rollback, and release readiness.",
+                                                                         "userInvocable":  "true",
+                                                                         "tools":  [
+                                                                                       "read",
+                                                                                       "search",
+                                                                                       "execute",
+                                                                                       "microsoftDocs/*"
+                                                                                   ],
+                                                                         "agents":  [
+
+                                                                                    ],
+                                                                         "writePermission":  "read-only validation; return defects to Master."
+                                                                     },
+                   "010-semantic-model-team-lead.agent.md":  {
+                                                                 "name":  "010 - Semantic Model Team Lead",
+                                                                 "description":  "Decompose semantic work, select TE2, Modeling MCP/TOM, TMDL, fab, or sqlcmd, coordinate dependencies, and own model-wide validation.",
+                                                                 "userInvocable":  "true",
+                                                                 "tools":  [
+                                                                               "agent",
+                                                                               "read",
+                                                                               "search",
+                                                                               "execute",
+                                                                               "edit",
+                                                                               "powerbi-modeling-mcp/*",
+                                                                               "microsoftDocs/*"
+                                                                           ],
+                                                                 "agents":  [
+                                                                                "011 - Model Architecture Agent",
+                                                                                "012 - Relationships \u0026 Storage Mode Agent",
+                                                                                "013 - TMDL Agent",
+                                                                                "014 - DAX Agent",
+                                                                                "015 - Semantic Security \u0026 AI Metadata Agent",
+                                                                                "016 - Semantic Validation \u0026 Performance Agent"
+                                                                            ],
+                                                                 "writePermission":  "edit files inside your owned artifact paths."
+                                                             },
+                   "011-model-architecture.agent.md":  {
+                                                           "name":  "011 - Model Architecture Agent",
+                                                           "description":  "Assess grain, fact and dimension boundaries, star schema, Direct Lake versus Import, composites, and calculation-group architecture.",
+                                                           "userInvocable":  "false",
+                                                           "tools":  [
+                                                                         "read",
+                                                                         "search",
+                                                                         "powerbi-modeling-mcp/*"
+                                                                     ],
+                                                           "agents":  [
+
+                                                                      ],
+                                                           "writePermission":  "normally read-only."
+                                                       },
+                   "012-relationships-storage-mode.agent.md":  {
+                                                                   "name":  "012 - Relationships \u0026 Storage Mode Agent",
+                                                                   "description":  "Implement and validate cardinality, filter direction, ambiguity, bridges, integrity, storage modes, and Direct Lake behavior.",
+                                                                   "userInvocable":  "false",
+                                                                   "tools":  [
+                                                                                 "read",
+                                                                                 "search",
+                                                                                 "execute",
+                                                                                 "edit",
+                                                                                 "powerbi-modeling-mcp/*"
+                                                                             ],
+                                                                   "agents":  [
+
+                                                                              ],
+                                                                   "writePermission":  "edit files inside your owned artifact paths."
+                                                               },
+                   "013-tmdl.agent.md":  {
+                                             "name":  "013 - TMDL Agent",
+                                             "description":  "Inspect before editing tables, columns, hierarchies, partitions, expressions, cultures, and PBIP semantic-model files; preserve house style and validate.",
+                                             "userInvocable":  "false",
+                                             "tools":  [
+                                                           "read",
+                                                           "search",
+                                                           "execute",
+                                                           "edit",
+                                                           "powerbi-modeling-mcp/*"
+                                                       ],
+                                             "agents":  [
+
+                                                        ],
+                                             "writePermission":  "edit files inside your owned artifact paths."
+                                         },
+                   "014-dax.agent.md":  {
+                                            "name":  "014 - DAX Agent",
+                                            "description":  "Create and validate measures, time intelligence, calculation groups, context behavior, formats, regression queries, and performance.",
+                                            "userInvocable":  "false",
+                                            "tools":  [
+                                                          "read",
+                                                          "search",
+                                                          "execute",
+                                                          "edit",
+                                                          "powerbi-modeling-mcp/*"
+                                                      ],
+                                            "agents":  [
+
+                                                       ],
+                                            "writePermission":  "edit files inside your owned artifact paths."
+                                        },
+                   "015-semantic-security-ai-metadata.agent.md":  {
+                                                                      "name":  "015 - Semantic Security \u0026 AI Metadata Agent",
+                                                                      "description":  "Own RLS, OLS, roles, descriptions, synonyms, AI instructions, schemas, verified-answer metadata, and explicit security-impact validation.",
+                                                                      "userInvocable":  "false",
+                                                                      "tools":  [
+                                                                                    "read",
+                                                                                    "search",
+                                                                                    "execute",
+                                                                                    "edit",
+                                                                                    "powerbi-modeling-mcp/*"
+                                                                                ],
+                                                                      "agents":  [
+
+                                                                                 ],
+                                                                      "writePermission":  "edit files inside your owned artifact paths."
+                                                                  },
+                   "016-semantic-validation-performance.agent.md":  {
+                                                                        "name":  "016 - Semantic Validation \u0026 Performance Agent",
+                                                                        "description":  "Run TE2 BPA, schema, relationship, VertiPaq, Direct Lake, DAX regression, and storage validation.",
+                                                                        "userInvocable":  "false",
+                                                                        "tools":  [
+                                                                                      "read",
+                                                                                      "search",
+                                                                                      "execute",
+                                                                                      "powerbi-modeling-mcp/*"
+                                                                                  ],
+                                                                        "agents":  [
+
+                                                                                   ],
+                                                                        "writePermission":  "read-only unless a safe fix is approved."
+                                                                    },
+                   "020-reporting-team-lead.agent.md":  {
+                                                            "name":  "020 - Reporting Team Lead",
+                                                            "description":  "Turn requirements into a report plan, coordinate PBIR implementation and semantic dependencies, serialize visual/theme ownership, and require report QA.",
+                                                            "userInvocable":  "true",
+                                                            "tools":  [
+                                                                          "agent",
+                                                                          "read",
+                                                                          "search",
+                                                                          "execute",
+                                                                          "edit",
+                                                                          "microsoftDocs/*"
+                                                                      ],
+                                                            "agents":  [
+                                                                           "021 - Report Planning \u0026 UX Agent",
+                                                                           "022 - PBIR Authoring Agent",
+                                                                           "023 - Theme \u0026 Formatting Agent",
+                                                                           "024 - Advanced \u0026 Custom Visuals Agent",
+                                                                           "025 - Paginated Reports Agent",
+                                                                           "026 - Report QA \u0026 Desktop Verification Agent"
+                                                                       ],
+                                                            "writePermission":  "edit files inside your owned artifact paths."
+                                                        },
+                   "021-report-planning-ux.agent.md":  {
+                                                           "name":  "021 - Report Planning \u0026 UX Agent",
+                                                           "description":  "Define audience, business questions, page plan, navigation, visual selection, accessibility, interactions, and required measures before implementation.",
+                                                           "userInvocable":  "false",
+                                                           "tools":  [
+                                                                         "read",
+                                                                         "search"
+                                                                     ],
+                                                           "agents":  [
+
+                                                                      ],
+                                                           "writePermission":  "read-only planning."
+                                                       },
+                   "022-pbir-authoring.agent.md":  {
+                                                       "name":  "022 - PBIR Authoring Agent",
+                                                       "description":  "Use pbir first for report structure and visuals, verify current help, validate after each mutation, and use controlled direct PBIR only as fallback.",
+                                                       "userInvocable":  "false",
+                                                       "tools":  [
+                                                                     "read",
+                                                                     "search",
+                                                                     "execute",
+                                                                     "edit"
+                                                                 ],
+                                                       "agents":  [
+
+                                                                  ],
+                                                       "writePermission":  "edit files inside your owned artifact paths."
+                                                   },
+                   "023-theme-formatting.agent.md":  {
+                                                         "name":  "023 - Theme \u0026 Formatting Agent",
+                                                         "description":  "Own typography, palette, spacing, conditional formatting, branding, and accessibility; never edit the same visual concurrently with PBIR Authoring.",
+                                                         "userInvocable":  "false",
+                                                         "tools":  [
+                                                                       "read",
+                                                                       "search",
+                                                                       "edit"
+                                                                   ],
+                                                         "agents":  [
+
+                                                                    ],
+                                                         "writePermission":  "edit files inside your owned artifact paths."
+                                                     },
+                   "024-advanced-custom-visuals.agent.md":  {
+                                                                "name":  "024 - Advanced \u0026 Custom Visuals Agent",
+                                                                "description":  "Implement Deneb, SVG, Python/R visuals and advanced interactions inside PBIR reports only when the design requires them; route Power BI custom visual SDK (.pbiviz) projects to the PBIVIZ Development team via the Master.",
+                                                                "userInvocable":  "false",
+                                                                "tools":  [
+                                                                              "read",
+                                                                              "search",
+                                                                              "edit"
+                                                                          ],
+                                                                "agents":  [
+
+                                                                           ],
+                                                                "writePermission":  "edit files inside your owned artifact paths."
+                                                            },
+                   "025-paginated-reports.agent.md":  {
+                                                          "name":  "025 - Paginated Reports Agent",
+                                                          "description":  "Own paginated definitions, parameters, data sources, layout, rendering, and export validation.",
+                                                          "userInvocable":  "false",
+                                                          "tools":  [
+                                                                        "read",
+                                                                        "search",
+                                                                        "edit"
+                                                                    ],
+                                                          "agents":  [
+
+                                                                     ],
+                                                          "writePermission":  "edit files inside your owned artifact paths."
+                                                      },
+                   "026-report-qa-desktop-verification.agent.md":  {
+                                                                       "name":  "026 - Report QA \u0026 Desktop Verification Agent",
+                                                                       "description":  "Run pbir validation and available Desktop refresh/screenshots; detect overlap, truncation, blanks, broken bindings, accessibility, and theme defects.",
+                                                                       "userInvocable":  "false",
+                                                                       "tools":  [
+                                                                                     "read",
+                                                                                     "search",
+                                                                                     "execute"
+                                                                                 ],
+                                                                       "agents":  [
+
+                                                                                  ],
+                                                                       "writePermission":  "read-only verification."
+                                                                   },
+                   "030-data-engineering-team-lead.agent.md":  {
+                                                                   "name":  "030 - Data Engineering Team Lead",
+                                                                   "description":  "Coordinate source-to-serving engineering and its semantic dependencies, assign one artifact owner, and validate data and orchestration.",
+                                                                   "userInvocable":  "true",
+                                                                   "tools":  [
+                                                                                 "agent",
+                                                                                 "read",
+                                                                                 "search",
+                                                                                 "execute",
+                                                                                 "edit",
+                                                                                 "Fabric MCP/*",
+                                                                                 "microsoftDocs/*"
+                                                                             ],
+                                                                   "agents":  [
+                                                                                  "031 - Notebook \u0026 Spark Agent",
+                                                                                  "032 - Lakehouse, Delta \u0026 MLV Agent",
+                                                                                  "033 - Warehouse SQL Agent",
+                                                                                  "034 - SQL Database Agent",
+                                                                                  "035 - Dataflows Gen2 Agent",
+                                                                                  "036 - Pipeline Orchestration Agent",
+                                                                                  "037 - Real-Time Intelligence Agent",
+                                                                                  "038 - Fabric Intelligence \u0026 Ontology Agent"
+                                                                              ],
+                                                                   "writePermission":  "edit files inside your owned artifact paths."
+                                                               },
+                   "031-notebook-spark.agent.md":  {
+                                                       "name":  "031 - Notebook \u0026 Spark Agent",
+                                                       "description":  "Author and validate PySpark, Spark SQL, notebooks, sessions, remote execution, dependencies, and notebook quality.",
+                                                       "userInvocable":  "false",
+                                                       "tools":  [
+                                                                     "read",
+                                                                     "search",
+                                                                     "execute",
+                                                                     "edit",
+                                                                     "Fabric MCP/*"
+                                                                 ],
+                                                       "agents":  [
+
+                                                                  ],
+                                                       "writePermission":  "edit files inside your owned artifact paths."
+                                                   },
+                   "032-lakehouse-delta-mlv.agent.md":  {
+                                                            "name":  "032 - Lakehouse, Delta \u0026 MLV Agent",
+                                                            "description":  "Own Delta, medallion, MLV, incremental processing, shortcuts, schema evolution, and optimization; request DuckDB only through approval.",
+                                                            "userInvocable":  "false",
+                                                            "tools":  [
+                                                                          "read",
+                                                                          "search",
+                                                                          "execute",
+                                                                          "edit",
+                                                                          "Fabric MCP/*"
+                                                                      ],
+                                                            "agents":  [
+
+                                                                       ],
+                                                            "writePermission":  "edit files inside your owned artifact paths."
+                                                        },
+                   "033-warehouse-sql.agent.md":  {
+                                                      "name":  "033 - Warehouse SQL Agent",
+                                                      "description":  "Design and validate Fabric Warehouse and SQL analytics endpoint DDL, DML, serving, and performance using sqlcmd when available.",
+                                                      "userInvocable":  "false",
+                                                      "tools":  [
+                                                                    "read",
+                                                                    "search",
+                                                                    "execute",
+                                                                    "edit",
+                                                                    "Fabric MCP/*"
+                                                                ],
+                                                      "agents":  [
+
+                                                                 ],
+                                                      "writePermission":  "edit files inside your owned artifact paths."
+                                                  },
+                   "034-sql-database.agent.md":  {
+                                                     "name":  "034 - SQL Database Agent",
+                                                     "description":  "Handle Fabric SQL Database OLTP, procedures, temporal, JSON, vectors, security, and diagnostics distinctly from Warehouse work.",
+                                                     "userInvocable":  "false",
+                                                     "tools":  [
+                                                                   "read",
+                                                                   "search",
+                                                                   "execute",
+                                                                   "edit",
+                                                                   "Fabric MCP/*"
+                                                               ],
+                                                     "agents":  [
+
+                                                                ],
+                                                     "writePermission":  "edit files inside your owned artifact paths."
+                                                 },
+                   "035-dataflows-gen2.agent.md":  {
+                                                       "name":  "035 - Dataflows Gen2 Agent",
+                                                       "description":  "Own Power Query M, connectors, previews, destinations, refresh behavior, and failure diagnosis for Dataflows Gen2.",
+                                                       "userInvocable":  "false",
+                                                       "tools":  [
+                                                                     "read",
+                                                                     "search",
+                                                                     "execute",
+                                                                     "edit",
+                                                                     "Fabric MCP/*"
+                                                                 ],
+                                                       "agents":  [
+
+                                                                  ],
+                                                       "writePermission":  "edit files inside your owned artifact paths."
+                                                   },
+                   "036-pipeline-orchestration.agent.md":  {
+                                                               "name":  "036 - Pipeline Orchestration Agent",
+                                                               "description":  "Implement pipeline activities, notebooks, dataflows, copy, variables, schedules, dependencies, retry, and failure handling with schema validation.",
+                                                               "userInvocable":  "false",
+                                                               "tools":  [
+                                                                             "read",
+                                                                             "search",
+                                                                             "execute",
+                                                                             "edit",
+                                                                             "Fabric MCP/*"
+                                                                         ],
+                                                               "agents":  [
+
+                                                                          ],
+                                                               "writePermission":  "edit files inside your owned artifact paths."
+                                                           },
+                   "037-real-time-intelligence.agent.md":  {
+                                                               "name":  "037 - Real-Time Intelligence Agent",
+                                                               "description":  "Own real-time Fabric artifacts, KQL behavior, ingestion, monitoring, and operational validation.",
+                                                               "userInvocable":  "false",
+                                                               "tools":  [
+                                                                             "read",
+                                                                             "search",
+                                                                             "execute",
+                                                                             "edit",
+                                                                             "Fabric MCP/*"
+                                                                         ],
+                                                               "agents":  [
+
+                                                                          ],
+                                                               "writePermission":  "edit files inside your owned artifact paths."
+                                                           },
+                   "038-fabric-intelligence-ontology.agent.md":  {
+                                                                     "name":  "038 - Fabric Intelligence \u0026 Ontology Agent",
+                                                                     "description":  "Handle FabricIQ, Ontology, Data Agents, and related knowledge capabilities while checking current product behavior.",
+                                                                     "userInvocable":  "false",
+                                                                     "tools":  [
+                                                                                   "read",
+                                                                                   "search",
+                                                                                   "execute",
+                                                                                   "edit",
+                                                                                   "Fabric MCP/*"
+                                                                               ],
+                                                                     "agents":  [
+
+                                                                                ],
+                                                                     "writePermission":  "edit files inside your owned artifact paths."
+                                                                 },
+                   "040-fabric-administration-governance-team-lead.agent.md":  {
+                                                                                   "name":  "040 - Fabric Administration \u0026 Governance Team Lead",
+                                                                                   "description":  "Coordinate workspace, capacity, access, governance, monitoring, catalog, and operational safety with explicit approval for destructive changes.",
+                                                                                   "userInvocable":  "true",
+                                                                                   "tools":  [
+                                                                                                 "agent",
+                                                                                                 "read",
+                                                                                                 "search",
+                                                                                                 "execute",
+                                                                                                 "edit",
+                                                                                                 "Fabric MCP/*",
+                                                                                                 "microsoftDocs/*"
+                                                                                             ],
+                                                                                   "agents":  [
+                                                                                                  "041 - Workspace \u0026 Capacity Administration Agent",
+                                                                                                  "042 - Security, Access \u0026 Governance Agent",
+                                                                                                  "043 - Monitoring, Catalog \u0026 Operations Agent"
+                                                                                              ],
+                                                                                   "writePermission":  "edit files inside your owned artifact paths."
+                                                                               },
+                   "041-workspace-capacity-administration.agent.md":  {
+                                                                          "name":  "041 - Workspace \u0026 Capacity Administration Agent",
+                                                                          "description":  "Administer workspaces, capacities, settings, assignments, and cost awareness; require approval for destructive or production-impacting actions.",
+                                                                          "userInvocable":  "false",
+                                                                          "tools":  [
+                                                                                        "read",
+                                                                                        "search",
+                                                                                        "execute",
+                                                                                        "Fabric MCP/*"
+                                                                                    ],
+                                                                          "agents":  [
+
+                                                                                     ],
+                                                                          "writePermission":  "run commands/CLI; no file edits."
+                                                                      },
+                   "042-security-access-governance.agent.md":  {
+                                                                   "name":  "042 - Security, Access \u0026 Governance Agent",
+                                                                   "description":  "Own workspace roles, Entra groups, least privilege, permissions, governance, and security-boundary validation.",
+                                                                   "userInvocable":  "false",
+                                                                   "tools":  [
+                                                                                 "read",
+                                                                                 "search",
+                                                                                 "execute",
+                                                                                 "Fabric MCP/*"
+                                                                             ],
+                                                                   "agents":  [
+
+                                                                              ],
+                                                                   "writePermission":  "run commands/CLI; no file edits."
+                                                               },
+                   "043-monitoring-catalog-operations.agent.md":  {
+                                                                      "name":  "043 - Monitoring, Catalog \u0026 Operations Agent",
+                                                                      "description":  "Search catalog and inventory, inspect jobs and refreshes, monitor status, and diagnose failures without unapproved remediation.",
+                                                                      "userInvocable":  "false",
+                                                                      "tools":  [
+                                                                                    "read",
+                                                                                    "search",
+                                                                                    "execute",
+                                                                                    "Fabric MCP/*"
+                                                                                ],
+                                                                      "agents":  [
+
+                                                                                 ],
+                                                                      "writePermission":  "read-only diagnosis by default."
+                                                                  },
+                   "050-alm-devops-team-lead.agent.md":  {
+                                                             "name":  "050 - ALM \u0026 DevOps Team Lead",
+                                                             "description":  "Own Git, GitHub, Azure DevOps, Fabric Git integration, release sequencing, and Power BI ALM; tool installation belongs to Maintenance.",
+                                                             "userInvocable":  "true",
+                                                             "tools":  [
+                                                                           "agent",
+                                                                           "read",
+                                                                           "search",
+                                                                           "execute",
+                                                                           "edit",
+                                                                           "Fabric MCP/*",
+                                                                           "microsoftDocs/*"
+                                                                       ],
+                                                             "agents":  [
+                                                                            "051 - GitHub Source Control Agent",
+                                                                            "052 - Azure DevOps Agent",
+                                                                            "053 - Fabric Git Integration Agent",
+                                                                            "054 - Deployment \u0026 Release Agent",
+                                                                            "055 - Power BI ALM Agent"
+                                                                        ],
+                                                             "writePermission":  "edit files inside your owned artifact paths."
+                                                         },
+                   "051-github-source-control.agent.md":  {
+                                                              "name":  "051 - GitHub Source Control Agent",
+                                                              "description":  "Use Git and gh for authorized branches, commits, pull requests, reviews, Actions, releases, and repository settings; never expose credentials.",
+                                                              "userInvocable":  "false",
+                                                              "tools":  [
+                                                                            "read",
+                                                                            "search",
+                                                                            "execute"
+                                                                        ],
+                                                              "agents":  [
+
+                                                                         ],
+                                                              "writePermission":  "run commands/CLI; no file edits."
+                                                          },
+                   "052-azure-devops.agent.md":  {
+                                                     "name":  "052 - Azure DevOps Agent",
+                                                     "description":  "Use Git and approved az devops/repos/pipelines/boards commands for Azure DevOps work, respecting repository topology and auth policy.",
+                                                     "userInvocable":  "false",
+                                                     "tools":  [
+                                                                   "read",
+                                                                   "search",
+                                                                   "execute"
+                                                               ],
+                                                     "agents":  [
+
+                                                                ],
+                                                     "writePermission":  "run commands/CLI; no file edits."
+                                                 },
+                   "053-fabric-git-integration.agent.md":  {
+                                                               "name":  "053 - Fabric Git Integration Agent",
+                                                               "description":  "Inspect and operate Fabric Git status, commit, update, mapping, and conflict workflows without inferring permission to overwrite either side.",
+                                                               "userInvocable":  "false",
+                                                               "tools":  [
+                                                                             "read",
+                                                                             "search",
+                                                                             "execute",
+                                                                             "Fabric MCP/*"
+                                                                         ],
+                                                               "agents":  [
+
+                                                                          ],
+                                                               "writePermission":  "run commands/CLI; no file edits."
+                                                           },
+                   "054-deployment-release.agent.md":  {
+                                                           "name":  "054 - Deployment \u0026 Release Agent",
+                                                           "description":  "Sequence DEV to TEST to PROD, PRs, deployment pipelines, parameters, release checks, rollback, and notes without assuming branch names.",
+                                                           "userInvocable":  "false",
+                                                           "tools":  [
+                                                                         "read",
+                                                                         "search",
+                                                                         "execute",
+                                                                         "Fabric MCP/*"
+                                                                     ],
+                                                           "agents":  [
+
+                                                                      ],
+                                                           "writePermission":  "run commands/CLI; no file edits."
+                                                       },
+                   "055-power-bi-alm.agent.md":  {
+                                                     "name":  "055 - Power BI ALM Agent",
+                                                     "description":  "Use pbi-tools for PBIX/PBIP extraction, build, CI/CD, deployment, and ALM validationâ€”not routine PBIR visual editing.",
+                                                     "userInvocable":  "false",
+                                                     "tools":  [
+                                                                   "read",
+                                                                   "search",
+                                                                   "execute",
+                                                                   "edit"
+                                                               ],
+                                                     "agents":  [
+
+                                                                ],
+                                                     "writePermission":  "edit files inside your owned artifact paths."
+                                                 },
+                   "060-applications-integration-team-lead.agent.md":  {
+                                                                           "name":  "060 - Applications \u0026 Integration Team Lead",
+                                                                           "description":  "Coordinate custom applications, SDK, REST/XMLA, authentication, ODBC, and data access without leaking secrets.",
+                                                                           "userInvocable":  "true",
+                                                                           "tools":  [
+                                                                                         "agent",
+                                                                                         "read",
+                                                                                         "search",
+                                                                                         "execute",
+                                                                                         "edit",
+                                                                                         "Fabric MCP/*",
+                                                                                         "microsoftDocs/*"
+                                                                                     ],
+                                                                           "agents":  [
+                                                                                          "061 - Python \u0026 Fabric SDK Agent",
+                                                                                          "062 - REST, Authentication \u0026 XMLA Agent",
+                                                                                          "063 - SQL, ODBC \u0026 Data Access Agent"
+                                                                                      ],
+                                                                           "writePermission":  "edit files inside your owned artifact paths."
+                                                                       },
+                   "061-python-fabric-sdk.agent.md":  {
+                                                          "name":  "061 - Python \u0026 Fabric SDK Agent",
+                                                          "description":  "Build Python applications, SDK clients, Azure Identity integrations, APIs, processing, and local utilities with safe dependency handling.",
+                                                          "userInvocable":  "false",
+                                                          "tools":  [
+                                                                        "read",
+                                                                        "search",
+                                                                        "execute",
+                                                                        "edit",
+                                                                        "Fabric MCP/*"
+                                                                    ],
+                                                          "agents":  [
+
+                                                                     ],
+                                                          "writePermission":  "edit files inside your owned artifact paths."
+                                                      },
+                   "062-rest-authentication-xmla.agent.md":  {
+                                                                 "name":  "062 - REST, Authentication \u0026 XMLA Agent",
+                                                                 "description":  "Handle Fabric/Power BI REST, az rest, audiences, Entra, SPN, managed identity, and XMLA with no secrets in commands or source.",
+                                                                 "userInvocable":  "false",
+                                                                 "tools":  [
+                                                                               "read",
+                                                                               "search",
+                                                                               "execute",
+                                                                               "Fabric MCP/*"
+                                                                           ],
+                                                                 "agents":  [
+
+                                                                            ],
+                                                                 "writePermission":  "run commands/CLI; no file edits."
+                                                             },
+                   "063-sql-odbc-data-access.agent.md":  {
+                                                             "name":  "063 - SQL, ODBC \u0026 Data Access Agent",
+                                                             "description":  "Own sqlcmd, ODBC, pyodbc, SQLAlchemy, Warehouse/endpoint/database connectivity, bulk operations, and parameterized validation.",
+                                                             "userInvocable":  "false",
+                                                             "tools":  [
+                                                                           "read",
+                                                                           "search",
+                                                                           "execute",
+                                                                           "Fabric MCP/*"
+                                                                       ],
+                                                             "agents":  [
+
+                                                                        ],
+                                                             "writePermission":  "run commands/CLI; no file edits."
+                                                         },
+                   "070-capability-maintenance-team-lead.agent.md":  {
+                                                                         "name":  "070 - Capability Maintenance Team Lead",
+                                                                         "description":  "Own vendor sync, skill inventory, organization, approved tool installation and updates, failed-install remediation, managed-file review, and workspace regression checks.",
+                                                                         "userInvocable":  "true",
+                                                                         "tools":  [
+                                                                                       "agent",
+                                                                                       "read",
+                                                                                       "search",
+                                                                                       "execute",
+                                                                                       "edit",
+                                                                                       "microsoftDocs/*"
+                                                                                   ],
+                                                                         "agents":  [
+                                                                                        "071 - Upstream Repository Sync Agent",
+                                                                                        "072 - Skill Inventory \u0026 Mapping Agent",
+                                                                                        "073 - Agent Coverage \u0026 Organization Agent",
+                                                                                        "074 - Environment \u0026 Tooling Agent",
+                                                                                        "075 - Installer Health \u0026 Regression Agent",
+                                                                                        "076 - Managed File Review Agent"
+                                                                                    ],
+                                                                         "writePermission":  "edit files inside your owned artifact paths."
+                                                                     },
+                   "071-upstream-repository-sync.agent.md":  {
+                                                                 "name":  "071 - Upstream Repository Sync Agent",
+                                                                 "description":  "Force-refresh the Microsoft and Kurt vendor repositories to their upstream state so the clones always mirror live upstream, stash any local edits before the hard reset so nothing is lost, record the resulting commits, and report diverged repositories.",
+                                                                 "userInvocable":  "false",
+                                                                 "tools":  [
+                                                                               "read",
+                                                                               "search",
+                                                                               "execute"
+                                                                           ],
+                                                                 "agents":  [
+
+                                                                            ],
+                                                                 "writePermission":  "vendor force-refresh to upstream only; stash local edits before hard reset, never hand-edit vendor content."
+                                                             },
+                   "072-skill-inventory-mapping.agent.md":  {
+                                                                "name":  "072 - Skill Inventory \u0026 Mapping Agent",
+                                                                "description":  "Dynamically detect valid, invalid, duplicate, added, removed, renamed, changed, unmapped, and tool-assuming skills and refresh local inventory.",
+                                                                "userInvocable":  "false",
+                                                                "tools":  [
+                                                                              "read",
+                                                                              "search",
+                                                                              "execute",
+                                                                              "edit"
+                                                                          ],
+                                                                "agents":  [
+
+                                                                           ],
+                                                                "writePermission":  "edit files inside your owned artifact paths."
+                                                            },
+                   "073-agent-coverage-organization.agent.md":  {
+                                                                    "name":  "073 - Agent Coverage \u0026 Organization Agent",
+                                                                    "description":  "Evaluate coverage, overlap, overload, gaps, team fit, workers, and teams; auto-apply only obvious low-risk mappings and seek approval for structural changes.",
+                                                                    "userInvocable":  "false",
+                                                                    "tools":  [
+                                                                                  "read",
+                                                                                  "search",
+                                                                                  "edit"
+                                                                              ],
+                                                                    "agents":  [
+
+                                                                               ],
+                                                                    "writePermission":  "edit files inside your owned artifact paths."
+                                                                },
+                   "074-environment-tooling.agent.md":  {
+                                                            "name":  "074 - Environment \u0026 Tooling Agent",
+                                                            "description":  "Own current and future default-tool updates, failed installer follow-up, optional installation, locked-down laptop remediation, validation, rollback guidance, and tool-status refresh.",
+                                                            "userInvocable":  "false",
+                                                            "tools":  [
+                                                                          "read",
+                                                                          "search",
+                                                                          "execute",
+                                                                          "edit"
+                                                                      ],
+                                                            "agents":  [
+
+                                                                       ],
+                                                            "writePermission":  "approved environment/tool changes only."
+                                                        },
+                   "075-installer-health-regression.agent.md":  {
+                                                                    "name":  "075 - Installer Health \u0026 Regression Agent",
+                                                                    "description":  "Validate source, manifests, templates, generated installer, clean/update installs, schemas, skills, tools, multi-root behavior, and privacy.",
+                                                                    "userInvocable":  "false",
+                                                                    "tools":  [
+                                                                                  "read",
+                                                                                  "search",
+                                                                                  "execute"
+                                                                              ],
+                                                                    "agents":  [
+
+                                                                               ],
+                                                                    "writePermission":  "read-only validation."
+                                                                },
+                   "076-managed-file-review.agent.md":  {
+                                                            "name":  "076 - Managed File Review Agent",
+                                                            "description":  "Review requested differences between installer-managed files and local customisations without changing the original installer update behaviour; apply an approved amendment only when the user asks.",
+                                                            "userInvocable":  "false",
+                                                            "tools":  [
+                                                                          "read",
+                                                                          "search",
+                                                                          "edit"
+                                                                      ],
+                                                            "agents":  [
+
+                                                                       ],
+                                                            "writePermission":  "apply user-requested managed-file changes only after explicit approval."
+                                                        },
+                   "080-pbiviz-development-team-lead.agent.md":  {
+                                                                     "name":  "080 - PBIVIZ Development Team Lead",
+                                                                     "description":  "Own Power BI custom visual SDK projects end to end: plan, implement, test, review, maintain, version and release .pbiviz packages with one writer per artifact, and hand report integration back to the Master for the Reporting team.",
+                                                                     "userInvocable":  "true",
+                                                                     "tools":  [
+                                                                                   "agent",
+                                                                                   "read",
+                                                                                   "search",
+                                                                                   "execute",
+                                                                                   "microsoftDocs/*",
+                                                                                   "pbiviz/*"
+                                                                               ],
+                                                                     "agents":  [
+                                                                                    "081 - PBIVIZ Planner Agent",
+                                                                                    "082 - PBIVIZ Developer Agent",
+                                                                                    "083 - PBIVIZ Tester Agent",
+                                                                                    "084 - PBIVIZ Reviewer Agent",
+                                                                                    "085 - PBIVIZ Maintainer Agent",
+                                                                                    "086 - PBIVIZ ALM \u0026 Release Agent"
+                                                                                ],
+                                                                     "writePermission":  "orchestration only; 082/085 write visual source, 086 writes Git state and release pairs."
+                                                                 },
+                   "081-pbiviz-planner.agent.md":  {
+                                                       "name":  "081 - PBIVIZ Planner Agent",
+                                                       "description":  "Read-only PBIVIZ planner: reverse-engineer PBIP visuals, write source-conversion contracts, choose the archetype, record DAX aggregation semantics, data roles, interactions and executable acceptance criteria.",
+                                                       "userInvocable":  "false",
+                                                       "tools":  [
+                                                                     "read",
+                                                                     "search",
+                                                                     "microsoftDocs/*",
+                                                                     "pbiviz/*"
+                                                                 ],
+                                                       "agents":  [
+
+                                                                  ],
+                                                       "writePermission":  "read-only planning."
+                                                   },
+                   "082-pbiviz-developer.agent.md":  {
+                                                         "name":  "082 - PBIVIZ Developer Agent",
+                                                         "description":  "Implement new or changed Power BI custom visual projects from the approved PBIVIZ_PLAN with the project-local pbiviz CLI; own the feature version bump; package only with evidence; never commit.",
+                                                         "userInvocable":  "false",
+                                                         "tools":  [
+                                                                       "read",
+                                                                       "search",
+                                                                       "execute",
+                                                                       "edit",
+                                                                       "microsoftDocs/*",
+                                                                       "pbiviz/*"
+                                                                   ],
+                                                         "agents":  [
+
+                                                                    ],
+                                                         "writePermission":  "the assigned visual project folder only; never commits."
+                                                     },
+                   "083-pbiviz-tester.agent.md":  {
+                                                      "name":  "083 - PBIVIZ Tester Agent",
+                                                      "description":  "Independently verify PBIVIZ builds, data correctness, interactions and regressions in tiers T0-T4 without editing source; host checks are NOT RUN unless actually executed.",
+                                                      "userInvocable":  "false",
+                                                      "tools":  [
+                                                                    "read",
+                                                                    "search",
+                                                                    "execute",
+                                                                    "microsoftDocs/*",
+                                                                    "pbiviz/*"
+                                                                ],
+                                                      "agents":  [
+
+                                                                 ],
+                                                      "writePermission":  "read-only; non-destructive execution only."
+                                                  },
+                   "084-pbiviz-reviewer.agent.md":  {
+                                                        "name":  "084 - PBIVIZ Reviewer Agent",
+                                                        "description":  "Independent read-only review of PBIVIZ changes: semantics, API correctness, security, accessibility, licences and release evidence; returns APPROVE, BLOCK or APPROVE WITH NONBLOCKING NOTES.",
+                                                        "userInvocable":  "false",
+                                                        "tools":  [
+                                                                      "read",
+                                                                      "search",
+                                                                      "microsoftDocs/*",
+                                                                      "pbiviz/*"
+                                                                  ],
+                                                        "agents":  [
+
+                                                                   ],
+                                                        "writePermission":  "read-only review."
+                                                    },
+                   "085-pbiviz-maintainer.agent.md":  {
+                                                          "name":  "085 - PBIVIZ Maintainer Agent",
+                                                          "description":  "Audit first, then maintain existing custom visuals for current SDK/runtime compatibility and security findings; own the maintenance version bump; never work concurrently with the Developer on the same visual.",
+                                                          "userInvocable":  "false",
+                                                          "tools":  [
+                                                                        "read",
+                                                                        "search",
+                                                                        "execute",
+                                                                        "edit",
+                                                                        "microsoftDocs/*",
+                                                                        "pbiviz/*"
+                                                                    ],
+                                                          "agents":  [
+
+                                                                     ],
+                                                          "writePermission":  "the assigned existing visual project only, after an audit and an approved change set; never commits."
+                                                      },
+                   "086-pbiviz-alm-release.agent.md":  {
+                                                           "name":  "086 - PBIVIZ ALM \u0026 Release Agent",
+                                                           "description":  "Own the PBIVIZ repository lifecycle across three levels: local checkpoints and restores (L1), remote onboarding and sync (L2), isolated single-visual promotion with append-only releases and derived provenance (L3), always through the Pbiviz-Alm.ps1 helper and approval tokens.",
+                                                           "userInvocable":  "false",
+                                                           "tools":  [
+                                                                         "read",
+                                                                         "search",
+                                                                         "execute",
+                                                                         "edit",
+                                                                         "microsoftDocs/*",
+                                                                         "pbiviz/*"
+                                                                     ],
+                                                           "agents":  [
+
+                                                                      ],
+                                                           "writePermission":  "PBIVIZ repository Git state, its root .gitignore/.gitattributes and new release pairs only; never visual source."
+                                                       }
+               },
+    "pbiviz":  {
+                   "080-pbiviz-development-team-lead.agent.md":  {
+                                                                     "pinned":  [
+                                                                                    "- `.github/agent-docs/local/pbiviz-workspace.json` *(optional, machine-specific; skip if absent)* - the configured PBIVIZ folder (the only automatic project parent) and the cached ALM level - read FIRST",
+                                                                                    "- `.github/skills/pbiviz-release-safety/SKILL.md` - identity, version and package evidence; the five quality labels",
+                                                                                    "- `.github/skills/pbiviz-alm-release/SKILL.md` - Level 1 / 2 / 3 repository lifecycle owned by 086",
+                                                                                    "- `power-bi-agentic-development/plugins/custom-visuals/skills/powerbi-custom-visuals` - general custom-visual construction (community-maintained, not Microsoft-endorsed; Microsoft Learn wins on API, CLI and certification)",
+                                                                                    "- `.github/agent-docs/working-flow-reference.md` - routing boundaries with 020 (024 Deneb/SVG, 022 import, 026 QA) and 050"
+                                                                                ],
+                                                                     "auto":  [
+
+                                                                              ],
+                                                                     "tailSha256":  "A87A2354B4AEEECEA7D2A4611336494FA34715F2B719213A728F6B4A18F2395B"
+                                                                 },
+                   "081-pbiviz-planner.agent.md":  {
+                                                       "pinned":  [
+                                                                      "- `.github/skills/pbiviz-pbip-reconstruction/SKILL.md` - mode A: native PBIP/PBIR visual -\u003e PBIVIZ mapping and the semantic gate",
+                                                                      "- `.github/skills/pbiviz-source-conversion/SKILL.md` - mode B: Deneb/Vega, Charticulator, HTML/DAX, D3/SVG/Canvas parity contracts",
+                                                                      "- `.github/skills/pbiviz-ibcs-semantic-contract/SKILL.md` - IBCS Actual/CV/variance semantics and fixtures",
+                                                                      "- `power-bi-agentic-development/plugins/custom-visuals/skills/powerbi-custom-visuals` - general custom-visual construction (community-maintained; Microsoft Learn wins on API)",
+                                                                      "- `power-bi-agentic-development/plugins/pbip/skills/pbir-format` - reading PBIR visual.json in mode A",
+                                                                      "- `power-bi-agentic-development/plugins/semantic-models/skills/dax` - reading measure semantics before classifying aggregation"
+                                                                  ],
+                                                       "auto":  [
+                                                                    "power-bi-agentic-development/plugins/custom-visuals/skills/deneb-visuals"
+                                                                ],
+                                                       "tailSha256":  "07BC5993967730B55C78B673BC47201A48E6FAA5263621E42DDDCD363173C214"
+                                                   },
+                   "082-pbiviz-developer.agent.md":  {
+                                                         "pinned":  [
+                                                                        "- `power-bi-agentic-development/plugins/custom-visuals/skills/powerbi-custom-visuals` - general construction (community-maintained; Microsoft Learn wins on API and CLI)",
+                                                                        "- `power-bi-agentic-development/plugins/custom-visuals/skills/powerbi-custom-visuals/references/pbiviz-toolchain.md` - pbiviz CLI notes - verify against `pbiviz --help` of the installed version",
+                                                                        "- `power-bi-agentic-development/plugins/custom-visuals/skills/powerbi-custom-visuals/references/mcp-server.md` - pbiviz MCP notes - verify against the five tools actually listed",
+                                                                        "- `.github/skills/pbiviz-release-safety/SKILL.md` - GUID, version and package safety",
+                                                                        "- `.github/skills/pbiviz-ibcs-semantic-contract/SKILL.md` - IBCS semantics for IBCS visuals",
+                                                                        "- `.github/skills/pbiviz-interaction-regression/SKILL.md` - regression cases your change must keep green",
+                                                                        "- `.github/skills/pbiviz-pbip-reconstruction/SKILL.md` - implementing a mode A plan",
+                                                                        "- `.github/skills/pbiviz-source-conversion/SKILL.md` - implementing a mode B plan"
+                                                                    ],
+                                                         "auto":  [
+
+                                                                  ],
+                                                         "tailSha256":  "2718B7733A03A6DCE0623638FCF3D4043F0CDBA30BC7216862D69362BEC73953"
+                                                     },
+                   "083-pbiviz-tester.agent.md":  {
+                                                      "pinned":  [
+                                                                     "- `.github/skills/pbiviz-interaction-regression/SKILL.md` - case catalogue SEL / SCR / GEO / FMT / LNG / DAT / ACC / PERF",
+                                                                     "- `.github/skills/pbiviz-ibcs-semantic-contract/SKILL.md` - numerical fixtures for IBCS visuals",
+                                                                     "- `.github/skills/pbiviz-release-safety/SKILL.md` - package safety checks",
+                                                                     "- `power-bi-agentic-development/plugins/custom-visuals/skills/powerbi-custom-visuals` - general testing practice (community-maintained)"
+                                                                 ],
+                                                      "auto":  [
+
+                                                               ],
+                                                      "tailSha256":  "A19D28E4B5C6254A952165CD0CB5E16967CB0A64E0A860EAD5639ED5F092F3CA"
+                                                  },
+                   "084-pbiviz-reviewer.agent.md":  {
+                                                        "pinned":  [
+                                                                       "- `.github/skills/pbiviz-release-safety/SKILL.md` - identity, version, package and certification boundaries",
+                                                                       "- `.github/skills/pbiviz-ibcs-semantic-contract/SKILL.md` - semantic equivalence rules",
+                                                                       "- `.github/skills/pbiviz-source-conversion/SKILL.md` - licence and provenance checks for imported code",
+                                                                       "- `power-bi-agentic-development/plugins/custom-visuals/skills/powerbi-custom-visuals/references/certification-publishing.md` - certification notes - verify against current Microsoft Learn"
+                                                                   ],
+                                                        "auto":  [
+                                                                     "power-bi-agentic-development/plugins/custom-visuals/skills/powerbi-custom-visuals"
+                                                                 ],
+                                                        "tailSha256":  "C9F6F08867038D511BC46266885015137DDF0F1E4BCDBC39A2FFA4191CBD858D"
+                                                    },
+                   "085-pbiviz-maintainer.agent.md":  {
+                                                          "pinned":  [
+                                                                         "- `.github/skills/pbiviz-release-safety/SKILL.md` - audit-before-migration, identity and package safety",
+                                                                         "- `.github/skills/pbiviz-interaction-regression/SKILL.md` - regressions to re-run after a migration",
+                                                                         "- `power-bi-agentic-development/plugins/custom-visuals/skills/powerbi-custom-visuals/references/pbiviz-toolchain.md` - toolchain notes - verify against the installed CLI",
+                                                                         "- `power-bi-agentic-development/plugins/custom-visuals/skills/powerbi-custom-visuals/references/certification-publishing.md` - certification requirements - verify against current Microsoft Learn"
+                                                                     ],
+                                                          "auto":  [
+                                                                       "power-bi-agentic-development/plugins/custom-visuals/skills/powerbi-custom-visuals"
+                                                                   ],
+                                                          "tailSha256":  "B6419C7086773B467BF101F229A9FD3330A93A1E34433CB90D7DEAB158806F40"
+                                                      },
+                   "086-pbiviz-alm-release.agent.md":  {
+                                                           "pinned":  [
+                                                                          "- `.github/skills/pbiviz-alm-release/SKILL.md` - Level 1/2/3 procedures, adoption case table, two-scope promotion, gates G0-G6, append-only archive, derived provenance",
+                                                                          "- `.github/agent-docs/Pbiviz-Alm.ps1` - deterministic helper - the only way to run state, adoption, promotion, release and provenance operations",
+                                                                          "- `.github/skills/pbiviz-release-safety/SKILL.md` - identity, version and package evidence",
+                                                                          "- `.github/agent-docs/local/pbiviz-workspace.json` *(optional, machine-specific; skip if absent)* - PBIVIZ folder and cached ALM level (a hint; the repository is the truth)"
+                                                                      ],
+                                                           "auto":  [
+
+                                                                    ],
+                                                           "tailSha256":  "4BB5565D87D5D92633A4B9EC64E2B6790822EB89B07E37E2C1C7DFBAED3D0F6B"
+                                                       }
+               }
+}

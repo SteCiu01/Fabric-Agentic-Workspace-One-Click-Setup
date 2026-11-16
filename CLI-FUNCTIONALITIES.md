@@ -494,10 +494,11 @@ bridge that drives an open Power BI Desktop (reload the canvas, screenshot pages
 
 | | |
 |---|---|
-| **Owned by** | **020 Reporting Team Lead**, via **022 PBIR Authoring Agent**. **055 Power BI ALM Agent** may *read* the `pbir-format` skill for PR/conflict review only — it does not author reports. |
+| **Owned by** | **020 Reporting Team Lead**, via **022 PBIR Authoring Agent** (authoring) and **026 Report QA & Desktop Verification Agent** (validation, Desktop refresh and screenshots). **055 Power BI ALM Agent** may *read* the `pbir-format` skill for PR/conflict review only — it does not author reports. |
 | **tool-status.json key** | `pbir` (aliases checked: `pbir`, `pbir-cli`) |
 | **Provider** | data-goblin / Kurt Buhler — see the `reports/skills/pbir-cli` skill in `power-bi-agentic-development` |
-| **When to use** | Any structured report edit. The skill's rule: **always** use `pbir` when available; only edit PBIR JSON directly (with the `pbir-format` skill) if `pbir` fails three times in a row. |
+| **Licence** | The PyPI package `pbir-cli` is published under a custom **non-commercial** licence. Whether your use is covered is a decision for the owner of this workspace (and, if needed, your legal team); the installer neither decides it nor removes the tool. |
+| **When to use** | Any structured report edit, under the house **PBIR edit policy** (`.github/skills/fabric-cli-policy/SKILL.md`, section "Power BI reports (PBIR) - edit policy"): pbir first; an *unsupported* change (no command or `pbir set` path) is not a *failed* command; a failed command is reported, never routed around; a direct JSON edit is an exception that needs a written plan, a backup, validation and `APPROVED:PBIR-DIRECT-EDIT:<report>`. |
 
 | What | Example |
 |------|---------|
@@ -514,12 +515,24 @@ bridge that drives an open Power BI Desktop (reload the canvas, screenshot pages
 - **Path syntax** is filesystem-like with required type suffixes
   (`Report.Report/Page.Page/Visual.Visual`); glob (`**/*.Visual`) for bulk ops (needs `-f`).
   **Top-level flags go before the subcommand**: `pbir -q new report ...`, not `pbir new report -q`.
-- **Fallback when absent** — edit PBIR JSON directly using the **`pbir-format` skill (in the
-  `pbip` plugin, not the reports plugin)**; never hand-edit PBIR without it.
+- **Fallback when absent** — report work continues only within the PBIR edit policy: a direct
+  PBIR JSON edit (guided by the **`pbir-format` skill in the `pbip` plugin**) needs the approved
+  exception plan; Microsoft's CLI below is used instead of pbir only if the user agrees to install it.
 - **Caveats** — `pbir desktop` is Windows-only (every call fails on macOS/Linux) and needs the
-  Desktop "external tool access" preview setting on; `pbir desktop refresh` reloads PBIP/PBIR
-  definitions, not PBIX. `validate` checks structure, not rendering — confirm visually via the
-  Desktop screenshot loop or a sandbox `pbir publish`.
+  Desktop "external tool access" preview setting on (otherwise `pbir desktop list` reports that
+  the local API is not reachable); `pbir desktop refresh` reloads PBIP/PBIR definitions, not
+  PBIX, and does not reload theme changes. A refresh on an instance with **unsaved changes**
+  makes Desktop save and rewrite the report definition, so 026 checks `pbir desktop list` first
+  and stops for a user decision when the target instance is dirty. Screenshots go to a new
+  folder under `%TEMP%\fabric-report-qa\`, never into the report or the workspace repository.
+  `validate` checks structure, not rendering — confirm visually via the Desktop screenshot loop
+  or a sandbox `pbir publish`.
+- **Microsoft `powerbi-report-author`** (npm `@microsoft/powerbi-report-authoring-cli`) — an
+  alternative CLI with PBIR validation and Desktop/service preview. **Detect-only**: tool-status
+  key `powerbiReportAuthor`, never prompted for or installed by the installer, and it does not
+  replace `pbir`. A side-by-side evaluation (unsaved-state handling, multiple Desktop instances,
+  structured error recovery, service preview) is still required before it could become a
+  supported option.
 
 ---
 

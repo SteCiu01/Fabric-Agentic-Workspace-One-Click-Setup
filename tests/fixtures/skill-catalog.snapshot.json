@@ -1,0 +1,159 @@
+{
+    "schemaVersion":  1,
+    "note":  "Skill folder names and pinned reference paths recorded from the vendor clones; identifiers only, no upstream text. Refresh with a real catalog when pins change.",
+    "capturedAt":  "2026-11-16",
+    "sources":  [
+                    {
+                        "path":  "skills-for-fabric",
+                        "commit":  "e31422e7d1045ef3a0906df9ff5991f2338af010",
+                        "describe":  "v0.3.21-2-ge31422e"
+                    },
+                    {
+                        "path":  "power-bi-agentic-development",
+                        "commit":  "aa13b20b014242513a2ae9efa1eca53e29e31e9a",
+                        "describe":  "v26.45-1-gaa13b20"
+                    }
+                ],
+    "skills":  [
+                   "power-bi-agentic-development/plugins/custom-visuals/skills/deneb-visuals",
+                   "power-bi-agentic-development/plugins/custom-visuals/skills/powerbi-custom-visuals",
+                   "power-bi-agentic-development/plugins/custom-visuals/skills/python-visuals",
+                   "power-bi-agentic-development/plugins/custom-visuals/skills/r-visuals",
+                   "power-bi-agentic-development/plugins/custom-visuals/skills/svg-visuals",
+                   "power-bi-agentic-development/plugins/dashboards/skills/creating-good-dashboards",
+                   "power-bi-agentic-development/plugins/dashboards/skills/querying-fabric",
+                   "power-bi-agentic-development/plugins/etl/skills/executing-spark",
+                   "power-bi-agentic-development/plugins/etl/skills/using-duckdb",
+                   "power-bi-agentic-development/plugins/fabric-admin/skills/audit-tenant-settings",
+                   "power-bi-agentic-development/plugins/fabric-admin/skills/fabric-capacity",
+                   "power-bi-agentic-development/plugins/fabric-cli/skills/fabric-cli",
+                   "power-bi-agentic-development/plugins/goblin-mode/skills/help-me-get-started",
+                   "power-bi-agentic-development/plugins/goblin-mode/skills/improve-my-agent-setup",
+                   "power-bi-agentic-development/plugins/paginated-reports/skills/paginated-report",
+                   "power-bi-agentic-development/plugins/pbi-desktop/skills/connect-pbid",
+                   "power-bi-agentic-development/plugins/pbip/skills/pbip",
+                   "power-bi-agentic-development/plugins/pbip/skills/pbir-format",
+                   "power-bi-agentic-development/plugins/pbip/skills/tmdl",
+                   "power-bi-agentic-development/plugins/reports/skills/create-pbi-report",
+                   "power-bi-agentic-development/plugins/reports/skills/modifying-theme-json",
+                   "power-bi-agentic-development/plugins/reports/skills/pbir-cli",
+                   "power-bi-agentic-development/plugins/reports/skills/pbi-report-design",
+                   "power-bi-agentic-development/plugins/reports/skills/review-report",
+                   "power-bi-agentic-development/plugins/semantic-models/skills/dax",
+                   "power-bi-agentic-development/plugins/semantic-models/skills/lineage-analysis",
+                   "power-bi-agentic-development/plugins/semantic-models/skills/organize-semantic-model",
+                   "power-bi-agentic-development/plugins/semantic-models/skills/power-query",
+                   "power-bi-agentic-development/plugins/semantic-models/skills/refresh-semantic-model",
+                   "power-bi-agentic-development/plugins/semantic-models/skills/semantic-model",
+                   "power-bi-agentic-development/plugins/tabular-editor/skills/bpa-rules",
+                   "power-bi-agentic-development/plugins/tabular-editor/skills/c-sharp-scripting",
+                   "power-bi-agentic-development/plugins/tabular-editor/skills/te2-cli",
+                   "power-bi-agentic-development/plugins/tabular-editor/skills/te-cli",
+                   "power-bi-agentic-development/plugins/tabular-editor/skills/te-docs",
+                   "skills-for-fabric/skills/activator-cli",
+                   "skills-for-fabric/skills/azmon-mirroredcatalogs-operations-cli",
+                   "skills-for-fabric/skills/databasehub-cli",
+                   "skills-for-fabric/skills/databricks-migration",
+                   "skills-for-fabric/skills/dataflows-cli",
+                   "skills-for-fabric/skills/deployment-pipelines-authoring-cli",
+                   "skills-for-fabric/skills/e2e-fabric-cost-estimation",
+                   "skills-for-fabric/skills/e2e-medallion-architecture",
+                   "skills-for-fabric/skills/eventhouse-cli",
+                   "skills-for-fabric/skills/eventschemaset-cli",
+                   "skills-for-fabric/skills/eventstream-cli",
+                   "skills-for-fabric/skills/fabriciq",
+                   "skills-for-fabric/skills/fabric-policies-cli",
+                   "skills-for-fabric/skills/git-integration-operations-cli",
+                   "skills-for-fabric/skills/hdinsight-migration",
+                   "skills-for-fabric/skills/onelake-catalog-cli",
+                   "skills-for-fabric/skills/ontology-cli",
+                   "skills-for-fabric/skills/pipeline-migration",
+                   "skills-for-fabric/skills/powerbi-report-cli",
+                   "skills-for-fabric/skills/project-osmos",
+                   "skills-for-fabric/skills/search-consumption-cli",
+                   "skills-for-fabric/skills/semantic-model-authoring",
+                   "skills-for-fabric/skills/spark-cli",
+                   "skills-for-fabric/skills/sqldb-cli",
+                   "skills-for-fabric/skills/sqldw-cli",
+                   "skills-for-fabric/skills/synapse-migration",
+                   "skills-for-fabric/skills/variable-library-cli"
+               ],
+    "paths":  [
+                  {
+                      "path":  "power-bi-agentic-development/plugins/custom-visuals/skills/powerbi-custom-visuals/references/certification-publishing.md",
+                      "type":  "file"
+                  },
+                  {
+                      "path":  "power-bi-agentic-development/plugins/custom-visuals/skills/powerbi-custom-visuals/references/mcp-server.md",
+                      "type":  "file"
+                  },
+                  {
+                      "path":  "power-bi-agentic-development/plugins/custom-visuals/skills/powerbi-custom-visuals/references/pbiviz-toolchain.md",
+                      "type":  "file"
+                  },
+                  {
+                      "path":  "power-bi-agentic-development/plugins/semantic-models/skills/organize-semantic-model/references/naming-rules.md",
+                      "type":  "file"
+                  },
+                  {
+                      "path":  "power-bi-agentic-development/plugins/semantic-models/skills/semantic-model/references/ai-copilot-readiness.md",
+                      "type":  "file"
+                  },
+                  {
+                      "path":  "skills-for-fabric/common/COMMON-CLI.md",
+                      "type":  "file"
+                  },
+                  {
+                      "path":  "skills-for-fabric/common/COMMON-CORE.md",
+                      "type":  "file"
+                  },
+                  {
+                      "path":  "skills-for-fabric/common/DATAFLOWS-AUTHORING-CORE.md",
+                      "type":  "file"
+                  },
+                  {
+                      "path":  "skills-for-fabric/common/DATAFLOWS-CONSUMPTION-CORE.md",
+                      "type":  "file"
+                  },
+                  {
+                      "path":  "skills-for-fabric/common/EVENTHOUSE-CONSUMPTION-CORE.md",
+                      "type":  "file"
+                  },
+                  {
+                      "path":  "skills-for-fabric/common/ITEM-DEFINITIONS-CORE.md",
+                      "type":  "file"
+                  },
+                  {
+                      "path":  "skills-for-fabric/common/notebook-authoring",
+                      "type":  "dir"
+                  },
+                  {
+                      "path":  "skills-for-fabric/common/SPARK-MONITORING-CORE.md",
+                      "type":  "file"
+                  },
+                  {
+                      "path":  "skills-for-fabric/common/SPARK-NOTEBOOK-AUTHORING-CORE.md",
+                      "type":  "file"
+                  },
+                  {
+                      "path":  "skills-for-fabric/common/SQLDB-AUTHORING-CORE.md",
+                      "type":  "file"
+                  },
+                  {
+                      "path":  "skills-for-fabric/common/SQLDB-CONSUMPTION-CORE.md",
+                      "type":  "file"
+                  },
+                  {
+                      "path":  "skills-for-fabric/common/SQLDW-AUTHORING-CORE.md",
+                      "type":  "file"
+                  },
+                  {
+                      "path":  "skills-for-fabric/common/SQLDW-CONSUMPTION-CORE.md",
+                      "type":  "file"
+                  },
+                  {
+                      "path":  "skills-for-fabric/skills/semantic-model-authoring/references/semantic-model-ai-readiness.md",
+                      "type":  "file"
+                  }
+              ]
+}
