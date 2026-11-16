@@ -95,6 +95,8 @@ before any CLI/REST task. This file is the human-readable companion to that skil
 - [25. `sqlcmd` — T-SQL over the Fabric SQL endpoint](#25-sqlcmd--t-sql-over-the-fabric-sql-endpoint)
 - [26. `gh` — GitHub CLI](#26-gh--github-cli)
 - [27. `az devops` — Azure DevOps CLI](#27-az-devops--azure-devops-cli)
+- [28. `pbiviz` — Power BI custom visual tools](#28-pbiviz--power-bi-custom-visual-tools)
+- [29. Git for the PBIVIZ repository — `Pbiviz-Alm.ps1`](#29-git-for-the-pbiviz-repository--pbiviz-almps1)
 
 ---
 
@@ -474,6 +476,9 @@ agent reads `<key>.found` first, optionally does one live `--version`/`Get-Comma
 re-check, then falls back gracefully when the tool is absent. **None of these is
 required for the core local-editing workflow.**
 
+> Exceptions: the custom visual toolchain (§28) is **detected only** — the installer never
+> installs Node.js, npm or `pbiviz` — and §29 is a script the installer ships, not a CLI.
+
 > The newer/niche tools (`pbir`, the Tabular Editor CLI, `pbi-tools`) move quickly and
 > some are in preview. The tables below are an accurate **working set** taken from each
 > provider's own docs — always confirm exact flags with the tool's `--help`/`-?` and the
@@ -489,10 +494,11 @@ bridge that drives an open Power BI Desktop (reload the canvas, screenshot pages
 
 | | |
 |---|---|
-| **Owned by** | **020 Reporting Team Lead**, via **022 PBIR Authoring Agent**. **055 Power BI ALM Agent** may *read* the `pbir-format` skill for PR/conflict review only — it does not author reports. |
+| **Owned by** | **020 Reporting Team Lead**, via **022 PBIR Authoring Agent** (authoring) and **026 Report QA & Desktop Verification Agent** (validation, Desktop refresh and screenshots). **055 Power BI ALM Agent** may *read* the `pbir-format` skill for PR/conflict review only — it does not author reports. |
 | **tool-status.json key** | `pbir` (aliases checked: `pbir`, `pbir-cli`) |
 | **Provider** | data-goblin / Kurt Buhler — see the `reports/skills/pbir-cli` skill in `power-bi-agentic-development` |
-| **When to use** | Any structured report edit. The skill's rule: **always** use `pbir` when available; only edit PBIR JSON directly (with the `pbir-format` skill) if `pbir` fails three times in a row. |
+| **Licence** | The PyPI package `pbir-cli` is published under a custom **non-commercial** licence. Whether your use is covered is a decision for the owner of this workspace (and, if needed, your legal team); the installer neither decides it nor removes the tool. |
+| **When to use** | Any structured report edit, under the house **PBIR edit policy** (`.github/skills/fabric-cli-policy/SKILL.md`, section "Power BI reports (PBIR) - edit policy"): pbir first; an *unsupported* change (no command or `pbir set` path) is not a *failed* command; a failed command is reported, never routed around; a direct JSON edit is an exception that needs a written plan, a backup, validation and `APPROVED:PBIR-DIRECT-EDIT:<report>`. |
 
 | What | Example |
 |------|---------|
@@ -509,12 +515,24 @@ bridge that drives an open Power BI Desktop (reload the canvas, screenshot pages
 - **Path syntax** is filesystem-like with required type suffixes
   (`Report.Report/Page.Page/Visual.Visual`); glob (`**/*.Visual`) for bulk ops (needs `-f`).
   **Top-level flags go before the subcommand**: `pbir -q new report ...`, not `pbir new report -q`.
-- **Fallback when absent** — edit PBIR JSON directly using the **`pbir-format` skill (in the
-  `pbip` plugin, not the reports plugin)**; never hand-edit PBIR without it.
+- **Fallback when absent** — report work continues only within the PBIR edit policy: a direct
+  PBIR JSON edit (guided by the **`pbir-format` skill in the `pbip` plugin**) needs the approved
+  exception plan; Microsoft's CLI below is used instead of pbir only if the user agrees to install it.
 - **Caveats** — `pbir desktop` is Windows-only (every call fails on macOS/Linux) and needs the
-  Desktop "external tool access" preview setting on; `pbir desktop refresh` reloads PBIP/PBIR
-  definitions, not PBIX. `validate` checks structure, not rendering — confirm visually via the
-  Desktop screenshot loop or a sandbox `pbir publish`.
+  Desktop "external tool access" preview setting on (otherwise `pbir desktop list` reports that
+  the local API is not reachable); `pbir desktop refresh` reloads PBIP/PBIR definitions, not
+  PBIX, and does not reload theme changes. A refresh on an instance with **unsaved changes**
+  makes Desktop save and rewrite the report definition, so 026 checks `pbir desktop list` first
+  and stops for a user decision when the target instance is dirty. Screenshots go to a new
+  folder under `%TEMP%\fabric-report-qa\`, never into the report or the workspace repository.
+  `validate` checks structure, not rendering — confirm visually via the Desktop screenshot loop
+  or a sandbox `pbir publish`.
+- **Microsoft `powerbi-report-author`** (npm `@microsoft/powerbi-report-authoring-cli`) — an
+  alternative CLI with PBIR validation and Desktop/service preview. **Detect-only**: tool-status
+  key `powerbiReportAuthor`, never prompted for or installed by the installer, and it does not
+  replace `pbir`. A side-by-side evaluation (unsaved-state handling, multiple Desktop instances,
+  structured error recovery, service preview) is still required before it could become a
+  supported option.
 
 ---
 
@@ -691,6 +709,403 @@ pipelines (build/release), boards work items, and artifacts.
 - **Caveats** — `az devops` is an **extension on top of `az`**: if the `az` key is missing this
   tool cannot exist (that's why its `tool-status.json` `reason` reads "az missing"). Auth via
   `az login` or a PAT in `AZURE_DEVOPS_EXT_PAT`.
+
+---
+
+## 28. `pbiviz` — Power BI custom visual tools
+
+**Purpose** — Create, run, package and inspect Power BI custom visual SDK projects
+(`powerbi-visuals-tools`). Used only inside the optional PBIVIZ folder.
+
+| | |
+|---|---|
+| **Owned by** | **080 PBIVIZ Development Team Lead** (082 Developer, 083 Tester, 085 Maintainer run it) |
+| **tool-status.json keys** | `node`, `npm`, `pbivizCli` (category `pbiviz-toolchain`, detect only) |
+| **Provider** | https://learn.microsoft.com/power-bi/developer/visuals/ |
+| **When to use** | For `.pbiviz` SDK projects. In-report Deneb, SVG, Python and R visuals are 024's and need no CLI. |
+
+**Rule — detect first, obtain approval before installation or download, prefer the
+project-local toolchain, and never silently acquire or execute missing packages.** In a
+non-interactive terminal plain `npx <name>` downloads a missing package without asking, so
+agents use only the forms below.
+
+| What | Example (run inside the visual folder unless noted) |
+|------|---------|
+| Detect the project-local CLI (no download) | `Test-Path .\node_modules\.bin\pbiviz.cmd` · `npx --no pbiviz --version` (`--no` refuses to download) |
+| Run the project-local CLI | `npx --no pbiviz start` · `npx --no pbiviz package` · `npx --no pbiviz info` |
+| Restore the dependencies of an existing visual (downloads) | only after `APPROVED:INSTALL:<visual>`: `npm ci` (lockfile present) |
+| New visual (`pbiviz new` downloads the CLI and the template's dependencies) | only after `APPROVED:INSTALL:<visual>`, in the PBIVIZ folder: `npm exec --yes --package=powerbi-visuals-tools@<pinned version> -- pbiviz new <VisualName>` |
+| Per-project MCP server | write `<visual>/.vscode/mcp.json` with the project-local command below. `npx --no pbiviz mcp --init` generates `npx -y powerbi-visuals-tools mcp` instead: never keep that generated command, it would download a missing package |
+
+Project-local `pbiviz` MCP configuration (`<visual>/.vscode/mcp.json`, the visual folder
+opened as a workspace root); it starts only the installed package and fails instead of
+downloading when it is missing:
+
+```json
+{
+  "servers": {
+    "pbiviz": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}/node_modules/powerbi-visuals-tools/bin/pbiviz.js", "mcp"]
+    }
+  }
+}
+```
+
+- **Fallback when absent** — Node.js is required to build; without it agents can still plan,
+  review and edit source, and report every build/test step as `NOT RUN`.
+- **Caveats** — Node.js 20.19.0+ for current `powerbi-visuals-tools` (each project's
+  installed version decides). A global `pbiviz` is not required and is never installed by
+  agents. The `pbiviz` MCP server is callable only when that visual folder is
+  opened as a workspace root; it is never configured by the installer. Packages are
+  imported into reports only from `<Visual>/releases/`.
+
+---
+
+## 29. Git for the PBIVIZ repository — `Pbiviz-Alm.ps1`
+
+**Purpose** — Deterministic Git operations for the PBIVIZ repository across the three
+levels (local, remote, team). Shipped as `.github/agent-docs/Pbiviz-Alm.ps1`; every
+Git call goes through one function with literal pathspecs, UTF-8 output and no prompts.
+
+| | |
+|---|---|
+| **Owned by** | **086 PBIVIZ ALM & Release Agent** (via 080). **050** keeps Fabric repositories and organisation-level GitHub/Azure DevOps administration. |
+| **Requires** | Git 2.28+; a Git identity for commits |
+| **Load** | `. .\.github\agent-docs\Pbiviz-Alm.ps1` |
+
+| What | Function |
+|------|----------|
+| State and level of the folder | `Get-PbivizRepoState -Root <folder>` · `Get-PbivizStatusLine -Root <folder> -RelativePath <name>` |
+| Level 1 initialisation (installer) | `Initialize-PbivizRepository -Root <folder> -FolderWasEmpty` |
+| Level 2: adopt a remote, keeping both histories | `Connect-PbivizRemoteHistory -Root <folder> -Remote origin -Branch main -Fetch` |
+| Level 3: candidate for one visual | `New-PbivizPromotionCandidate -Root <folder> -Visual <Name> -SourceRef PBVIZ_Team_Dev -TargetRef PBVIZ_Team_Prod [-Allowlist <paths>]` |
+| Level 3: gates G0-G6 | `Test-PbivizPromotionGates -Worktree <candidate> -Visual <Name> -TargetRef PBVIZ_Team_Prod [-Allowlist <the candidate's paths>]` |
+| Release build with build evidence | Level 1/2: `Invoke-PbivizBuild -Root <folder> -Visual <Name>` (clean checkout whose HEAD is the source commit) · Level 3: `Invoke-PbivizBuild -Worktree <candidate> -Visual <Name>` · optional `-TimeoutSeconds` (default 900) |
+| Release pair (`.pbiviz` + `.release.json`) | Level 1/2: `Add-PbivizRelease -Root <folder> -Visual <Name> -SourceSha <HEAD>` · Level 3: `Add-PbivizRelease -Worktree <candidate> -Visual <Name> -SourceSha <candidate source>` · optional `-Tests @{ lint='PASS'; unit='PASS'; host='NOT RUN'; certification='NOT RUN' }`, `-Review @{ reviewer=...; verdict='APPROVE'; sourceSha=<source commit> }`, `-PackagePath <path>`, `-ExternalPackageApproval 'APPROVED:EXTERNAL-PACKAGE:<Name>:<sha256>'`; `-ToolsVersion` / `-NodeVersion` only cross-check the build evidence |
+| One-time legacy archive of `dist/` packages | `Add-PbivizLegacyArchive -Root <folder> -Visual <Name>` |
+| After your PR is merged | `Get-PbivizReleaseProvenance -Root <folder> -Visual <Name> -Version <v> -ProdRef PBVIZ_Team_Prod` · `Test-PbivizReleaseIntegrity -Root <folder> -Visual <Name> -Version <v> -Commit <prod commit>` |
+| Clean up a helper worktree | `Remove-PbivizPromotionWorktree -Root <folder> -WorktreeDir <candidate>` (a committed candidate, without force) · an uncommitted candidate only with `-DiscardApproval 'APPROVED:DISCARD-CANDIDATE:<branch>'` |
+
+Pass absolute folder paths (`(Resolve-Path <folder>).ProviderPath`): the helper starts Git and
+Node with the path it is given, not with the PowerShell location.
+
+### 29.0 The three levels in practice
+
+The level is derived from the repository (`Get-PbivizRepoState -Root $root`: `main` without a
+remote = 1, a remote = 2, `PBVIZ_Team_*` branches = 3), never assumed. 086 runs every step below;
+the Git commands are plain Git, the rest are helper functions.
+
+**Level 1 - local repository.**
+- Created by the installer (Step 8) with `Initialize-PbivizRepository`: `git init -b main`, a
+  repository-local `core.longpaths`, `.gitignore` and `.gitattributes`, and - only for a brand-new
+  empty folder with a Git identity - one configuration-only baseline commit. An existing
+  repository is reused and never committed to.
+- A new visual is created by 082 (`pbiviz new`, section 28, only after `APPROVED:INSTALL:<Name>`).
+- Checkpoint - one visual per commit, after checking the Git identity:
+
+```powershell
+git -C $root status --short -- 'Bar'
+git -C $root add -- 'Bar'
+git -C $root diff --cached --name-only       # only Bar/ paths; unstage and stop if another visual appears
+git -C $root commit -m 'Bar: first working version (v1.0.0.0)'
+```
+
+- Restore: `git -C $root restore --source=<sha> -- Bar` (working tree only) or
+  `git -C $root revert <sha>` (a new commit). Releases: 29.2. Level 1 has no off-device copy.
+
+**Level 2 - remote collaboration** (after `APPROVED:CONNECT:<url>`):
+
+```powershell
+Test-PbivizRemoteUrl -Url $url               # True only for a GitHub / Azure DevOps repository URL
+git -C $root remote add origin $url
+$a = Connect-PbivizRemoteHistory -Root $root -Remote origin -Branch main -Fetch
+$a.Status, $a.Case, $a.Reason, $a.BackupRef, ($a.ConflictPaths -join ', '), ($a.Collisions -join ', ')
+```
+
+`Case` is one of: `empty-remote` (nothing changed; push `main` only with `APPROVED:PUSH:main`),
+`up-to-date`, `fast-forward` (related history), `unrelated-merge` (an independent remote merged
+with both root commits kept), `tracking-checkout` (an empty local repository takes the remote
+branch), `conflict` (the merge was aborted and HEAD, index, tracked files and untracked/ignored
+files are exactly as before - the paths are listed; resolving them in local files needs
+`APPROVED:MERGE-LOCAL:<paths>`), `needs-checkpoint` (commit local files first),
+`needs-merge-decision` (diverged history: a merge needs approval) or `blocked` (for example a local
+untracked or ignored file at a path the remote tracks - move it aside, nothing was changed).
+Before any branch moves a backup ref `refs/pbiviz-backup/connect-<utc>` is written; afterwards the
+helper asserts that the old local tip is an ancestor of the new one and that no other ref changed.
+Tags are never fetched. Daily sync is the same call (one-branch fetch, fast-forward only).
+
+**Level 3 - DEV / (TEST) / PROD** (after `APPROVED:BRANCHES:<repo>`, clean and up-to-date `main`):
+`PBVIZ_Team_Dev` at `origin/main`, `PBVIZ_Team_Prod` at the commit the user confirms (or empty),
+`PBVIZ_Team_Test` on request; the local checkout switches to Dev and `main` stays untouched. Branch
+policies start as a checklist and are applied only with `APPROVED:POLICY:<branch>`. Releases made
+before Level 3 reach an empty Prod through an archive-only promotion
+(`New-PbivizPromotionCandidate -ArchiveOnly`, gates with `-ArchiveOnly`), which admits validated
+releases and labelled legacy history only. Releases: 29.3; with a Test branch: 29.7.
+
+### 29.1 Release classes and the evidence behind them
+
+| Term | Exactly what it means |
+|---|---|
+| **OFFICIAL RELEASE** | The manifest says `validated: true`, which the helper sets only when all of these hold: the package identity was verified from its content, the helper's build evidence binds those exact bytes to the source commit, lint and unit are recorded as PASS, the `powerbi-visuals-tools` and Node versions are recorded, and an `APPROVE` (or `APPROVE WITH NONBLOCKING NOTES`) review is recorded for the exact source commit. It never implies host testing or any certification. |
+| **Recorded attestations** (`tests`, `review`) | The lint/unit/host/certification results and the review verdict are recorded exactly as the caller supplies them (normally 083 and 084 through 086). `Add-PbivizRelease` checks their vocabulary, that the review names the release source commit and that nothing FAILED or was BLOCKED; it does **not** run the tests, read their logs or authenticate the reviewer. A recorded PASS is an attestation by the agent that reported it, not execution evidence produced by the helper. Only the build evidence and the package identity are established by the helper itself. |
+| **DEVELOPMENT/TEST CANDIDATE** | `validated: false`, with every missing item listed in `validationGaps`. Allowed at Level 1/2 only; Level 3 never promotes it (`Add-PbivizRelease -Worktree` blocks it before writing, G6 blocks it in the candidate). It is never presented or distributed as a production release. |
+| **Verified local build** (`BuildEvidence = VERIFIED`) | The helper's own build record exists for exactly these package bytes: `Invoke-PbivizBuild` ran the visual's project-local CLI on this machine on the source revision. It is what the helper observed here, not a reproducible-build attestation, and it does not vouch for the contents of `node_modules`. |
+| **Package identity inspection** (`package.identity = VERIFIED`) | GUID, version and resource read from the `.pbiviz` content (`package.json` and `resources/<guid>.pbiviz.json`) and matched against `pbiviz.json` at the source commit. It says nothing about how or from what the package was built: BUILT is never derived from package metadata. |
+
+A FAIL test result, a `BLOCK` review, an invented `package` result, a review of another commit or a
+package built from another commit is BLOCKED; a missing result is a gap, never filled with PASS.
+
+### 29.2 Release workflow - Level 1 and Level 2 (clean checkout)
+
+Preconditions, each checked by the helper (BLOCKED otherwise, nothing written):
+- the PBIVIZ repository root, HEAD on a branch (not detached) and equal to the commit you release;
+  no uncommitted change, no untracked file in the visual, no `assume-unchanged` / `skip-worktree`
+  entry, no ignored file in the visual other than build output;
+- the visual's own `powerbi-visuals-tools` is installed in `<Name>/node_modules`. The helper never
+  downloads: when it is missing the result is BLOCKED and names `APPROVED:INSTALL:<Name>` - restore
+  the locked dependencies (section 28) only after the user gives that token;
+- the toolchain preflight passes (29.6): `pbiviz package` must not need to download or change
+  dependencies itself;
+- `node` is on PATH, `pbiviz.json` has a valid GUID and version at that commit, and
+  `<Name>/dist/<guid>.<version>.pbiviz` does not exist yet (a package is never overwritten);
+- the version exceeds every archived version of the visual, validated and legacy (checked by
+  `Add-PbivizRelease`).
+
+```powershell
+. .\.github\agent-docs\Pbiviz-Alm.ps1                    # from the workspace root
+$root = (Resolve-Path '<PBIVIZ folder>').ProviderPath
+$b = Invoke-PbivizBuild -Root $root -Visual 'Bar'
+$b.Status, $b.Reason       # PASS -> $b.PackagePath, $b.Sha256, $b.SourceSha, $b.RecordPath
+# 083 reports lint/unit for $b.SourceSha; 084 reviews exactly $b.SourceSha.
+$r = Add-PbivizRelease -Root $root -Visual 'Bar' -SourceSha $b.SourceSha `
+       -Tests  @{ lint = 'PASS'; unit = 'PASS'; host = 'NOT RUN'; certification = 'NOT RUN' } `
+       -Review @{ reviewer = '084 PBIVIZ Reviewer'; verdict = 'APPROVE'; sourceSha = $b.SourceSha
+                  reviewedAt = '2026-11-14T10:00:00Z'; reference = '080 WORK RESULT, review of Bar 1.0.0.1' }
+$r.Status, $r.Validated, $r.ReleaseClass, $r.BuildEvidence, ($r.ValidationGaps -join '; ')
+$r.Staged                  # exactly Bar/releases/<guid>.<version>.pbiviz and .release.json
+```
+
+Expected outcomes:
+- `Invoke-PbivizBuild` PASS: `dist/<guid>.<version>.pbiviz` exists and the build record
+  `<git common dir>/pbiviz-builds/<sha256>.json` (plus the build log) binds those bytes to the
+  source commit, its fingerprint, the tools and Node versions and the command
+  `node node_modules/powerbi-visuals-tools/bin/pbiviz.js package`. FAILED (no evidence) when the
+  build fails, times out, leaves processes running, changes the repository state, or produces no
+  package or a package with another identity.
+- `Add-PbivizRelease` PASS: the pair is written and staged, `BuildEvidence = VERIFIED`,
+  `PackageSource = build output`. With the complete recorded evidence above, `Validated = True` and
+  `ReleaseClass = OFFICIAL RELEASE`; with anything missing (for example no review),
+  `Validated = False`, `ReleaseClass = DEVELOPMENT/TEST CANDIDATE` and `ValidationGaps` lists it.
+  `Validated = True` therefore rests on the helper's own build evidence plus the attestations it
+  was given; report the lint, unit and review results as attested by 083 and 084.
+- Then commit exactly the two staged files (the helper never commits), and check the release
+  commit: `Test-PbivizReleaseIntegrity -Root $root -Visual 'Bar' -Version <v> -Commit HEAD`. Report
+  an official release only for `Status = PASS`, `Verification = COMPLETE`,
+  `ReleaseClass = OFFICIAL RELEASE`.
+
+### 29.3 Release workflow - Level 3 (one visual, Dev to Prod)
+
+```powershell
+$c = New-PbivizPromotionCandidate -Root $root -Visual 'Bar' -SourceRef PBVIZ_Team_Dev -TargetRef PBVIZ_Team_Prod
+$b = Invoke-PbivizBuild -Worktree $c.Worktree -Visual 'Bar'
+$r = Add-PbivizRelease -Worktree $c.Worktree -Visual 'Bar' -SourceSha $c.Source -Tests $tests -Review $review
+$g = Test-PbivizPromotionGates -Worktree $c.Worktree -Visual 'Bar' -TargetRef PBVIZ_Team_Prod
+$g.Status; $g.Gates | Format-Table Gate, Pass, Detail
+```
+
+- `$tests` / `$review` are the same evidence as in 29.2, for `$c.Source`. Only `validated: true`
+  is accepted: an incomplete release is BLOCKED before anything is written.
+- Every gate must PASS. Then commit on the release branch (trailer
+  `Pbiviz-Release: <visual>@<version>`); push and open the pull request only with
+  `APPROVED:PUSH` and `APPROVED:PR`; merge only with `APPROVED:MERGE` and every required review
+  and check satisfied. After the merge nothing is written to Prod:
+  `Get-PbivizReleaseProvenance` derives the Prod commit and `Test-PbivizReleaseIntegrity` re-checks
+  the release there. Remove the candidate with `Remove-PbivizPromotionWorktree`.
+- Alternative build: build the source commit on the clean Dev checkout (29.2) and pass that
+  `dist/` package with `-PackagePath`; it is still a worktree of this repository.
+
+### 29.4 External packages - `APPROVED:EXTERNAL-PACKAGE:<Name>:<sha256>`
+
+A package anywhere other than `<Name>/dist/<guid>.<version>.pbiviz` of a worktree of this
+repository (or reached through a junction) is external. `Add-PbivizRelease -PackagePath <file>`
+then returns BLOCKED and quotes the exact token for those bytes,
+`-ExternalPackageApproval 'APPROVED:EXTERNAL-PACKAGE:Bar:<64-character sha256 of the file>'`. Ask the user; only after
+they give that token, re-run with it. The token binds the SHA-256 of the bytes: another file, or
+the same file changed, needs a new approval. An approved external package carries build evidence
+only when its bytes are identical to a helper build record; otherwise `BuildEvidence = NONE`, it
+stays a DEVELOPMENT/TEST CANDIDATE and Level 3 refuses it.
+
+### 29.5 Integrity results - how to report them
+
+| `Status` | `Verification` | `CommitEvidence` / `SourceRevision` | Report as |
+|---|---|---|---|
+| `PASS` | `COMPLETE` | `VERIFIED` / `VERIFIED` | verified; an official release only if `ReleaseClass = OFFICIAL RELEASE` |
+| `PARTIAL` | `COMMIT ONLY` | `VERIFIED` / `NOT AVAILABLE` | "commit evidence verified; source revision not verified" - never as a verified release; fetch the Dev history and re-run |
+| `FAILED` | `NONE` | `MISMATCH` (commit or source revision), or no single release manifest at that commit | not a valid release |
+
+COMMIT evidence: fingerprint, shared-file blobs, package hash, size, content claims, build evidence
+and validation claim at the given commit. SOURCE-REVISION evidence: the Dev commit named in the
+manifest still yields the same fingerprint and shared blobs.
+
+### 29.6 Build supervision, isolation, transactional archiving and G4 limits
+
+- **Toolchain preflight** - before the CLI starts, `Invoke-PbivizBuild` refuses (BLOCKED, nothing
+  run or written) every case in which `pbiviz package` would itself download or change
+  dependencies. `powerbi-visuals-tools` (verified with 7.2.1) runs `npm list powerbi-visuals-api` on every package and
+  installs that package over the network, rewriting `package.json`, `package-lock.json` and
+  `node_modules`, when `node_modules/powerbi-visuals-api` is missing, `pbiviz.json` has no
+  `apiVersion` (then `@latest`) or the installed major.minor differs from `apiVersion` (then
+  `~<apiVersion>`). The preflight blocks those three cases and, when the visual has a
+  `package-lock.json` (version 2 or 3), also a lockfile whose root entry disagrees with
+  `package.json` on `powerbi-visuals-tools` / `powerbi-visuals-api` - a different range, a
+  declaration on only one side, or no root entry at all - or that locks other versions than the
+  installed ones. A visual without a lockfile, or with a version-1 lockfile, is built without that
+  cross-check, and the build evidence says so. The fix is the user's
+  `APPROVED:INSTALL:<Name>` and `npm ci`, or a source commit that corrects `apiVersion` - never a
+  helper workaround. Another patch of the same API major.minor is accepted, as the SDK accepts it.
+- **Isolation of the CLI** - the SDK verifies a dev-server certificate under
+  `os.homedir()\<certificateFolder>` on every package (through Windows PowerShell) and, when that
+  fails, deletes the certificate files and creates a new certificate with
+  `pwsh New-SelfSignedCertificate -CertStoreLocation Cert:\CurrentUser\My`. A package needs no TLS
+  material, so the helper runs the CLI with:
+
+  | Child setting | Value |
+  |---|---|
+  | `USERPROFILE` / `HOME` | `<git dir>\pbiviz-build-home\home-<id>\profile`, holding a public-only placeholder PFX (ephemeral key, nothing imported into any store) at the SDK's `certificateFolder` / `pfx` / `passphrase` names |
+  | `PATH` | a guard folder with `pwsh.cmd` first (it records the call and fails), then the caller's PATH without folders that hold `pwsh.exe` / `pwsh.com` |
+  | `PATHEXT` · `NoDefaultCurrentDirectoryInExePath` | `.CMD` guaranteed · `1`, so a same-named `pwsh.*` in the visual folder never runs before the guard |
+  | `npm_config_cache` · `npm_config_offline` · `npm_config_update_notifier` | a disposable cache (npm logs included) · `true` · `false`; `npm_config_userconfig` keeps the caller's user npmrc |
+  | `TEMP` / `TMP` | a folder inside the disposable home |
+
+  The guard folder, its marker, `owner.lock`, the npm cache and TEMP sit beside `profile\`, and each
+  SDK certificate setting (`certificateFolder`, `certificate`, `privateKey`, `pfx`, `passphrase`
+  in the toolchain's `config.json`) must be a single safe file name, distinct from the others,
+  whose resolved path lies directly in the disposable certificate folder - otherwise BLOCKED. The
+  build is also BLOCKED before the CLI starts when `Cert:\CurrentUser\My` cannot be read (an empty
+  store is fine), because a certificate the SDK might add could not be detected. The
+  build is FAILED with no evidence when the guard was called, the SDK rejected or regenerated the
+  certificate, the placeholder changed, a new certificate appeared in `Cert:\CurrentUser\My` or the
+  store could not be read after the run (the store is only read; the helper never deletes a
+  certificate), or the SDK tried to install a dependency. The caller's environment is restored and
+  the home removed in every case.
+- **What isolation does not cover** - it contains the SDK's known side effects; it is not an
+  operating-system sandbox. The CLI, ESLint, webpack and every package in `node_modules` run with
+  the user's rights and can read or write anything the user can. The SDK's certificate check starts
+  Windows PowerShell, which loads the user's PowerShell profile and keeps its own caches under
+  `%LOCALAPPDATA%`. Review the dependencies of a visual like any other code you run.
+- **Network and approvals** - who may reach the network:
+
+  | Command | Network | Needs |
+  |---|---|---|
+  | `pbiviz new` (082) and dependency restore (082/085) | yes, npm registry | `APPROVED:INSTALL:<Name>` |
+  | `pbiviz package` / `pbiviz start` in a development build (082/083/085) | only when the API package is missing or mismatching - check first, otherwise NOT RUN | `APPROVED:INSTALL:<Name>` for the repair |
+  | `Invoke-PbivizBuild` (086) | no: preflight blocks, npm runs offline | - |
+  | `Connect-PbivizRemoteHistory -Fetch`, `git fetch` (086) | yes, the Git remote | `APPROVED:CONNECT:<url>` once |
+  | `git push`, pull requests, merges, tags (086) | yes, the Git provider | `APPROVED:PUSH` / `PR` / `MERGE` / `TAG` |
+
+- **Timeout and cleanup** - `-TimeoutSeconds` (default 900) bounds the CLI. Disposable homes are
+  owned through `owner.lock`, which the running build holds open: the next build removes only homes
+  whose lock is free (a finished or killed build) and lockless homes older than 24 hours, never a
+  live build's home and never through a link. A linked `pbiviz-build-home` folder is refused.
+  Recovery after a crash needs nothing: the next build sweeps the left-over home.
+- **Build supervision** - `pbiviz package` runs under process-tree supervision (Windows job
+  object): the CLI starts suspended inside the job, stdin is `NUL`, stdout/stderr are drained into
+  bounded buffers (4 MB per stream; the excess is counted in the log, not kept). When the CLI exits
+  or the timeout expires, every process of its tree still running - detached descendants
+  included - is counted and terminated before the call returns, so nothing can write a package
+  afterwards (the console host Windows attaches to the CLI is not counted). A timeout, a descendant still running after the CLI exited, or output that could not
+  be collected is FAILED with no build evidence.
+- **Transactional archiving** - `Add-PbivizRelease` and `Add-PbivizLegacyArchive` write each new
+  file to a temporary file and rename it into place (never over an existing file), and record
+  every folder and file they create. If anything fails after the first write - package, manifest,
+  staging or the post-staging candidate check - they unstage what they staged, delete what they
+  wrote while it still holds the bytes they wrote, and remove folders they created when empty; the
+  reason ends with `rolled back: nothing this call wrote or staged was left behind`. Pre-existing
+  releases and user files are never touched. If a written file changed meanwhile it is left in
+  place and the result is FAILED with `ROLLBACK INCOMPLETE` naming it. A release file that exists
+  but is not tracked is reported (never deleted) for you to inspect.
+- **G4 (dependencies stay inside the visual)** - analyses the visual's own code, styles and JSON
+  configuration as the PBIVIZ toolchain (webpack 5, ts-loader, less-loader, css-loader) resolves
+  them: `import` / `export ... from`, side-effect imports, `import()` (template literals by their
+  static prefix), `require()`, `require.resolve()`, `require.context()`,
+  `import.meta.webpackContext()`, `new URL(<request>, import.meta.url)`, triple-slash references,
+  LESS/CSS `@import` and `url()`, and relative or absolute path strings in the visual's JSON files
+  (for example `extends`, `baseUrl` and `paths` in `tsconfig.json`, `file:` dependencies in
+  `package.json` and the lockfile, paths in `pbiviz.json`). A request
+  reaching a file outside the visual that is not allowlisted, a folder request (context or
+  template) outside the visual, npm workspaces at the repository root, or an absolute path BLOCK
+  the gate. It fails closed (`analysis incomplete`) on a computed request, a package the visual's
+  own `package.json` / `package-lock.json` does not declare or lock, inline loader syntax,
+  `#` subpath imports, an executable `pbiviz.mjs` / `tsconfig.mjs` / `capabilities.mjs`, a
+  `node_modules` folder at the repository root, unreadable or oversized files, junctions and
+  links. Limits: the contents of `node_modules` are not analysed; TypeScript automatic `@types`
+  inclusion from folders above the repository, pnpm/Yarn layouts, lockfile version 1 and R scripts
+  are not resolved; text inside JSX that looks like a comment can hide a computed import from the
+  lexer (static relative requests are still caught by a raw scan). G4 is a static classification,
+  not a proof that the bundle contains nothing from outside the visual.
+
+- **Cleanup** — only helper-created candidates (record, folder and `release/pbiviz/*` branch
+  must match) are removed; unexpected staged, unstaged or untracked data and operations in
+  progress are refused, with or without approval. The release branch is always kept.
+
+- **Never (helper or agent)** — force (`switch -C`, `checkout -B`, `branch -f`,
+  `push --force`), `reset --hard`, `clean -f`, admin/policy bypass, writing to Prod after a
+  merge, or editing a file under any `releases/` folder. The one forced operation in the
+  helper is discarding an uncommitted, helper-created candidate worktree, and only with
+  `APPROVED:DISCARD-CANDIDATE:<branch>`.
+- **Approval-gated (agent only)** — push, pull request and merge are separate agent actions,
+  each gated by an explicit approval token (`APPROVED:PUSH`, `APPROVED:PR`, `APPROVED:MERGE`
+  with every required review and check satisfied); the helper performs none of them.
+- **Results** — every function returns a status (`PASS`, `BLOCKED`, `NEEDS INPUT`,
+  `NEEDS CHECKPOINT`, `CONFLICT`, `FAILED`; integrity: also `PARTIAL`; provenance: `DERIVED` /
+  `NOT DERIVABLE`) with a reason and evidence; agents report it verbatim.
+
+### 29.7 Test stage - one candidate per release, rejected releases and `test-sync`
+
+With `PBVIZ_Team_Test` the release branch name stays `release/pbiviz/<Name>/<version>`, so there is
+**one candidate per visual and version, always cut from the Prod tip** (a second candidate for the
+same version is refused). Flow:
+
+1. Create, build, gate and commit the candidate against Prod (29.3); push it (`APPROVED:PUSH`).
+2. Pull request 1: the release branch -> `PBVIZ_Team_Test` (`APPROVED:PR`, then `APPROVED:MERGE`).
+3. `Test-PbivizReleaseIntegrity` on the Test merge commit; host-test the package from Test's archive.
+4. Pull request 2: the **same, unchanged** release branch -> `PBVIZ_Team_Prod`; then provenance and
+   integrity on the Prod merge commit (29.5). Only the Prod result makes an OFFICIAL RELEASE
+   distributable.
+
+A release rejected in Test is fixed with a new Dev commit and a **new version** - never by editing
+the release branch. The rejected pair stays in Test's archive as history and is never promoted.
+Test then still holds the rejected source of that visual, so pull request 1 of the next version may
+conflict, or merge cleanly yet leave rejected files behind (step 3 then FAILS on the fingerprint).
+The rule: on Test, the visual's whole source scope (plus the allowlisted shared files - the
+`sharedFiles` paths in this version's `.release.json`) must equal the release branch. 086
+reconciles it on a local integration branch, never in the provider's web conflict editor (that
+would commit the resolution onto the release branch):
+
+```powershell
+$rel = 'release/pbiviz/Bar/1.0.0.3'
+git -C $root switch -c 'test-sync/Bar/1.0.0.3' PBVIZ_Team_Test
+git -C $root merge --no-ff --no-commit $rel                 # may report conflicts: expected
+git -C $root checkout $rel -- Bar                          # plus each allowlisted shared file
+# remove every Bar file outside Bar/releases/ that exists only on Test:
+$keep  = git -C $root ls-tree -r --name-only $rel -- Bar
+$extra = git -C $root ls-files -- Bar | Where-Object { $_ -notlike 'Bar/releases/*' -and $keep -notcontains $_ }
+foreach ($p in $extra) { git -C $root rm -q -- $p }
+git -C $root diff --name-only --diff-filter=U               # must be empty
+git -C $root diff --cached --name-only PBVIZ_Team_Test      # must list Bar/ paths only
+git -C $root commit -m "Merge $rel into Test via test-sync/Bar/1.0.0.3"
+```
+
+Then push the integration branch and use it for pull request 1 (`APPROVED:PUSH`, `APPROVED:PR`,
+`APPROVED:MERGE`). Step 3 must now show `Status = PASS` with the merge commit's fingerprint equal to
+the manifest's. **Stop and report** - do not resolve by hand - when a path outside the visual (and its
+allowlisted shared files) differs from a clean merge, when an unmerged path remains, or when a
+release pair of another version would change: release pairs that exist only on Test stay as they
+are (the archive is append-only). Never merge Test into the release branch or into Prod. This
+procedure is plain Git (no helper function); it is covered by an automated regression test and was
+rehearsed on local branches, not yet against a provider's pull-request UI.
 
 ---
 

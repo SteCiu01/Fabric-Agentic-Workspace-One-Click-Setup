@@ -413,3 +413,190 @@ Describe 'Generated configuration (settings, docs, status script)' {
         }
     }
 }
+
+Describe 'Generated PBIVIZ capability (helper, skills, MCP)' {
+
+    BeforeAll {
+        $script:HelperPath = Join-Path $script:EmitDir '.github\agent-docs\Pbiviz-Alm.ps1'
+        $tokens = $null; $errors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile($script:HelperPath, [ref]$tokens, [ref]$errors) | Out-Null
+        $script:HelperErrors = @($errors)
+        # Code only (comments dropped), argument arrays collapsed so @('reset', '--hard') reads 'reset --hard'.
+        $code = (@($tokens | Where-Object { $_.Kind -ne 'Comment' }) | ForEach-Object { $_.Text }) -join ' '
+        $script:HelperCode = [regex]::Replace($code, "'\s*,\s*'", ' ')
+        $script:HelperStrings = @($tokens | Where-Object { $_ -is [System.Management.Automation.Language.StringToken] } | ForEach-Object { $_.Value })
+        $script:Banned = @('switch -C', 'checkout -B', 'branch -f', 'branch -D', 'reset --hard', 'clean -f', 'push --force', 'push -f', '--force-with-lease', '--admin', '--bypass-policy', 'update-ref refs/heads', 'tag -f')
+    }
+
+    It 'emits Pbiviz-Alm.ps1 byte-identical to the installer heredoc, and it parses' {
+        Test-Path -LiteralPath $script:HelperPath | Should -BeTrue
+        $script:HelperErrors.Count | Should -Be 0
+        $raw = [IO.File]::ReadAllText($script:Installer)
+        $m = [regex]::Match($raw, "(?s)\`$pbivizAlmScript = @'\r?\n(.*?)\r?\n'@")
+        [IO.File]::ReadAllText($script:HelperPath) | Should -BeExactly $m.Groups[1].Value
+    }
+
+    It 'the helper contains no destructive Git command (<_>)' -ForEach @('switch -C', 'checkout -B', 'branch -f', 'branch -D', 'reset --hard', 'clean -f', 'push --force', 'push -f', '--force-with-lease', '--admin', '--bypass-policy', 'update-ref refs/heads', 'tag -f') {
+        $script:HelperCode | Should -Not -MatchExactly ([regex]::Escape($_))
+    }
+
+    It 'the helper never pushes, merges into protected branches or creates PRs' {
+        $script:HelperStrings.Count | Should -BeGreaterThan 100
+        $script:HelperStrings | Should -Not -Contain 'push'
+        $script:HelperCode | Should -Not -MatchExactly '\bgh\s+pr\b|az\s+repos\s+pr'
+    }
+
+    It 'the helper never passes a literal glob or magic pathspec to Git' {
+        @($script:HelperStrings | Where-Object { $_ -like ':(*' }).Count | Should -Be 0 -Because 'magic pathspecs are never used'
+        $script:HelperCode | Should -Not -Match "--\s+['""]?[^'""\s$]*[*?\[]" -Because 'user paths go through --pathspec-from-file with literal pathspecs, never a glob after --'
+        $script:HelperCode | Should -Match 'GIT_LITERAL_PATHSPECS'
+    }
+
+    It 'the helper invokes Git only through Invoke-PbivizGit and writes files without Set-Content/Out-File/Add-Content' {
+        $script:HelperCode | Should -Not -Match '(?<![\w''])&\s+[''"]?git(\.exe)?[''"]?\s'
+        $script:HelperCode | Should -Not -Match 'Start-Process'
+        $script:HelperCode | Should -Not -Match '\b(Set-Content|Out-File|Add-Content)\b'
+        $script:HelperCode | Should -Match 'function Invoke-PbivizGit'
+    }
+
+    It 'the release skill names banned commands only under its "## Never" section' {
+        $skill = Join-Path $script:EmitDir '.github\skills\pbiviz-alm-release\SKILL.md'
+        Test-Path -LiteralPath $skill | Should -BeTrue
+        $sections = [regex]::Split([IO.File]::ReadAllText($skill), '(?m)^(?=## )')
+        @($sections | Where-Object { $_ -match '^## Never' }).Count | Should -Be 1
+        foreach ($s in ($sections | Where-Object { $_ -notmatch '^## Never' })) {
+            foreach ($b in $script:Banned) { $s | Should -Not -MatchExactly ([regex]::Escape($b)) -Because "'$b' may only appear under ## Never" }
+        }
+    }
+
+    It 'emits all six PBIVIZ skills' {
+        foreach ($n in 'pbiviz-pbip-reconstruction', 'pbiviz-source-conversion', 'pbiviz-ibcs-semantic-contract', 'pbiviz-interaction-regression', 'pbiviz-release-safety', 'pbiviz-alm-release') {
+            Test-Path -LiteralPath (Join-Path $script:EmitDir ".github\skills\$n\SKILL.md") | Should -BeTrue -Because $n
+        }
+    }
+
+    It 'adds the Microsoft Learn MCP server to .vscode/mcp.json and keeps it out of the installer-managed purge list' {
+        $p = Join-Path $script:EmitDir '.vscode\mcp.json'
+        Test-Path -LiteralPath $p | Should -BeTrue
+        $j = [IO.File]::ReadAllText($p) | ConvertFrom-Json
+        $j.servers.microsoftDocs.url | Should -Be 'https://learn.microsoft.com/api/mcp'
+        $man = [IO.File]::ReadAllText((Join-Path $script:EmitDir '.github\agent-docs\installed-manifest.json')) | ConvertFrom-Json
+        @($man.files | ForEach-Object { $_.path }) | Should -Contain '.github/agent-docs/Pbiviz-Alm.ps1'
+        @($man.files | ForEach-Object { $_.path }) | Should -Not -Contain '.vscode/mcp.json'
+    }
+
+    It 'emit mode creates no PBIVIZ folder and no machine mapping' {
+        Test-Path -LiteralPath (Join-Path $script:EmitDir '.github\agent-docs\local\pbiviz-workspace.json') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $script:EmitDir '0 - PBIVIZ Developing Environment') | Should -BeFalse
+    }
+
+    It 'grants pbiviz/* to the PBIVIZ team only and microsoftDocs/* to executives, leads and PBIVIZ specialists' {
+        foreach ($agent in $script:Manifest.agents) {
+            $slug = $agent.filename -replace '^\d+-', ''
+            $tools = @($script:GenBySlug[$slug].Tools)
+            if ($agent.department -eq 'pbiviz-development') { $tools | Should -Contain 'pbiviz/*' -Because $agent.filename }
+            else { $tools | Should -Not -Contain 'pbiviz/*' -Because $agent.filename }
+            if ($agent.level -in @('executive', 'team-lead')) { $tools | Should -Contain 'microsoftDocs/*' -Because $agent.filename }
+        }
+    }
+
+    It 'routes .pbiviz SDK work to 080 and keeps 024 on in-report visuals' {
+        $lead = $script:GenBySlug.Keys | Where-Object { $_ -like 'pbiviz-development-team-lead*' } | Select-Object -First 1
+        $lead | Should -Not -BeNullOrEmpty
+        $adv = $script:GenBySlug.Keys | Where-Object { $_ -like 'advanced-custom-visuals*' } | Select-Object -First 1
+        $advBody = Get-Content -LiteralPath $script:GenBySlug[$adv].Path -Raw
+        $advBody | Should -Match 'PBIVIZ Development Team Lead'
+        $advBody | Should -Not -Match 'powerbi-custom-visuals/SKILL\.md'
+    }
+}
+
+Describe 'Package downloads are prohibitions or approval-gated, never instructions (review finding 4)' {
+
+    BeforeAll {
+        $repo = Split-Path $PSScriptRoot -Parent
+        $script:DlSources = @()
+        foreach ($doc in 'README.md', 'CLI-FUNCTIONALITIES.md', 'CHANGELOG.md') { $script:DlSources += [pscustomobject]@{ Name = $doc; Text = [IO.File]::ReadAllText((Join-Path $repo $doc)) } }
+        foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $script:EmitDir '.github') -Recurse -File -Include '*.md' -ErrorAction SilentlyContinue)) {
+            $script:DlSources += [pscustomobject]@{ Name = $f.FullName.Substring($script:EmitDir.Length + 1); Text = [IO.File]::ReadAllText($f.FullName) }
+        }
+        # A command that can download or install a package: npx without --no, npm exec, npm install / ci / i.
+        $script:DlRisky = '\bnpx\b(?!\s+--no\b)|\bnpm\s+(exec|install|ci|i)\b'
+        # Allowed only inside a sentence that gates it on approval or states a prohibition ("--no" is not a negation).
+        $script:DlGate = 'APPROVED:INSTALL'
+        $script:DlNeg = '(?i)(?<![-\w])(never|no|not|without|avoid|refuses?|forbidden|instead of)(?![-\w])'
+        function Get-TSentences {
+            param([string]$Text)
+            # Continuation lines (indented, not a new list item or table row) belong to the previous line.
+            $joined = [regex]::Replace($Text, '\r?\n(?=[ \t]+(?![-*|]\s|\d+\.\s)\S)', ' ')
+            foreach ($line in ($joined -split '\r?\n')) { foreach ($s in [regex]::Split($line, '(?<=[.;!?])\s+|\s\|\s')) { if ($s.Trim()) { $s } } }
+        }
+    }
+
+    It 'has the documents and the generated skills and agents to check' {
+        @($script:DlSources | Where-Object { $_.Name -like '*SKILL.md' }).Count | Should -BeGreaterThan 5
+        @($script:DlSources | Where-Object { $_.Name -like '*.agent.md' }).Count | Should -Be 54
+    }
+
+    It 'every download-capable npm command sits in a prohibition or an APPROVED:INSTALL sentence' {
+        $offenders = New-Object System.Collections.Generic.List[string]
+        foreach ($src in $script:DlSources) {
+            foreach ($s in @(Get-TSentences $src.Text)) {
+                if ($s -match $script:DlRisky -and $s -notmatch $script:DlGate -and $s -notmatch $script:DlNeg) { $offenders.Add("$($src.Name): $($s.Trim())") }
+            }
+        }
+        $offenders | Should -BeNullOrEmpty -Because 'detect first, obtain approval before installation or download, prefer the project-local toolchain, never silently acquire or execute missing packages'
+    }
+
+    It 'the classifier itself separates warnings from instructions (meta)' {
+        @(Get-TSentences 'Run `npx pbiviz start` in the folder.') | Where-Object { $_ -match $script:DlRisky -and $_ -notmatch $script:DlGate -and $_ -notmatch $script:DlNeg } | Should -Not -BeNullOrEmpty
+        @(Get-TSentences 'Run `npx -y powerbi-visuals-tools new X` (run in the PBIVIZ folder).') | Where-Object { $_ -match $script:DlRisky -and $_ -notmatch $script:DlGate -and $_ -notmatch $script:DlNeg } | Should -Not -BeNullOrEmpty
+        @(Get-TSentences 'Use `npx --no pbiviz package`.') | Where-Object { $_ -match $script:DlRisky } | Should -BeNullOrEmpty
+        @(Get-TSentences 'No global installs, no `npx -y`.') | Where-Object { $_ -match $script:DlRisky -and $_ -notmatch $script:DlGate -and $_ -notmatch $script:DlNeg } | Should -BeNullOrEmpty
+    }
+
+    It 'documents the project-local pbiviz MCP configuration in the skill, the developer agent, the CLI guide and the README' {
+        $local = [regex]::Escape('${workspaceFolder}/node_modules/powerbi-visuals-tools/bin/pbiviz.js')
+        foreach ($n in '*pbiviz-release-safety*SKILL.md', '*pbiviz-developer*.agent.md', 'CLI-FUNCTIONALITIES.md', 'README.md') {
+            $doc = @($script:DlSources | Where-Object { $_.Name -like $n })
+            $doc.Count | Should -Be 1 -Because $n
+            $doc[0].Text | Should -Match $local -Because $n
+        }
+    }
+}
+
+Describe 'Release-correctness rules reach the agents that report releases (final review)' {
+
+    BeforeAll {
+        $repo = Split-Path $PSScriptRoot -Parent
+        $script:RcDocs = [ordered]@{}
+        foreach ($n in 'pbiviz-alm-release', 'pbiviz-release-safety') { $script:RcDocs[$n] = [IO.File]::ReadAllText((Join-Path $script:EmitDir ".github\skills\$n\SKILL.md")) }
+        foreach ($k in @{ '086' = 'pbiviz-alm-release*'; '080' = 'pbiviz-development-team-lead*' }.GetEnumerator()) {
+            $slug = @($script:GenBySlug.Keys | Where-Object { $_ -like $k.Value })[0]
+            $script:RcDocs[$k.Key] = [IO.File]::ReadAllText($script:GenBySlug[$slug].Path)
+        }
+        foreach ($d in 'CLI-FUNCTIONALITIES.md', 'README.md') { $script:RcDocs[$d] = [IO.File]::ReadAllText((Join-Path $repo $d)) }
+    }
+
+    It 'states that Level 3 promotes only validated releases and that the rest are development/test candidates (<_>)' -ForEach @('pbiviz-alm-release', 'pbiviz-release-safety', '086', '080', 'CLI-FUNCTIONALITIES.md') {
+        $script:RcDocs[$_] | Should -Match 'DEVELOPMENT/TEST CANDIDATE'
+        $script:RcDocs[$_] | Should -Match 'validated: true'
+    }
+
+    It 'never lets commit-only integrity pass as a verified release (<_>)' -ForEach @('pbiviz-alm-release', '086', 'CLI-FUNCTIONALITIES.md') {
+        $script:RcDocs[$_] | Should -Match 'PARTIAL'
+        $script:RcDocs[$_] | Should -Match 'COMMIT ONLY'
+        $script:RcDocs[$_] | Should -Match 'OFFICIAL RELEASE'
+    }
+
+    It 'builds release packages through Invoke-PbivizBuild and gates external packages on their bytes (<_>)' -ForEach @('pbiviz-alm-release', 'pbiviz-release-safety', '086', 'CLI-FUNCTIONALITIES.md') {
+        $script:RcDocs[$_] | Should -Match 'Invoke-PbivizBuild'
+        $script:RcDocs[$_] | Should -Match 'EXTERNAL-PACKAGE:<visual>:<sha256>|EXTERNAL-PACKAGE:<Name>:<sha256>'
+    }
+
+    It 'the helper the agents dot-source exposes the build, the class and the verification fields' {
+        $helper = [IO.File]::ReadAllText((Join-Path $script:EmitDir '.github\agent-docs\Pbiviz-Alm.ps1'))
+        $helper | Should -Match 'function Invoke-PbivizBuild'
+        foreach ($t in 'OFFICIAL RELEASE', 'DEVELOPMENT/TEST CANDIDATE', "'COMMIT ONLY'", "'PARTIAL'", 'APPROVED:EXTERNAL-PACKAGE:') { $helper | Should -Match ([regex]::Escape($t)) }
+        $helper | Should -Not -MatchExactly 'buildCommand|builtAt' -Because 'unverified build claims are no longer written'
+    }
+}

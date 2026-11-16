@@ -1,8 +1,8 @@
 @echo off
-title Fabric Agentic Workspace Setup v0.7.3
+title Fabric Agentic Workspace Setup v0.8.0
 echo.
 echo  ===============================================
-echo   Fabric Agentic Workspace -- One-click Setup v0.7.3
+echo   Fabric Agentic Workspace -- One-click Setup v0.8.0
 echo  ===============================================
 echo.
 :: -ExecutionPolicy Bypass is required because many organisations restrict

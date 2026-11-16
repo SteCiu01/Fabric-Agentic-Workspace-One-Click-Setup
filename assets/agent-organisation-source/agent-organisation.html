@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<!--
+  Source of assets/agent-organisation.png (README section 3.4). Render it with Render-AgentOrganisation.ps1; see README.md.
+  Team Leads and specialists mirror the installer's embedded agent manifest. No numeric prefixes in labels.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent organisation</title>
+<style>
+  :root {
+    --teal: #0f6e74;
+    --teal-soft: #e8f2f3;
+    --ink: #1f2328;
+    --ink2: #44505b;
+    --ink3: #6e7781;
+    --line: #b4c2ca;
+    --tree: #cbd6db;
+    --border: #e1e7eb;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1000px; background: #f6f8f9; }
+  body { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: var(--ink); -webkit-font-smoothing: antialiased; padding: 36px 40px 40px; }
+  svg.ic { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  .card { background: #fff; border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 1px 2px rgba(16, 24, 40, .04), 0 2px 8px rgba(16, 24, 40, .04); }
+  .abs { position: absolute; }
+  .wire { position: absolute; background: var(--line); }
+
+  .top { position: relative; height: 206px; }
+  .master { left: 240px; top: 0; width: 440px; height: 78px; border-radius: 12px; display: flex; align-items: center; gap: 16px; padding: 0 22px;
+            background: linear-gradient(135deg, #0c6067 0%, #12868c 100%); color: #fff; box-shadow: 0 4px 14px rgba(15, 110, 116, .20); }
+  .mlogo { width: 46px; height: 46px; border-radius: 50%; background: #fff; display: flex; align-items: center; justify-content: center; flex: none; }
+  .mlogo img { width: 30px; height: 30px; display: block; }
+  .mlogo svg.ic { display: none; width: 26px; height: 26px; color: var(--teal); }
+  .mlogo.no-icon svg.ic { display: block; }
+  .mname { font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif; font-size: 21px; font-weight: 600; }
+  .msub { font-size: 13.5px; opacity: .9; margin-top: 2px; }
+  .exec { top: 120px; width: 260px; height: 62px; display: flex; align-items: center; gap: 12px; padding: 0 18px; font-size: 15px; font-weight: 600; line-height: 1.3; }
+  .badge { width: 34px; height: 34px; border-radius: 8px; background: var(--teal-soft); color: var(--teal); display: flex; align-items: center; justify-content: center; flex: none; }
+
+  .leads { border-radius: 14px; background: #eef4f5; border: 1px solid #d9e5e7; padding: 14px 18px 18px; }
+  .eyebrow { font-size: 11.5px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: #557479; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }
+  .col { display: flex; flex-direction: column; gap: 12px; }
+  .col .team { flex: 1 1 auto; }
+
+  .team { position: relative; padding: 13px 18px 12px 20px; }
+  .team::before { content: ""; position: absolute; left: 0; top: 14px; height: 22px; width: 3px; border-radius: 0 2px 2px 0; background: var(--c); }
+  .th { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .tn { font-size: 16px; font-weight: 600; }
+  .tc { font-size: 12.5px; color: var(--ink3); white-space: nowrap; }
+  .tree { list-style: none; margin: 7px 0 0 3px; }
+  .tree li { position: relative; padding-left: 22px; font-size: 14.5px; line-height: 25px; color: var(--ink2); }
+  .tree li::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 1.5px; background: var(--tree); }
+  .tree li:first-child::before { top: -5px; }
+  .tree li:last-child::before { bottom: 12px; }
+  .tree li::after { content: ""; position: absolute; left: 0; top: 12px; width: 13px; height: 1.5px; background: var(--tree); }
+
+  .foot { display: flex; flex-direction: column; align-items: center; }
+  .stem { width: 1.5px; height: 20px; background: var(--line); }
+  .pill { width: 440px; height: 40px; border-radius: 20px; border: 1.5px dashed #86b8bb; background: #fff;
+          display: flex; align-items: center; justify-content: center; font-size: 14.5px; font-weight: 500; color: var(--teal); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-agent" viewBox="0 0 24 24"><rect x="4.5" y="7" width="15" height="11" rx="4"/><path d="M12 7V4.5"/><circle cx="9.3" cy="12.4" r="1"/><circle cx="14.7" cy="12.4" r="1"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.4l6.6 2.6v5.3c0 4.1-2.8 7.4-6.6 8.9-3.8-1.5-6.6-4.8-6.6-8.9V6z"/><path d="M9.2 12l2 2 3.8-4.1"/></symbol>
+    <symbol id="i-clipboard" viewBox="0 0 24 24"><rect x="5.6" y="5" width="12.8" height="15.4" rx="2"/><path d="M9.4 3.6h5.2v2.8H9.4z"/><path d="M8.8 12.8l2.1 2.1 4.3-4.4"/></symbol>
+  </defs>
+</svg>
+
+<div class="top">
+  <div class="abs master">
+    <!-- copilot-icon.png is supplied by the renderer from the local VS Code install and is not stored in the repository. -->
+    <div class="mlogo"><img src="copilot-icon.png" alt="" onerror="this.parentNode.className += ' no-icon'; this.remove();"><svg class="ic"><use href="#i-agent"/></svg></div>
+    <div><div class="mname">Fabric Workspace Master</div><div class="msub">Primary contact · Orchestrator · Outcome owner</div></div>
+  </div>
+  <div class="wire" style="left:459.25px; top:78px; width:1.5px; height:128px;"></div>
+  <div class="wire" style="left:310px; top:99.25px; width:320px; height:1.5px;"></div>
+  <div class="wire" style="left:309.25px; top:100px; width:1.5px; height:20px;"></div>
+  <div class="wire" style="left:629.25px; top:100px; width:1.5px; height:20px;"></div>
+  <div class="abs card exec" style="left:180px;"><div class="badge"><svg class="ic"><use href="#i-shield"/></svg></div>Solution Architect</div>
+  <div class="abs card exec" style="left:500px;"><div class="badge"><svg class="ic"><use href="#i-clipboard"/></svg></div>Integration QA &amp; Change&nbsp;Controller</div>
+</div>
+
+<div class="leads">
+  <div class="eyebrow">8 Team Leads</div>
+  <div class="cols">
+    <div class="col">
+      <div class="card team" style="--c:#2b8a3e">
+        <div class="th"><span class="tn">Semantic Model</span><span class="tc">6 specialists</span></div>
+        <ul class="tree"><li>Model Architecture</li><li>Relationships &amp; Storage Mode</li><li>TMDL</li><li>DAX</li><li>Semantic Security &amp; AI Metadata</li><li>Semantic Validation &amp; Performance</li></ul>
+      </div>
+      <div class="card team" style="--c:#c69200">
+        <div class="th"><span class="tn">Reporting</span><span class="tc">6 specialists</span></div>
+        <ul class="tree"><li>Report Planning &amp; UX</li><li>PBIR Authoring</li><li>Theme &amp; Formatting</li><li>Advanced &amp; Custom Visuals</li><li>Paginated Reports</li><li>Report QA &amp; Desktop Verification</li></ul>
+      </div>
+      <div class="card team" style="--c:#1f6fd1">
+        <div class="th"><span class="tn">Data Engineering</span><span class="tc">8 specialists</span></div>
+        <ul class="tree"><li>Notebook &amp; Spark</li><li>Lakehouse, Delta &amp; MLV</li><li>Warehouse SQL</li><li>SQL Database</li><li>Dataflows Gen2</li><li>Pipeline Orchestration</li><li>Real-Time Intelligence</li><li>Fabric Intelligence &amp; Ontology</li></ul>
+      </div>
+      <div class="card team" style="--c:#0b5c6b">
+        <div class="th"><span class="tn">Administration &amp; Governance</span><span class="tc">3 specialists</span></div>
+        <ul class="tree"><li>Workspace &amp; Capacity Administration</li><li>Security, Access &amp; Governance</li><li>Monitoring, Catalog &amp; Operations</li></ul>
+      </div>
+    </div>
+    <div class="col">
+      <div class="card team" style="--c:#6f42c1">
+        <div class="th"><span class="tn">ALM &amp; DevOps</span><span class="tc">5 specialists</span></div>
+        <ul class="tree"><li>GitHub Source Control</li><li>Azure DevOps</li><li>Fabric Git Integration</li><li>Deployment &amp; Release</li><li>Power BI ALM</li></ul>
+      </div>
+      <div class="card team" style="--c:#9b59b6">
+        <div class="th"><span class="tn">Applications &amp; Integration</span><span class="tc">3 specialists</span></div>
+        <ul class="tree"><li>Python &amp; Fabric SDK</li><li>REST, Authentication &amp; XMLA</li><li>SQL, ODBC &amp; Data Access</li></ul>
+      </div>
+      <div class="card team" style="--c:#d9622b">
+        <div class="th"><span class="tn">Capability Maintenance</span><span class="tc">6 specialists</span></div>
+        <ul class="tree"><li>Upstream Repository Sync</li><li>Skill Inventory &amp; Mapping</li><li>Agent Coverage &amp; Organization</li><li>Environment &amp; Tooling</li><li>Installer Health &amp; Regression</li><li>Managed File Review</li></ul>
+      </div>
+      <div class="card team" style="--c:#0e9aa7">
+        <div class="th"><span class="tn">PBIVIZ Development</span><span class="tc">6 specialists</span></div>
+        <ul class="tree"><li>Planner</li><li>Developer</li><li>Tester</li><li>Reviewer</li><li>Maintainer</li><li>ALM &amp; Release</li></ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="foot"><div class="stem"></div><div class="pill">43 delegated specialists (hidden by default)</div></div>
+<!-- The renderer reads data-h to size the screenshot to the full page height. -->
+<script>document.documentElement.setAttribute('data-h', Math.ceil(document.documentElement.getBoundingClientRect().height));</script>
+</body>
+</html>
