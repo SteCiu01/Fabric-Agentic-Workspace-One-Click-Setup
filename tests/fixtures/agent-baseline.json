@@ -353,7 +353,9 @@
                                                                     "search",
                                                                     "execute",
                                                                     "edit",
-                                                                    "Fabric MCP/*"
+                                                                    "Fabric MCP/*",
+                                                                    "fabric-dw-global/*",
+                                                                    "fabric-dw-item/*"
                                                                 ],
                                                       "agents":  [
 
@@ -433,7 +435,8 @@
                                                                                    "search",
                                                                                    "execute",
                                                                                    "edit",
-                                                                                   "Fabric MCP/*"
+                                                                                   "Fabric MCP/*",
+                                                                                   "FabricIQ/*"
                                                                                ],
                                                                      "agents":  [
 
@@ -498,7 +501,8 @@
                                                                                     "read",
                                                                                     "search",
                                                                                     "execute",
-                                                                                    "Fabric MCP/*"
+                                                                                    "Fabric MCP/*",
+                                                                                    "FabricIQ/*"
                                                                                 ],
                                                                       "agents":  [
 

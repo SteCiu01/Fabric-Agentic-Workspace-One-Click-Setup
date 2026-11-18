@@ -467,11 +467,66 @@ Describe 'fabric-pipelines skill: evidence and contract (PIPE-04 to PIPE-08)' {
         $script:Skill | Should -Match '`GroupId` is \*\*not\*\* the workspace id'
     }
 
+    It 'gives <Variable> exactly this meaning: <Meaning> (PIPE-05)' -TestCases @(
+        @{ Variable = 'DataFactory'; Meaning = 'the **id of the workspace** the run is in'; Evidence = 'the workspace GUID' },
+        @{ Variable = 'Pipeline'; Meaning = 'the **id of the pipeline**'; Evidence = 'the pipeline item GUID' },
+        @{ Variable = 'PipelineName'; Meaning = 'the name of the pipeline'; Evidence = 'the display name' },
+        @{ Variable = 'RunId'; Meaning = 'the id of this run'; Evidence = 'the job instance GUID' },
+        @{ Variable = 'GroupId'; Meaning = 'the id of the group the run belongs to'; Evidence = 'equal to `RunId`' },
+        @{ Variable = 'TriggerTime'; Meaning = 'when the trigger fired, UTC, ISO 8601'; Evidence = '`2000-01-01T00:00:00.0000000Z` form' }
+    ) {
+        param($Variable, $Meaning, $Evidence)
+        $row = @($script:Skill -split "`n" | Where-Object { $_.StartsWith('| `@pipeline().' + $Variable + '` |') })
+        $row.Count | Should -Be 1 -Because "$Variable has exactly one row"
+        $cells = @($row[0].Trim('|').Split('|') | ForEach-Object { $_.Trim() })
+        $cells[1] | Should -BeExactly $Meaning
+        $cells[2] | Should -BeExactly $Evidence
+    }
+
+    It 'never lets the pipeline id pass for its name (PIPE-05)' {
+        $script:Skill | Should -Match '`Pipeline` is an id, not a name\. For a message use `PipelineName`\.'
+        # The row of the id must not describe a name, and the row of the name must not describe an id.
+        (@($script:Skill -split "`n" | Where-Object { $_.StartsWith('| `@pipeline().Pipeline` |') })[0]) | Should -Not -Match '(?i)\bname\b'
+        (@($script:Skill -split "`n" | Where-Object { $_.StartsWith('| `@pipeline().PipelineName` |') })[0]) | Should -Not -Match '(?i)\bid\b|GUID'
+        $script:Skill | Should -Match 'do not build on it' -Because 'an undocumented variable that happened to work is not offered as a contract'
+    }
+
     It 'lists what does not move between environments and the manual work that remains (PIPE-06)' {
         foreach ($s in 'Semantic model \| does not rebind', 'Spark job definition \| does not rebind', 'Connection \| never rebinds', 'sign in again') { $script:Skill | Should -Match $s }
         $script:Skill | Should -Match 'never by the HTTP status'
         $script:Skill | Should -Match 'Number \| not supported in pipelines'
         $script:Skill | Should -Not -Match 'Number \| Double'
+    }
+
+    It 'names every binding that stays open after a promotion: <Binding> (PIPE-06)' -TestCases @(
+        @{ Binding = 'Outlook and Teams sign-in' }, @{ Binding = 'connection' }, @{ Binding = 'dataflow references' },
+        @{ Binding = 'semantic model, Spark job definition and warehouse endpoint' }, @{ Binding = 'every cross-workspace reference' },
+        @{ Binding = 'the active value set of the Variable Library' }
+    ) {
+        param($Binding)
+        $line = [regex]::Match($script:Skill, '(?s)- \*\*Manual work that remains after every promotion\*\*:.*?(?=\n- \*\*)').Value
+        $line | Should -Not -BeNullOrEmpty
+        ($line -replace '\s+', ' ') | Should -Match ([regex]::Escape($Binding))
+    }
+
+    It 'treats a dataflow reference as not portable and a foreign-workspace item as never rebinding (PIPE-06)' {
+        $script:Skill | Should -Match '(?m)^\| Dataflow Gen2 \| documented both ways \| treat as not portable; verify after deployment \|$'
+        $script:Skill | Should -Match '(?m)^\| Any item of \*\*another\*\* workspace \| never rebinds \|'
+        $script:Skill | Should -Match '`libraryId` is the id of the Variable Library \*\*item of that workspace\*\*'
+        $script:Skill | Should -Match 'The value used at run time is the one of the active value set of the workspace'
+    }
+
+    It 'states that no dedicated upstream binding skill exists and substitutes none (PIPE-10)' {
+        $p = ([regex]::Match($script:Skill, '(?s)- \*\*Upstream skills \(catalog checked \d{4}-\d{2}-\d{2}\)\.\*\*.*?(?=\n\n|\n---)').Value) -replace '\s+', ' '
+        $p | Should -Not -BeNullOrEmpty
+        $p | Should -Match 'has no skill dedicated to rebinding a pipeline''s item references across workspaces'
+        foreach ($related in 'variable-library-cli', 'deployment-pipelines-authoring-cli', 'git-integration-operations-cli', 'pipeline-migration') { $p | Should -Match ([regex]::Escape("``$related``")) }
+        $p | Should -Match 'none is used in place of a binding skill'
+        $p | Should -Match 'Capability Maintenance maps it through the normal skill compatibility process'
+        # The related skills really are in the recorded upstream catalog; a binding skill is not.
+        $snapshot = @((Get-SkillCatalogSnapshot).skills | ForEach-Object { ($_ -split '/')[-1] })
+        foreach ($related in 'variable-library-cli', 'deployment-pipelines-authoring-cli', 'git-integration-operations-cli', 'pipeline-migration') { $snapshot | Should -Contain $related }
+        @($snapshot | Where-Object { $_ -match '(?i)bind|rebind' }) | Should -BeNullOrEmpty -Because 'when such a skill appears upstream this statement and the mapping must be revisited'
     }
 
     It 'no longer teaches the removed templates as templates' {
@@ -499,6 +554,15 @@ Describe 'Agent 036 deployment safeguards (PIPE-09)' {
         $script:Agent036 | Should -Match 'NEEDS INPUT or NEEDS APPROVAL'
         $script:Agent036 | Should -Match 'NOT EXECUTED'
         $script:Agent036 | Should -Match 'A successful save is never reported as a working pipeline'
+    }
+
+    It 'never saves a BLOCKED result, and an UNCHECKED or unrun check only with the user''s decision on each point' {
+        $script:Agent036 | Should -Match 'Only `RESULT: PASS` allows the save\. BLOCKED -> fix or ask; it is never saved'
+        $script:Agent036 | Should -Match 'UNCHECKED -> never saved on your own decision: say what could not be checked and return NEEDS INPUT'
+        $script:Agent036 | Should -Match 'A check that could not be run at all counts as UNCHECKED for every point; without its change plan you return NEEDS INPUT, not NEEDS APPROVAL'
+        $script:Agent036 | Should -Match 'a BLOCKED result was never saved, and an UNCHECKED result \(or a check that could not be run\) was not saved unless the WORK ORDER carried the user''''s decision on each unchecked point'
+        # The skill states the same rule, so the two texts cannot be read against each other.
+        $script:Skill | Should -Match '`RESULT: PASS` allows a save without a question to the user\. `BLOCKED` is never saved\.\s+`UNCHECKED`, or a check that could not be run, is saved only after the user decided on\s+each point that could not be checked'
     }
 
     It 'keeps the agent''s ownership and tools unchanged' {

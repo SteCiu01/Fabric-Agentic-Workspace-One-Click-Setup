@@ -13,7 +13,7 @@ Used regularly by the maintainer in real Fabric work. Contributions and feedback
 > - **What** — a one-click installer that scaffolds an opinionated Microsoft Fabric development workspace in VS Code.
 > - **Who it's for** — anyone working in Fabric (semantic models, data engineering, reports, pipelines, admin, app dev, DevOps) who wants Copilot agents that already know the right tools and house conventions.
 > - **How to run** — double-click `Setup-FabricAgenticWorkspace.bat`, answer a few prompts, and let it scaffold.
-> - **What you get** — a numbered 54-agent organisation (11 clear dropdown entries + 43 delegated workers), nine embedded skills (three for Fabric, six for Power BI custom visual development), two curated open-source skill sources, optional CLI/MCP tooling, an optional custom visual (`.pbiviz`) folder with its own local Git history, optional GitHub/Azure DevOps repository onboarding, and governed DEV→PROD guidance.
+> - **What you get** — a numbered 54-agent organisation (11 clear dropdown entries + 43 delegated workers), eleven embedded skills (five for Fabric, six for Power BI custom visual development), two curated open-source skill sources, optional CLI/MCP tooling, an optional custom visual (`.pbiviz`) folder with its own local Git history, optional GitHub/Azure DevOps repository onboarding, and governed DEV→PROD guidance.
 
 > Windows installer (PowerShell + `.bat`); the workspace itself is OS-agnostic once created.
 
@@ -74,7 +74,7 @@ Used regularly by the maintainer in real Fabric work. Contributions and feedback
 
 ## 1.1 Before you start — checklist
 
-The installer **stops** if a required item is missing. It **installs** the auto items for you where it can, and only **asks** before installing the optional ones.
+The installer **stops** if a required item is missing. Everything else is optional: it **asks** before every install, and only a typed `Y` or `YES` installs. Enter, `N`, anything else, or no answer at all (a closed window, an unattended run) means **nothing is installed**.
 
 | | Item | Who installs it | Notes |
 |---|---|---|---|
@@ -84,16 +84,17 @@ The installer **stops** if a required item is missing. It **installs** the auto 
 | ✅ Required | **[Microsoft Fabric extension](https://marketplace.visualstudio.com/items?itemName=fabric.vscode-fabric)** | You — `code --install-extension fabric.vscode-fabric` | Pull/push of Fabric items. Installer warns if missing, continues. |
 | 👍 Recommended | **[TMDL extension](https://marketplace.visualstudio.com/items?itemName=analysis-services.tmdl)** | You — `code --install-extension analysis-services.tmdl` | Syntax highlighting/validation for `.tmdl`. Installer reminds you. |
 | 💡 Nice to have | **[Fabric Data Engineer Remote](https://marketplace.visualstudio.com/items?itemName=synapsevscode.vscode-synapse-remote)** | You | Run notebook cells against remote Spark. Installer mentions it as a tip. |
-| 🤖 Auto | **Python 3.10–3.14** | Installer (only if no supported Python is found) | Looks on PATH, then in the PEP 514 registry and the python.org / conda folders — an install that is simply not on PATH is used as-is. Otherwise winget `Python.Python.3.12 --scope user` (bounded to 4 min), then python.org 3.12.10 per-user. An out-of-range Python is left untouched and 3.12 installed alongside. |
-| 🤖 Auto | **Fabric CLI `fab`** | Installer | `pip install ms-fabric-cli` (with `--user` retry). Primary CLI for live work. |
-| 🤖 Auto | **Azure CLI `az`** | Installer | winget `Microsoft.AzureCLI`, else isolated `%USERPROFILE%\.fabric-az`. Fallback CLI. ⚠️ Slowest install when missing. |
-| 🤖 Auto | **Fabric MCP server** `fabric.vscode-fabric-mcp-server` | Installer | VS Code extension; live/hybrid mode. |
-| 🤖 Auto | **Power BI semantic-model MCP** `analysis-services.powerbi-modeling-mcp` | Installer | VS Code extension; live DAX/model edits. |
-| ❓ Asks Y/N | `pbir`, Tabular Editor CLI, `pbi-tools`, `sqlcmd`, `gh`, `az devops` | Installer, only on **Yes** | See [2.4](#24-optional-clis-and-mcp-servers--what-each-unlocks). Declined = remembered, agents fall back. |
+| ❓ Asks Y/N | **Fabric CLI `fab`** (recommended) | Installer, only on **Yes** | `pip install ms-fabric-cli` (with `--user` retry). Primary CLI for live work. |
+| ❓ Asks Y/N | **Python 3.10–3.14** | Installer, only on **Yes** — and only asked when you said Yes to `fab` and no supported Python is found | Looks on PATH, then in the PEP 514 registry and the python.org / conda folders — an install that is simply not on PATH is used as-is. Otherwise winget `Python.Python.3.12 --scope user` (bounded to 4 min), then python.org 3.12.10 per-user. An out-of-range Python is left untouched and 3.12 installed alongside. |
+| ❓ Asks Y/N | **Azure CLI `az`** | Installer, only on **Yes** | winget `Microsoft.AzureCLI` (a system-wide package that can fail without administrator rights), else isolated `%USERPROFILE%\.fabric-az`. Fallback CLI. ⚠️ Slowest install when missing. |
+| ❓ Asks Y/N | **Fabric MCP server** `fabric.vscode-fabric-mcp-server` | Installer, only on **Yes** | VS Code extension; live/hybrid mode. |
+| ❓ Asks Y/N | **Power BI semantic-model MCP** `analysis-services.powerbi-modeling-mcp` | Installer, only on **Yes** | VS Code extension; live DAX/model edits. |
+| ❓ Asks Y/N | `pbir`, Tabular Editor CLI, `pbi-tools`, `sqlcmd`, `gh`, `az devops` | Installer, only on **Yes** | See [2.4](#24-optional-clis-and-mcp-servers--what-each-unlocks). A **No** is not remembered: a missing tool is offered again on the next run. Agents fall back. |
+| 🔎 Detected only | Tabular Editor 3, the `te` CLI, `powerbi-report-author`, the remote **Fabric IQ** and **Fabric Data Warehouse** MCP servers | You | Reported and recorded for the agents when present; never installed or configured by the installer. |
 | 🔎 Detected only | **Node.js 20.19+ and npm** | You — [nodejs.org](https://nodejs.org) (LTS) | Only for custom visual (`.pbiviz`) development. Reported in Step 2, never installed. Each visual uses its own project-local `powerbi-visuals-tools`; a global `pbiviz` is not required. |
 | 🔎 Detected only | **Git 2.28+ and a Git identity** (`user.name` / `user.email`) | You | Only for the optional PBIVIZ folder: older Git skips its repository; without an identity it is initialised but nothing is committed. |
 
-> **Full-local mode needs none of the 🤖 / ❓ items.** They power the live and hybrid ways of working ([2.2](#22-three-ways-of-working)). If a corporate policy blocks one, the installer prints a warning and continues.
+> **Full-local mode needs none of the ❓ items.** They power the live and hybrid ways of working ([2.2](#22-three-ways-of-working)). "Recommended" is advice, not consent: a recommended tool is installed only after your Yes. If a corporate policy blocks an install you agreed to, the installer prints a warning and continues.
 
 ## 1.2 What the installer puts on your machine
 
@@ -102,7 +103,7 @@ The installer **stops** if a required item is missing. It **installs** the auto 
 
 **In your chosen workspace folder**
 - One sub-folder per Fabric workspace you choose to scaffold.
-- Installer-managed files: 54 agent definitions, 10 custom skills, `copilot-instructions.md`, `AGENTS.md`, `.vscode/` settings & tasks, `.github/agent-docs/` (status script, the helpers `Skill-Compat.ps1`, `Agent-Workspace.ps1`, `Test-PipelineDefinition.ps1` and `Pbiviz-Alm.ps1`, flow docs, `tool-status.json`). A `.gitignore` is written only if none exists; an existing one gets only the required exclusions appended.
+- Installer-managed files: 54 agent definitions, 11 custom skills, `copilot-instructions.md`, `AGENTS.md`, `.vscode/` settings & tasks, `.github/agent-docs/` (status script, the helpers `Skill-Compat.ps1`, `Agent-Workspace.ps1`, `Test-PipelineDefinition.ps1` and `Pbiviz-Alm.ps1`, flow docs, `tool-status.json`). A `.gitignore` is written only if none exists; an existing one gets only the required exclusions appended.
 - `0 - Team of Agents Local Files/` (gitignored): where the agents keep their working files — one task folder per request, reusable utilities, housekeeping reports. Created empty; an existing folder of that name is left exactly as it is. A root `scripts/` folder that earlier versions used as scratch space is never moved or emptied; it is added to `.gitignore` only when it exists and holds nothing tracked.
 - `.vscode/mcp.json`: the Microsoft Learn documentation MCP server (`microsoftDocs`, `https://learn.microsoft.com/api/mcp`) is **added** when no server with that URL exists. Your servers and inputs are kept; a malformed file is left untouched; the file is yours (never purged).
 - Two public clones (gitignored): [`microsoft/skills-for-fabric`](https://github.com/microsoft/skills-for-fabric) and [`data-goblin/power-bi-agentic-development`](https://github.com/data-goblin/power-bi-agentic-development). Already present → refreshed to upstream, or kept at the last compatible version when upstream dropped a skill the agents use.
@@ -110,7 +111,7 @@ The installer **stops** if a required item is missing. It **installs** the auto 
 - If you opt in: one PBIVIZ folder for custom visual projects (default `0 - PBIVIZ Developing Environment`), initialised as its **own** local Git repository on `main` and ignored by the outer repo. Existing visuals in it are never imported or committed automatically.
 - Git: a new repo gets an initial commit; an existing repo gets a commit limited to installer-owned paths.
 
-**On your system** — exactly the 🤖 and ❓ rows of the checklist above, nothing else. The installer never installs Git, VS Code or the authoring extensions.
+**On your system** — only the ❓ rows of the checklist above that you answered **Yes** to, nothing else. Looking for tools changes nothing: a tool found outside PATH is used for that run only, and your PATH is extended only by an install you approved. The installer never installs Git, VS Code or the authoring extensions.
 
 **Outside the folder** — a session `.code-workspace` in `%TEMP%` (one per workspace folder) used to open VS Code, and — only if you answer **Y** in Step 8 — **two keys in your VS Code user `settings.json`** (`%APPDATA%\Code\User\settings.json`): the nested-dispatch flag and the workspace-relative skill folders, edited in place. Everything else in that file is left as it is. See [Step 8](#step-8-of-9--writing-configuration-files) for exactly what that enables and where.
 
@@ -154,13 +155,15 @@ Each step prints a banner `STEP n of 9 - <title>` and ends with `Press Enter to 
 
 ### Step 2 of 9 — Checking Prerequisites
 
-Runs mostly on its own. Order of events:
+Checks first, then asks. Order of events:
 
 1. **Checks** Git, VS Code ≥ 1.117.0, Fabric extension, TMDL extension. Git/VS Code missing → stops. Extensions missing → warning, continues.
-2. **Auto-installs if missing** (best-effort): Python → `fab` → `az` → the two MCP extensions. Python is searched on PATH, in the registry and in the usual install folders first; the winget attempt gives up after 4 minutes instead of waiting forever on a blocked download.
+2. **Recommended tools, each behind its own question** (nothing is installed unasked): `Install Fabric CLI (fab) now? (Y/N)` → only after a Yes, and only when no supported Python exists, `Install Python 3.12 for the current user now? (Y/N)` → `Install Azure CLI (az) now? (Y/N)` → `Install the VS Code extension <id> now? (Y/N)` for each of the two MCP extensions. Python is searched on PATH, in the registry and in the usual install folders first; the winget attempt gives up after 4 minutes instead of waiting forever on a blocked download.
 3. **Optional specialist CLIs** — for each missing tool it prints provider + purpose and asks:
    `Install <tool> now? (Y/N)` for `pbir`, Tabular Editor CLI, `pbi-tools`, `sqlcmd`, `gh`, and `Install the azure-devops az extension now? (Y/N)`.
    **No** installs nothing and is not remembered: a tool that is still missing is offered again on the next run. A tool you install yourself later is detected.
+
+   > **What counts as Yes.** Only `Y` or `YES` (any case, surrounding spaces ignored). Enter, `N`, `NO`, any other text, and *no answer at all* — the window was closed, input was redirected, the run is unattended — all mean **No**: the tool is skipped and setup continues. The same rule applies to every update question in point 5.
 4. **Custom visual development (detect only)** — Node.js (warns below 20.19.0, the floor of current `powerbi-visuals-tools`), npm, a global `pbiviz` (not required) and your Git identity. Nothing is installed; results go to `tool-status.json`.
 5. `Check installed tools for updates now? (y/N)` — default **No**. **Yes** shows Current / Update / Unverified per installed tool and asks per-tool before updating.
 6. Prints `All prerequisites OK.` (or the missing list and exits).
@@ -193,7 +196,7 @@ No prompts. Clones `skills-for-fabric` and `power-bi-agentic-development`; if th
 
 ### Step 6 of 9 — Writing Custom Skills
 
-No prompts. Writes the ten maintainer-authored skills under `.github/skills/`: `fabric-tmdl`, `fabric-pipelines`, `fabric-cli-policy`, `fabric-housekeeping`, and six for custom visuals — `pbiviz-pbip-reconstruction`, `pbiviz-source-conversion`, `pbiviz-ibcs-semantic-contract`, `pbiviz-interaction-regression`, `pbiviz-release-safety`, `pbiviz-alm-release`.
+No prompts. Writes the eleven maintainer-authored skills under `.github/skills/`: five for Fabric — `fabric-tmdl`, `fabric-pipelines`, `fabric-cli-policy`, `fabric-housekeeping`, `fabric-ai-readiness` — and six for custom visuals — `pbiviz-pbip-reconstruction`, `pbiviz-source-conversion`, `pbiviz-ibcs-semantic-contract`, `pbiviz-interaction-regression`, `pbiviz-release-safety`, `pbiviz-alm-release`.
 
 ### Step 7 of 9 — Writing Agent Definitions
 
@@ -252,7 +255,7 @@ It never installs agents or skills anywhere else, never changes what built-in Co
 
 ### Step 9 of 9 — Finishing Up
 
-1. `git init` if needed; initial commit, or an update commit limited to installer-owned paths (skipped with a warning if `git user.name/email` is not set).
+1. `git init` if needed; initial commit, or an update commit limited to installer-owned paths (skipped with a warning if `git user.name/email` is not set, or if Git does not accept the folder as a repository — the workspace files are complete either way).
 2. `Setup complete! v<version>` and the workspace path; with a PBIVIZ folder also `PBIVIZ: <folder> | n visual(s) | git: main, 1 commit(s), clean | Level 1 (local only - not an off-device backup)`.
 3. `Press Enter to open VS Code...` → opens the multi-root workspace.
 
@@ -285,7 +288,7 @@ On your first message the Master runs **one** status script and shows **one** bl
 | Skill locations / nested dispatch | What VS Code registers, whether Lead → Worker dispatch is enabled, and a **warning naming any saved `.code-workspace` that opens this folder without the setting**. |
 | Identity | `fab auth status` → `az account show`; informational, never blocking. |
 | Tools | Live re-check; refreshes `tool-status.json` if something was installed/removed since setup. |
-| MCP servers | *installed* vs *connected* — installed is never presented as callable. |
+| MCP servers | *installed* vs *connected* — installed is never presented as callable. Remote servers (Fabric IQ, Fabric Data Warehouse) are listed as *configured* or *not configured* in `.vscode/mcp.json`, never as connected. |
 | PBIVIZ | Only with a PBIVIZ folder: visuals found, Git branch/commits/clean state and the derived level (1 local, 2 remote, 3 team). |
 
 Then it routes your request to the owning Team Lead(s). You never switch agent for normal work; the only optional switch is the **Run capability maintenance** handoff.
@@ -325,17 +328,19 @@ Same cause — `chat.agentSkillsLocations` is window-scoped too. The user-level 
 
 **Step 4 said `Could not create a worktree for '<branch>'; skipped` for every branch.** The usual cause is Windows' 260-character path limit on default Git (`Filename too long`, printed under the skipped line). Re-run the installer — it sets `core.longpaths=true` on the existing mirror and creates the missing branch folders; nothing else changes. If a branch is still skipped, the printed git line tells you why.
 
-**Step 2 said `No real Python found` although Python is installed.** The installer looks on PATH, in the PEP 514 registry and in the usual install folders, and gives up on winget after 4 minutes. If it still reports no Python, yours is older than 3.10 or newer than 3.14 — the installer says so and installs 3.12 alongside, or you can add a supported Python yourself and re-run.
+**Step 2 said `No real Python found` although Python is installed.** The installer looks on PATH, in the PEP 514 registry and in the usual install folders. If it still reports no Python, yours is older than 3.10 or newer than 3.14 — the installer says so and offers to install 3.12 alongside (only on **Yes**; the winget route gives up after 4 minutes), or you can add a supported Python yourself and re-run. The question appears only after you chose to install the Fabric CLI, the one tool that needs it.
 
 **A tool failed to install on a corporate / locked-down PC.**
-TLS inspection, endpoint security, winget policy, PATH delays or missing elevation can interrupt an otherwise valid install. Not blocking for full-local work.
-1. Re-run setup once after any pending installer finishes (every run refreshes PATH and re-detects).
+TLS inspection, endpoint security, winget policy, PATH delays or missing elevation can interrupt an install you agreed to. Not blocking for full-local work.
+1. Re-run setup once after any pending installer finishes (every run re-detects, and offers a still-missing tool again).
 2. Still missing → in VS Code select **070 - Capability Maintenance Team Lead**, name the tool and the console message. It re-checks installation, publisher version, PATH and policy, and may install/update **only after your explicit approval** (user-scope or portable), then refreshes `tool-status.json`.
 3. Git, VS Code, Fabric and TMDL extensions remain yours/IT's to install.
 
-**Tabular Editor 2 or `pbi-tools` download is empty (0 bytes).** Known on TLS-inspection proxies: both ship only as GitHub-release ZIPs. The installer detects it and prints the exact portable link — download it yourself, drop the ZIP in Downloads, re-run setup to auto-pick it up. `az` had the same class of problem and is handled automatically.
+**Tabular Editor 2 or `pbi-tools` download is empty (0 bytes).** Known on TLS-inspection proxies: both ship only as GitHub-release ZIPs. The installer detects it and prints the exact portable link — download it yourself, drop the ZIP in Downloads, re-run setup to auto-pick it up. `az` had the same class of problem; once you agree to install it, the installer falls back to its second route by itself.
 
-**`az` is slow to install.** Expected when it has to be installed from scratch; let it finish.
+**`az` is slow to install.** Expected when you agreed to install it from scratch; let it finish.
+
+**I ran the installer unattended and it installed no tools.** By design. An unanswered question is a No, so a run without a person at the keyboard (redirected or closed input) only detects tools. Run it interactively and answer `Y` to the tools you want, or install them yourself and re-run.
 
 **The PBIVIZ line says `local Git NOT initialized`.** The reason is in brackets: `synced path` (you declined Git inside OneDrive — recommended; move the workspace to a non-synced folder and re-run), `git <version> < 2.28.0` (upgrade Git and re-run), or a `stopped:` reason (nested repository, `.git` file, files tracked by the outer repo). Nothing in the folder was changed; ask **080 - PBIVIZ Development Team Lead** to resolve it.
 
@@ -415,11 +420,18 @@ The shared backbone; only the *editing* step differs between the three ways.
 | `pbir` | Reporting | Explore/edit/format/validate/publish PBIR; Desktop refresh and screenshots for report QA | Direct PBIR JSON edit only as an approved exception (`APPROVED:PBIR-DIRECT-EDIT:<report>`) |
 | Tabular Editor CLI | Semantic | BPA, validation, automation (free TE2) | `fabric-tmdl` + `bpa-rules` checklist |
 | `pbi-tools` | ALM & DevOps | PBIX/PBIP extract-compile workflows | Native PBIP/PBIR ALM via `fab`/`pbir` |
-| `sqlcmd` | Semantic, Data Eng, Apps | T-SQL over Fabric SQL endpoints | REST / notebooks |
+| `sqlcmd` | Semantic, Data Eng, Apps | T-SQL over Fabric SQL endpoints | Fabric Data Warehouse MCP when configured (033 only) → REST / notebooks |
 | `gh` | ALM & DevOps | GitHub PRs, Actions, releases | `git` + web |
 | `az devops` | ALM & DevOps | Azure DevOps PRs, pipelines, boards | `git` + web |
+| Tabular Editor 3, `te` CLI *(detected only)* | Semantic | Recorded separately from TE2; used only when really present. TE3 is never inferred from TE2 | TE2 CLI, then the checklist |
+| **Fabric IQ MCP** *(remote, detected only)* | 038 Fabric Intelligence & Ontology, 043 Monitoring & Catalog | Read-only questions over existing semantic models and reports. Not ontology authoring, not a write surface | REST `executeQueries` or the Power BI modeling MCP |
+| **Fabric Data Warehouse MCP** *(remote, preview, detected only)* | 033 Warehouse SQL only | One tool, `executeSQL`, on a Warehouse or SQL analytics endpoint. It can run write statements, so the SQL permission classes below apply | `sqlcmd` (preferred anyway) |
 
 Routing is always by **topic**; a missing tool never changes the owner — the specialist falls back. Deep dive: [CLI-FUNCTIONALITIES.md](CLI-FUNCTIONALITIES.md).
+
+> **Remote MCP servers — five separate facts.** The installer never adds, configures or signs in to the Fabric IQ or Fabric Data Warehouse MCP server; it only records whether an entry for one already exists in **your** `.vscode/mcp.json`. Agents keep these apart and say which one they have proof of: *documented* (Microsoft describes the server) → *configured* (an entry is in `mcp.json`) → *callable* (its tools are listed in this chat) → *signed in* (a call was accepted) → *executed* (an operation returned a result). A skill or a document describing a server is never taken as proof that it is reachable. Setting up Fabric IQ in VS Code is not something Microsoft's page documents today (it shows GitHub Copilot CLI), so that route is unverified here.
+>
+> **SQL — permission class first, tool second.** Every SQL request is classed before a tool is picked: `S0` offline (no connection), `S1` read-only metadata, `S2` read-only queries, `S3` data or schema writes (needs your approval token for the named object), `S4` administrative changes (never inferred, separately approved). Having a write-capable tool such as `executeSQL` or `sqlcmd` grants nothing by itself. Route: `sqlcmd -G` → Fabric Data Warehouse MCP (033 only, when callable) → documented alternates → offline.
 
 > **`pbir` licence.** The `pbir-cli` package is published under a custom non-commercial licence. Whether your use is covered is for you (or your organisation) to decide; the installer only offers it.
 >
@@ -457,6 +469,7 @@ Fabric Workspaces/
 │       ├── fabric-pipelines/SKILL.md
 │       ├── fabric-cli-policy/SKILL.md
 │       ├── fabric-housekeeping/SKILL.md
+│       ├── fabric-ai-readiness/SKILL.md               ← semantic model AI readiness: who may change what, validation levels
 │       └── pbiviz-*/SKILL.md                          ← six custom visual skills
 ├── .gitignore
 ├── .vscode/  (settings.json, tasks.json, mcp.json)
@@ -491,7 +504,9 @@ Fabric Workspaces/
 
 **Can multiple people share the workspace via git?** Yes. Push it; each member clones, re-runs the installer locally (for tool inventory + clones), selects the Master. Clones, business repos, the repository map, the workspace file and machine-specific settings are gitignored.
 
-**What do I need for live / hybrid mode?** The two MCP extensions + `fab`/`az` — all auto-installed where possible. Full-local needs none.
+**What do I need for live / hybrid mode?** The two MCP extensions + `fab`/`az` — each offered in Step 2 and installed only when you answer Yes. Full-local needs none.
+
+**Can the agents make my semantic model "AI ready"?** They can do the modelling part and tell you exactly what is left. The house skill `fabric-ai-readiness` splits the work in three: what an agent may edit in the model definition (descriptions, format strings, explicit measures, data categories; renames and hiding only with your approval token — all through the normal semantic-model workflow), what it only **drafts** for you to enter (AI instructions, verified answers, the AI data schema and its synonyms — Power BI's *Prep data for AI*, a preview feature), and what only a person can set (*Approved for Copilot*, Q&A, tenant settings). The model's `Copilot/` folder and linguistic metadata are left byte-identical. Every finding carries the level it was checked at — `L0` offline files, `L1` a local tool, `L2` a live model connection, `L3` Power BI Desktop or the service — and nothing is reported as checked at a level that was not actually used. An agent never reports a model as *AI ready* or *approved*.
 
 **How does the workspace know which tools I have?** `.github/agent-docs/tool-status.json`, gitignored and machine-specific; agents read `<tool>.found` before invoking anything.
 
@@ -634,7 +649,7 @@ This workspace targets **VS Code GitHub Copilot Chat / Agent Mode**: the install
 | **060 — Applications & Integration Team Lead** | Python/Fabric SDK, REST/authentication/XMLA, SQL/ODBC, data-access integrations |
 | **070 — Capability Maintenance Team Lead** | Vendor repo refresh, skill and agent coverage, tool lifecycle, failed-install recovery, installer regression |
 | **080 — PBIVIZ Development Team Lead** | Power BI custom visual SDK projects: planning, development, testing, review, maintenance, and Git/release work on the PBIVIZ repository ([2.7](#27-custom-visual-pbiviz-development)) |
-| **Custom TMDL / Pipelines / CLI-policy skills** *(original to this repo)* | TMDL syntax & validation; pipeline activity contract with the evidence behind each template, plus an offline check before a definition is saved; `fab`-first / `az`-fallback decision policy |
+| **Custom Fabric skills** *(original to this repo)* | TMDL syntax & validation; pipeline activity contract with the evidence behind each template, plus an offline check before a definition is saved; `fab`-first / `az`-fallback decision policy with the SQL permission classes and the remote MCP states; working files and housekeeping; semantic model AI readiness |
 | **Custom PBIVIZ skills** *(original to this repo)* | PBIP reconstruction, source conversion, IBCS semantic contract, interaction regression, release safety, ALM & release |
 | **Microsoft skills-for-fabric** | Spark, SQL, Eventhouse, medallion, and more |
 | **Data-goblin skills** by [Kurt Buhler](https://www.linkedin.com/in/kurtbuhler/) | PBIP, DAX, reports, Fabric CLI, Fabric admin |
@@ -644,7 +659,7 @@ Each of the 54 agents is generated from a **knowledge catalog** in the installer
 
 ## 3.5 Agent → tools → skills matrix
 
-Each agent has a **bounded purpose**, owns a **minimum set of deterministic tools**, and reads **only the skills its current subtask needs**. CLIs are invoked through `execute`, gated on `tool-status.json`. MCP servers *are* Copilot frontmatter tools, so authorised agents list `powerbi-modeling-mcp/*` or `Fabric MCP/*` in their `tools:` allowlist.
+Each agent has a **bounded purpose**, owns a **minimum set of deterministic tools**, and reads **only the skills its current subtask needs**. CLIs are invoked through `execute`, gated on `tool-status.json`. MCP servers *are* Copilot frontmatter tools, so authorised agents list `powerbi-modeling-mcp/*` or `Fabric MCP/*` in their `tools:` allowlist. The two remote servers follow the same rule with a narrower audience: `FabricIQ/*` is held by 038 and 043 only, `fabric-dw-global/*` and `fabric-dw-item/*` by 033 only. A grant names a server key; it does nothing until **you** add that server to `.vscode/mcp.json` under that key.
 
 | Agent | Tools used (gated) | Skills / docs used (selective) |
 |---|---|---|
@@ -662,7 +677,7 @@ Each agent has a **bounded purpose**, owns a **minimum set of deterministic tool
 
 The 43 workers inherit the same gates and loading rules with a narrower artifact each. Tool ownership is complete — every tool in [2.4](#24-optional-clis-and-mcp-servers--what-each-unlocks) has an agent-level owner; installation/update/recovery belongs to Capability Maintenance with explicit approval.
 
-> `tool-status.json` records `found`, `version`, `command`, `path`, `category`, `installMode` and a `reason` when missing — honouring real command names (Tabular Editor is `TabularEditor.exe`/`TabularEditor2.exe`/`TabularEditor3.exe`, not `te`).
+> `tool-status.json` records `found`, `version`, `command`, `path`, `category`, `installMode` and a `reason` when missing — honouring real command names (Tabular Editor 2 is `TabularEditor.exe`/`TabularEditor2.exe`, recorded as `tabularEditor`; Tabular Editor 3 and the `te` CLI have their own keys, `tabularEditor3` and `teCli`, and are never inferred from each other).
 
 ## 3.6 Agentic design principles
 
@@ -685,7 +700,7 @@ The 43 workers inherit the same gates and loading rules with a narrower artifact
 
 | Source | Covers | Updated |
 |---|---|---|
-| **Custom embedded** (`.github/skills/`) | TMDL syntax, pipeline JSON, CLI policy, workspace housekeeping, six custom visual skills — original to this repo | Re-run installer |
+| **Custom embedded** (`.github/skills/`) | TMDL syntax, pipeline JSON, CLI policy, workspace housekeeping, semantic model AI readiness, six custom visual skills — original to this repo | Re-run installer |
 | **Microsoft** (`skills-for-fabric/`) | Spark, SQL Warehouse/Database, Eventhouse/Eventstream/Activator, Dataflows, pipelines, deployment pipelines, Git integration, OneLake catalog governance, Database Hub, governance policies, Ontology, medallion, Power BI reports, semantic models, FabricIQ, Project Osmos | Refreshed every run / via Capability Maintenance; kept at the last compatible commit when upstream drops a pinned skill |
 | **Data-goblin** ([Kurt Buhler](https://www.linkedin.com/in/kurtbuhler/), `power-bi-agentic-development/`) | PBIP/TMDL/PBIR, DAX, semantic models, reports, themes, Deneb/custom visuals, paginated, Tabular Editor, Fabric CLI/admin | Refreshed every run / via Capability Maintenance; kept at the last compatible commit when upstream drops a pinned skill |
 
@@ -716,7 +731,7 @@ Skills provide exact syntax rules (TMDL tabs-only indentation, property ordering
 
 **Update mode** refreshes installer-managed files, force-refreshes vendor clones and keeps them only when compatible, purges retired managed files via the manifest diff, and commits only declared installer-owned paths ([1.6](#16-updating-re-run-the-same-installer)).
 
-**Dry-run / verification:** `-EmitAgentsTo <dir>` generates agents + config with no prerequisites, cloning, installs or launch (used by the test suite); `-VerifyRoot <folder>` re-hashes an installed workspace against `installed-manifest.json`.
+**Dry-run / verification:** `-EmitAgentsTo <dir>` generates agents + config with no prerequisites, cloning, installs or launch (used by the test suite); `-VerifyRoot <folder>` re-hashes an installed workspace against `installed-manifest.json`; `-StopAfterStep1` runs the Step 1 questions and exits before the prerequisite step, so nothing is detected, installed or generated (used by the prompt tests).
 
 ## 3.9 A bit of history: how Fabric/Power BI work used to flow
 
@@ -725,7 +740,11 @@ Before the Fabric VS Code extension and AI agents there were two places to build
 ## 3.10 Quality & validation
 
 - **JSON Schema** (`schema/agent-manifest.schema.json`, draft-07) — shape of every agent entry; validated in CI.
-- **Pester suite** (`tests/`) — manifest integrity (54 agents, 3/8/43 tiers, unique ids), hierarchy (single root, no cycles), least-privilege tools, version/doc consistency, generated-file **content** (Knowledge/Playbook/Return-contract, approval-token rule, resolved skill refs, granted tools), emitted settings, vendor refresh failure paths, business-repository branch mirroring under default Git with >260-char paths (plus the phantom `origin` branch and skip diagnostics), Python detection with fake interpreters (Store stub rejected, supported version preferred, cached probe, bounded winget), optional-CLI detection (a warning on stderr is not a missing CLI; an existing CLI is never reinstalled), update-mode safety (JSONC, workspace merge, purge containment, saved-workspace detection/patch idempotency), the status script run offline, and the real installer driven through the Step 1 prompts.
+- **Pester suite** (`tests/`) — manifest integrity (54 agents, 3/8/43 tiers, unique ids), hierarchy (single root, no cycles), least-privilege tools, version/doc consistency, generated-file **content** (Knowledge/Playbook/Return-contract, approval-token rule, resolved skill refs, granted tools), emitted settings, vendor refresh failure paths, business-repository branch mirroring under default Git with >260-char paths (plus the phantom `origin` branch and skip diagnostics), Python detection with fake interpreters (Store stub rejected, supported version preferred, cached probe, bounded winget), optional-CLI detection (a warning on stderr is not a missing CLI; an existing CLI is never reinstalled), update-mode safety (JSONC, workspace merge, purge containment, saved-workspace detection/patch idempotency), the status script run offline, and the real installer driven through the Step 1 prompts only.
+- **Consent** (`tests/Consent.Tests.ps1`) — only `Y`/`YES` installs or updates anything: every other answer, including no answer at all (end of input, tested in a real child process), skips. A structural check walks the prerequisite step and fails if any install route is not behind the explicit-Yes question; detection is shown not to persist PATH changes. The previous condition is kept as a negative control that reproduces the defect.
+- **Prompt tests cannot install** (`tests/Step1Prompts.Tests.ps1`, `tests/PBIVIZ.Install.Tests.ps1`) — they run the installer with `-StopAfterStep1`, so it exits by itself before the prerequisite step. Before any launch the test helper statically checks that nothing reachable before that exit can install, download or start a process, and refuses to launch a script that fails the check; the user profile and PATH are replaced for the child. A process kill exists only as an emergency timeout.
+- **Housekeeping** (`tests/Housekeeping.Tests.ps1`) and **pipelines** (`tests/Pipeline.Tests.ps1`) — the shipped helpers run against throwaway trees and synthetic definitions: task folders, preview/quarantine/restore/purge with their tokens, secrets flagged by pattern and never printed, paths with spaces, quoting characters, non-ASCII names and more than 260 characters; pipeline contract, portability, system variables and the fail-closed deployment rules.
+- **AI readiness and tooling** (`tests/AiReadiness.Tests.ps1`, `tests/Tooling.Tests.ps1`) — the house skill keeps its three classes, drafts-only rule and validation levels; SQL permission classes and route; the five remote MCP states; remote-server detection from `mcp.json` (never written); grants limited to the named agents; detect-only tools stay detect-only.
 - **Real generator smoke test** (`tests/Generated.Tests.ps1`) — `-EmitAgentsTo` dry-run asserting on actual generated files.
 - **Skill map** (`tests/SkillMap.Tests.ps1`) — against a committed snapshot of skill names and paths (`tests/fixtures/skill-catalog.snapshot.json`): every pinned skill resolves, retired names follow only verified renames, a missing skill is never replaced by a similar name, keyword suggestions stay reference-only and exclude out-of-scope skills, and the generated organisation still matches the committed identity baseline (`tests/fixtures/agent-baseline.json`: names, tools, delegation targets, write permissions, PBIVIZ agent content). Set `FABRIC_AGENTIC_CATALOG_ROOT` to an installed workspace to also check every pin against the live clones.
 - **Skills compatibility** (`tests/SkillCompat.Tests.ps1`) — throwaway local repositories stand in for the vendor catalogues: a new upstream skill is taken, a renamed, deleted or split pinned skill holds the whole catalogue at the previous or the approved commit, a moved reference file does not, a folder that is not the vendor repository is never touched, and the emitted `Skill-Compat.ps1` holds a catalogue end to end. Each case has a negative control (the same upstream change without the hold leaves an unresolved reference).
@@ -761,7 +780,7 @@ The product is validated in two ways: the automated suite ([3.10](#310-quality--
 
 | Area | Automated suite | Acceptance testing |
 |---|---|---|
-| Installer and updates | Generated output, update safety, Step 1 prompts, session status, self-pruning | Fresh installs and re-runs on Windows 10/11, including a locked-down corporate laptop; re-runs preserve the PBIVIZ repository and local customisations |
+| Installer and updates | Generated output, update safety, consent (explicit Yes only), Step 1 prompts, session status, self-pruning | Fresh installs and re-runs on Windows 10/11, including a locked-down corporate laptop; re-runs preserve the PBIVIZ repository and local customisations |
 | Agent organisation and team protocol | Manifest, hierarchy, least-privilege tools, generated agent content | Single-team and multi-team work with a live Fabric publish and regression DAX; an approval-gated destructive action |
 | Business repositories and Python detection | Long paths, branch mirroring, interpreter discovery | Corporate Azure DevOps repositories with deeply nested Fabric items |
 | Custom visual team (080–086) | PBIVIZ install and helper suites | Every worker invoked in real work; two visuals and five releases built with the real `powerbi-visuals-tools` |
@@ -780,6 +799,8 @@ The product is validated in two ways: the automated suite ([3.10](#310-quality--
 - Which skill VS Code actually loads for a given prompt, and whether a dispatched agent reads a pinned skill (the suite checks the generated files, not runtime selection).
 - Report QA through `pbir desktop` against a running Power BI Desktop, and the Microsoft `powerbi-report-author` CLI.
 - FabricIQ and Ontology question answering, Project Osmos, Database Hub and governance-policy work against a live tenant; the MCP servers these skills use are not configured by the installer.
+- The remote Fabric IQ and Fabric Data Warehouse MCP servers from VS Code: the kit detects an entry in `.vscode/mcp.json` and holds the grants, but sign-in and a first call have not been exercised (Microsoft does not document the VS Code setup for Fabric IQ).
+- *Prep data for AI* end to end: the drafts an agent hands over have not been applied in Power BI and tested with Copilot.
 
 **Known limitations**
 
@@ -793,7 +814,9 @@ The product is validated in two ways: the automated suite ([3.10](#310-quality--
 - Behind TLS-inspection proxies, Tabular Editor 2 and `pbi-tools` may need a manual download ([1.7](#17-troubleshooting)).
 - Skill registration (`chat.agentSkillsLocations`) is window-scoped ([3.7](#37-skills--where-they-come-from)); in a window where a skill folder is not registered, agents fall back to reading pinned skills by path.
 - Skill references are resolved at install time. Between installer runs a refresh never removes a skill the agents reference (the catalogue is held instead); skills that are *new* upstream reach the agents' pinned lists only through a kit release.
-- *Prep data for AI* content (AI instructions, AI data schema, verified answers) is drafted for you to apply in Power BI, never written by the agents; the `Copilot/` folder of a model is preserved untouched.
+- *Prep data for AI* content (AI instructions, AI data schema, verified answers) is drafted for you to apply in Power BI, never written by the agents; the `Copilot/` folder of a model is preserved untouched. *Prep data for AI* and the Fabric Data Warehouse MCP server are preview features: the facts in the house skills carry the date they were read.
+- Optional tools are installed only on a typed `Y`/`YES`. A run without a person at the keyboard therefore installs nothing; there is no switch to pre-approve installs.
+- The suite starts PowerShell child processes and uses Git. On a machine where endpoint policy blocks one of those for the calling process, the affected test files fail; run `tests/Run-Tests.bat` from an ordinary terminal.
 
 Found a problem? [Open an issue](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/issues).
 

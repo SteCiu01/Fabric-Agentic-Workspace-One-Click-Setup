@@ -66,6 +66,31 @@ To work on this project locally:
 3. To test, double-click `Setup-FabricAgenticWorkspace.bat` or run the `.ps1`
    directly in PowerShell.
 
+## Maintainer notes: reviewing the upstream skill catalogues
+
+The two vendor skill catalogues change upstream. Deciding what a change means for the agents is
+a maintainer task, done in a regular review of this repository. It is **not** something an
+installed workspace does: no installation schedules a review, asks its user to map a skill, or
+runs anything in the background. A user's installation only applies the outcome (a compatible
+catalogue is taken; an incompatible one is held at the last compatible commit).
+
+What a review changes, and where:
+
+1. Read what moved upstream (new, renamed, removed or split skills; new capabilities worth
+   pinning). In an installed workspace, **070 - Capability Maintenance Team Lead** can list held
+   catalogues and unresolved or newly available skills.
+2. In `fabric-agentic-installer/Setup-FabricAgenticWorkspace.ps1`: update pins in the agent
+   knowledge catalogue, add a verified rename to `$skillAliases` (never a guess, never across
+   providers), and move `approved` in `$vendorCatalogs` to the commits you validated.
+3. Refresh `tests/fixtures/skill-catalog.snapshot.json` from a workspace whose clones are at those
+   commits, and `tests/fixtures/agent-baseline.json` only if an agent's identity, tools or the
+   PBIVIZ team changed on purpose (see [tests/README.md](tests/README.md)).
+4. Run `tests/SkillMap.Tests.ps1` (with `FABRIC_AGENTIC_CATALOG_ROOT` set to that workspace) and
+   `tests/SkillCompat.Tests.ps1`, then the whole suite.
+5. Date-stamped product facts inside the house skills (`fabric-pipelines`,
+   `fabric-cli-policy`, `fabric-ai-readiness`) are re-read against Microsoft Learn in the same
+   review; change the date only when the text was actually re-checked.
+
 ## Code style
 
 - **PowerShell**: Use full cmdlet names (not aliases), meaningful variable names, and comment non-obvious logic

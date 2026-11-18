@@ -22,9 +22,13 @@
 #                        Used by tests/Generated.Tests.ps1 to validate real generated output.
 #   -VerifyRoot <dir>    Re-hash the managed files in an installed workspace against its
 #                        installed-manifest.json and report drift (exit 1 on any drift).
+#   -StopAfterStep1      Prompt check: run the real Step 1 questions, then exit 0 BEFORE the
+#                        prerequisite step. No tool is detected, installed or updated, nothing is
+#                        cloned and no workspace file is generated. Used by the prompt tests.
 param(
     [string]$EmitAgentsTo,
-    [string]$VerifyRoot
+    [string]$VerifyRoot,
+    [switch]$StopAfterStep1
 )
 
 # Keep the window open on any error so the user can read it
@@ -413,6 +417,7 @@ $managedSkills = @(
     'fabric-pipelines',
     'fabric-cli-policy',
     'fabric-housekeeping',
+    'fabric-ai-readiness',
     'pbiviz-pbip-reconstruction',
     'pbiviz-source-conversion',
     'pbiviz-ibcs-semantic-contract',
@@ -457,6 +462,34 @@ function Write-ManagedFile ([string]$Path, [string]$Content) {
     # leaving delegated worker agents visible in the Copilot dropdown).
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
+}
+
+# -- Consent: only an explicit Y or YES authorises an optional action -----
+# Fails closed. No answer, end of input, a blank line, N, NO, any other text and
+# anything that is not one string all mean No. Case and surrounding spaces are ignored.
+function Test-ExplicitYes {
+    param($Answer)
+    if ($Answer -isnot [string]) { return $false }
+    return ($Answer.Trim() -match '^(y|yes)$')
+}
+
+# Asks one question; $true only for an explicit Yes. A prompt that cannot be read
+# (no console, closed or failed input) is a No.
+function Read-ExplicitYes {
+    param([string]$Prompt)
+    $answer = $null
+    try { $answer = Read-Host $Prompt } catch { return $false }
+    return (Test-ExplicitYes $answer)
+}
+
+# "(Y/n)" question: Enter or an explicit Yes accepts. No input at all (end of input,
+# unreadable prompt) and any other text are a No.
+function Read-DefaultYes {
+    param([string]$Prompt)
+    $answer = $null
+    try { $answer = Read-Host $Prompt } catch { return $false }
+    if ($answer -isnot [string]) { return $false }
+    return (($answer.Trim() -eq '') -or (Test-ExplicitYes $answer))
 }
 
 # -- Helper: locate a REAL, runnable Python interpreter -----------------
@@ -600,8 +633,10 @@ function Update-InstallerPath {
 # -- Helper: add a dir to the session PATH and persist it (User scope) ---
 # Idempotent. Ensures a newly installed tool resolves both now and on the next
 # VS Code/terminal launch without a manual restart.
+# -SessionOnly changes nothing outside this process: detection uses it, so a run in
+# which every offer is declined leaves the user's persisted PATH exactly as it was.
 function Add-DirToPath {
-    param([string]$Dir)
+    param([string]$Dir, [switch]$SessionOnly)
     if (-not $Dir) { return }
     # Always move the requested directory to the front of the current session,
     # even when it already exists later in PATH. Merely checking for presence
@@ -611,6 +646,7 @@ function Add-DirToPath {
         $_ -and ($_.TrimEnd('\') -ine $normalizedDir)
     })
     $env:Path = (@($Dir) + $sessionRest) -join ';'
+    if ($SessionOnly) { return }
     try {
         $userPath = [System.Environment]::GetEnvironmentVariable('Path', 'User')
         $userEntries = @($userPath -split ';' | Where-Object { $_ })
@@ -625,7 +661,8 @@ function Add-DirToPath {
 # The #1 reason a freshly-installed CLI still reports "not found" is that its
 # folder is not on the in-memory PATH yet. This refreshes PATH from the registry
 # (Machine + User) and proactively adds the Python user/script dirs where pip
-# drops console scripts (fab.exe, az.exe). Idempotent; safe to call repeatedly.
+# drops console scripts (fab.exe, az.exe) to THIS session only. Idempotent; safe to call
+# repeatedly. It never writes the persisted PATH: only an install the user agreed to does.
 # Calling it at the START of the prerequisite step is what lets run N recognise
 # what run N-1 actually installed -- so the "not found" list shrinks each run.
 function Sync-ToolPaths {
@@ -639,7 +676,7 @@ function Sync-ToolPaths {
     if ($py) {
         try {
             $dirs = & $py -c "import site,sys,os; print(os.path.join(sys.prefix,'Scripts')); print(os.path.join(site.getuserbase(),'Scripts'))" 2>$null
-            foreach ($d in @($dirs)) { if ($d -and (Test-Path $d)) { Add-DirToPath $d } }
+            foreach ($d in @($dirs)) { if ($d -and (Test-Path $d)) { Add-DirToPath $d -SessionOnly } }
         } catch { }
     }
 
@@ -648,7 +685,7 @@ function Sync-ToolPaths {
     foreach ($root in @("$env:APPDATA\Python", "$env:LOCALAPPDATA\Programs\Python")) {
         if (Test-Path $root) {
             Get-ChildItem $root -Recurse -Directory -Filter 'Scripts' -ErrorAction SilentlyContinue |
-                ForEach-Object { Add-DirToPath $_.FullName }
+                ForEach-Object { Add-DirToPath $_.FullName -SessionOnly }
         }
     }
 
@@ -668,7 +705,7 @@ function Sync-ToolPaths {
         if (Test-Path $managed.Root) {
             $exe = Get-ChildItem $managed.Root -Recurse -File -Filter $managed.Exe -ErrorAction SilentlyContinue |
                    Select-Object -First 1
-            if ($exe) { Add-DirToPath $exe.DirectoryName }
+            if ($exe) { Add-DirToPath $exe.DirectoryName -SessionOnly }
         }
     }
 }
@@ -710,7 +747,7 @@ function Test-CliResilient {
                 $hit = Get-ChildItem $root -Recurse -File -ErrorAction SilentlyContinue `
                          -Include "$Name.exe", "$Name.cmd", "$Name.bat" | Select-Object -First 1
                 if ($hit) {
-                    Add-DirToPath $hit.DirectoryName
+                    Add-DirToPath $hit.DirectoryName -SessionOnly
                     if (& $isRunnable $Name) { return $true }
                 }
             }
@@ -842,28 +879,31 @@ function Install-VsCodeExtension {
     return (Test-VsCodeExtension -Id $Id -List (Get-InstalledVsCodeExtensions -VsCode $VsCode))
 }
 
-# -- Helper: ensure a REAL, SUPPORTED Python is available, installing if missing --
+# -- Helper: ensure a REAL, SUPPORTED Python is available, installing only with consent --
 # The Fabric CLI (fab) is a Python package, so without Python it cannot install.
-# This force-installs Python (mirroring the Power Platform twin's pac/.NET
-# bootstrap) so the common "fab won't install because Python is missing" case
-# resolves itself. Tries, in order:
-#   1. An existing real Python in the supported range (Find-RealPython)
-#   2. winget  (Python.Python.3.12, per-user, no admin) -- HARD TIMEOUT: on an
+# An existing supported interpreter is always reused. When there is none, the user is
+# asked once; only an explicit Yes starts an install (your existing Python is never
+# modified or removed). On Yes it tries, in order:
+#   1. winget  (Python.Python.3.12, per-user, no admin) -- HARD TIMEOUT: on an
 #      inspected proxy the download can stall forever and a bare `& winget`
 #      would freeze the installer at this line
-#   3. The official python.org silent installer (pinned), per-user, no admin
+#   2. The official python.org silent installer (pinned), per-user, no admin
 # Refreshes PATH after each attempt. Returns a usable launcher string
-# ('py'/'python'/full path) or $null on total failure -- never throws, never aborts setup.
+# ('py'/'python'/full path) or $null when declined or on total failure -- never throws, never aborts setup.
 function Ensure-Python {
     $range = Get-FabPythonRangeLabel
     $py = Find-RealPython
     if ($py -and $script:LastPythonProbe.Supported) { return $py }
     if ($py) {
         Write-Host "         Python $($script:LastPythonProbe.Version) found ($($script:LastPythonProbe.Invoke)), but the Fabric CLI needs $range." -ForegroundColor Yellow
-        Write-Host "         Installing a supported Python 3.12 alongside it (per-user; your existing Python is not touched)..." -ForegroundColor Yellow
+        Write-Host "         A supported Python 3.12 can be installed alongside it (per-user; your existing Python is not touched)." -ForegroundColor Yellow
     } else {
         Write-Host "         No real Python found on PATH, in the registry or in the usual install folders." -ForegroundColor Yellow
-        Write-Host "         Attempting to install Python 3.12 (required by the Fabric CLI)..." -ForegroundColor Yellow
+        Write-Host "         Python 3.12 can be installed for your user account (the Fabric CLI needs Python $range)." -ForegroundColor Yellow
+    }
+    if (-not (Read-ExplicitYes "         Install Python 3.12 for the current user now? (Y/N)")) {
+        Write-Host "         Skipped. Python was not installed." -ForegroundColor DarkGray
+        return $null
     }
 
     # -- Attempt 1: winget (per-user, no admin), bounded -----------------
@@ -924,8 +964,9 @@ function Ensure-Python {
     return $null
 }
 
-# -- Helper: attempt an optional tool install, never fatal --------------
-# Prompts the user, then tries each strategy in $Attempts (ordered list of
+# -- Helper: run an optional tool install the user has just agreed to, never fatal --
+# It does not ask: every caller obtains an explicit Yes (Read-ExplicitYes) first.
+# Tries each strategy in $Attempts (ordered list of
 # @{ Exe = '<exe>'; Args = @(...) }) until $CheckCmd is satisfied. Strategies
 # whose Exe is missing are skipped, so a blocked winget or missing pip does not
 # stop us trying another route. On total failure it reports the captured cause
@@ -938,9 +979,7 @@ function Try-InstallOptionalTool {
         [array]$Attempts,     # ordered list of @{ Exe=..; Args=@(..) } strategies
         [string]$ManualUrl    # fallback manual install URL
     )
-    # Install automatically -- no opt-out prompt. The goal is to set up as much
-    # as possible up front; a failed optional install is reported but never fatal.
-    Write-Host "    Installing $Name automatically..." -ForegroundColor White
+    Write-Host "    Installing $Name..." -ForegroundColor White
 
     $anyRan = $false
     foreach ($attempt in $Attempts) {
@@ -1134,8 +1173,8 @@ function Set-ToolStatus {
 }
 
 # Detect one optional specialist tool; if missing, explain provider/purpose and
-# ask Y/N. On Yes run the (optional) install scriptblock best-effort, then
-# re-detect. Always records a tool-status entry. Never throws / never blocks setup.
+# ask Y/N. Only an explicit Yes (Read-ExplicitYes) runs the install scriptblock,
+# best-effort; then re-detect. Always records a tool-status entry. Never throws / never blocks setup.
 # A missing tool is offered on every run: an earlier No never suppresses the prompt.
 function Invoke-OptionalToolPrompt {
     param(
@@ -1158,8 +1197,7 @@ function Invoke-OptionalToolPrompt {
     Write-Host "  ${Name}: not found (optional)" -ForegroundColor Yellow
     Write-Host "         Purpose:  $Purpose" -ForegroundColor DarkGray
     Write-Host "         Provider: $Provider" -ForegroundColor DarkGray
-    $ans = Read-Host "         Install $Name now? (Y/N)"
-    if ($ans -notmatch '^(y|yes)$') {
+    if (-not (Read-ExplicitYes "         Install $Name now? (Y/N)")) {
         Write-Host "         Skipped. Install later from: $Provider" -ForegroundColor DarkGray
         Set-ToolStatus -Key $Key -Found $false -Reason 'not found; user declined' -Category $Category -InstallMode 'ask' -AliasesChecked $Aliases
         return
@@ -1721,6 +1759,44 @@ function Test-UpdateAvailable {
     try { return ([version]$vl -gt [version]$vi) } catch { return $false }
 }
 
+# One tool's update offer: report the versions, ask, and only on an explicit Yes run
+# $DoUpdate; then re-detect and refresh the recorded version. Never throws.
+function Invoke-ToolUpdateOffer {
+    param([string]$Key, [string]$Name, [string]$Installed, [string]$Latest, [scriptblock]$DoUpdate, [scriptblock]$ReDetect)
+    $installedTok = Get-VersionToken $Installed
+    if ($installedTok -and $script:ToolStatus[$Key]) {
+        $script:ToolStatus[$Key].version = $installedTok
+    }
+    if (-not $Installed -or -not $Latest) {
+        $script:UpdUnverified++
+        Write-Host ("    [Unverified] {0} -- installed or latest version could not be confirmed." -f $Name) -ForegroundColor DarkGray
+        return
+    }
+    $script:UpdChecked++
+    if (-not (Test-UpdateAvailable $Installed $Latest)) {
+        Write-Host ("    [Current] {0} ({1})" -f $Name, (Get-VersionToken $Installed)) -ForegroundColor Green
+        return
+    }
+    $script:UpdOutdated = $true
+    Write-Host ("    [Update] {0}: v{1} installed, v{2} available." -f $Name, (Get-VersionToken $Installed), (Get-VersionToken $Latest)) -ForegroundColor Yellow
+    if (-not (Read-ExplicitYes ("         Update {0} now? (Y/N)" -f $Name))) { Write-Host "         Skipped." -ForegroundColor DarkGray; return }
+    Write-Host ("         Updating {0} (best-effort)..." -f $Name) -ForegroundColor White
+    try { & $DoUpdate | Out-Null } catch { }
+    Sync-ToolPaths
+    $new = $null; if ($ReDetect) { try { $new = & $ReDetect } catch { } }
+    $newTok = Get-VersionToken $new
+    if ($newTok) {
+        if ($script:ToolStatus[$Key]) { $script:ToolStatus[$Key].version = $newTok }
+        if (Test-UpdateAvailable $newTok $Latest) {
+            Write-Host ("  {0}: still v{1} -- the selected executable was not replaced. Review the install output or try again later." -f $Name, $newTok) -ForegroundColor Yellow
+        } else {
+            Write-Host ("  {0}: updated to v{1}." -f $Name, $newTok) -ForegroundColor Green
+        }
+    } else {
+        Write-Host ("  {0}: update attempted -- verify on next run." -f $Name) -ForegroundColor DarkGray
+    }
+}
+
 # Orchestrator: iterate managed, currently-installed tools; check + offer update.
 # Never throws; each tool is independent and best-effort.
 function Invoke-ToolUpdateCheck {
@@ -1745,42 +1821,7 @@ function Invoke-ToolUpdateCheck {
     }
 
     # Prompt + run one tool's update, then re-detect and refresh its version.
-    $checkOne = {
-        param([string]$Key, [string]$Name, [string]$Installed, [string]$Latest, [scriptblock]$DoUpdate, [scriptblock]$ReDetect)
-        $installedTok = Get-VersionToken $Installed
-        if ($installedTok -and $script:ToolStatus[$Key]) {
-            $script:ToolStatus[$Key].version = $installedTok
-        }
-        if (-not $Installed -or -not $Latest) {
-            $script:UpdUnverified++
-            Write-Host ("    [Unverified] {0} -- installed or latest version could not be confirmed." -f $Name) -ForegroundColor DarkGray
-            return
-        }
-        $script:UpdChecked++
-        if (-not (Test-UpdateAvailable $Installed $Latest)) {
-            Write-Host ("    [Current] {0} ({1})" -f $Name, (Get-VersionToken $Installed)) -ForegroundColor Green
-            return
-        }
-        $script:UpdOutdated = $true
-        Write-Host ("    [Update] {0}: v{1} installed, v{2} available." -f $Name, (Get-VersionToken $Installed), (Get-VersionToken $Latest)) -ForegroundColor Yellow
-        $ans = Read-Host ("         Update {0} now? (Y/N)" -f $Name)
-        if ($ans -notmatch '^(y|yes)$') { Write-Host "         Skipped." -ForegroundColor DarkGray; return }
-        Write-Host ("         Updating {0} (best-effort)..." -f $Name) -ForegroundColor White
-        try { & $DoUpdate | Out-Null } catch { }
-        Sync-ToolPaths
-        $new = $null; if ($ReDetect) { try { $new = & $ReDetect } catch { } }
-        $newTok = Get-VersionToken $new
-        if ($newTok) {
-            if ($script:ToolStatus[$Key]) { $script:ToolStatus[$Key].version = $newTok }
-            if (Test-UpdateAvailable $newTok $Latest) {
-                Write-Host ("  {0}: still v{1} -- the selected executable was not replaced. Review the install output or try again later." -f $Name, $newTok) -ForegroundColor Yellow
-            } else {
-                Write-Host ("  {0}: updated to v{1}." -f $Name, $newTok) -ForegroundColor Green
-            }
-        } else {
-            Write-Host ("  {0}: update attempted -- verify on next run." -f $Name) -ForegroundColor DarkGray
-        }
-    }
+    $checkOne = ${function:Invoke-ToolUpdateOffer}
 
     # fab (ms-fabric-cli, PyPI)
     if ($script:ToolStatus['fab'] -and $script:ToolStatus['fab'].found) {
@@ -2483,6 +2524,21 @@ function Add-GitIgnoreRules {
     Add-Content -LiteralPath $Path -Value $content -Encoding UTF8
 }
 
+# Power BI project (PBIP) files that belong to one user and one machine. These are the two
+# rules Power BI Desktop writes itself (Microsoft Learn, power-bi/developer/projects/
+# projects-overview, read 2026-11-18). The rest of a .pbi folder (editorSettings.json,
+# unappliedChanges.json) is project content and stays visible to Git. A broader '.pbi/' rule
+# written by an earlier version of this installer already covers both files and is left as it is:
+# an existing .gitignore is only ever added to.
+function Add-PowerBiProjectIgnoreRules {
+    param([string]$Path)
+    $existing = ''
+    if (Test-Path -LiteralPath $Path) { $existing = [string](Get-Content -LiteralPath $Path -Raw -ErrorAction SilentlyContinue) }
+    if ($existing -match '(?m)^\s*/?(\*\*/)?\.pbi/?\s*$') { return }
+    Add-GitIgnoreRules -Path $Path -Heading 'Power BI project files local to one user and machine' `
+        -Rules @('**/.pbi/localSettings.json', '**/.pbi/cache.abf')
+}
+
 # Number of Git-tracked files under a workspace-relative path: 0 when the workspace is not a
 # repository yet, -1 when Git could not answer (callers then treat the folder as the user's).
 function Get-TrackedFileCount {
@@ -2494,6 +2550,20 @@ function Get-TrackedFileCount {
         if ($LASTEXITCODE -ne 0) { return -1 }
         return $files.Count
     } catch { return -1 }
+}
+
+# True when $Path holds its own .git and Git accepts the folder as a work tree. False when there
+# is no .git there (after a failed `git init` the commands that follow would otherwise act on an
+# enclosing repository), when Git refuses the folder (an ownership or policy check) or cannot run.
+# Never throws: Step 9 uses it to decide between a commit and a warning.
+function Test-GitWorkTreeUsable {
+    param([string]$Path)
+    if (-not $Path -or -not (Test-Path -LiteralPath (Join-Path $Path '.git'))) { return $false }
+    $ErrorActionPreference = 'Continue'
+    try {
+        $answer = (& git -C $Path rev-parse --is-inside-work-tree 2>$null | Select-Object -First 1)
+        return ($LASTEXITCODE -eq 0 -and ([string]$answer).Trim() -eq 'true')
+    } catch { return $false }
 }
 
 # -- Helpers: optional PBIVIZ (custom visual) development folder ----------
@@ -2643,6 +2713,39 @@ function Merge-McpJson {
     $result.Changed = $true; $result.Inserted = $patch.Inserted
     $result.Status = 'added microsoftDocs (Microsoft Learn MCP); existing content, comments and formatting preserved'
     return $result
+}
+
+# -- Remote Microsoft-hosted MCP servers this kit knows, matched by URL in a parsed mcp.json --
+# The kit never adds, registers or signs in to them. Configured means an entry with that endpoint
+# exists; it says nothing about sign-in or whether its tools are callable in a chat session.
+# The same function is written into Get-SessionStatus.ps1 (kept identical by a test).
+function Get-RemoteMcpServers {
+    param($McpConfig)
+    $known = @(
+        @{ Key = 'fabricIqMcp'; Name = 'Fabric IQ MCP'; Release = 'generally available'; Access = 'read-only'; GrantKeys = @('FabricIQ')
+           Urls = @(@{ Scope = 'global'; Pattern = '^https://(fabriciq\.svc\.cloud\.microsoft|api\.fabric\.microsoft\.com)/v1/mcp/fabriciq/?$' }) },
+        @{ Key = 'fabricDataWarehouseMcp'; Name = 'Fabric Data Warehouse MCP'; Release = 'preview'; Access = 'runs T-SQL, including statements that change data'; GrantKeys = @('fabric-dw-global', 'fabric-dw-item')
+           Urls = @(@{ Scope = 'global'; Pattern = '^https://api\.fabric\.microsoft\.com/v1/mcp/dataPlane/sqlEndpoint/?$' },
+                    @{ Scope = 'item'; Pattern = '^https://api\.fabric\.microsoft\.com/v1/mcp/dataPlane/workspaces/[^/]+/items/[^/]+/sqlEndpoint/?$' }) }
+    )
+    $servers = @()
+    if ($McpConfig -and $McpConfig.PSObject.Properties['servers'] -and $McpConfig.servers) {
+        $servers = @($McpConfig.servers.PSObject.Properties | ForEach-Object { @{ Name = [string]$_.Name; Url = [string]$_.Value.url } })
+    }
+    foreach ($k in $known) {
+        $keys = @(); $scopes = @()
+        foreach ($u in $k.Urls) {
+            foreach ($s in $servers) {
+                if ($s.Url -match $u.Pattern) { $keys += $s.Name; if ($scopes -notcontains $u.Scope) { $scopes += $u.Scope } }
+            }
+        }
+        [pscustomobject]@{
+            Key = $k.Key; Name = $k.Name; Release = $k.Release; Access = $k.Access
+            Configured = ($keys.Count -gt 0); ServerKeys = @($keys); Scope = ($scopes -join '+')
+            KeyMatchesGrant = (@($keys | Where-Object { $k.GrantKeys -ccontains $_ }).Count -gt 0)
+            GrantKeys = @($k.GrantKeys)
+        }
+    }
 }
 
 # -- Offline pipeline definition check (single source; emitted to .github/agent-docs/Test-PipelineDefinition.ps1) --
@@ -7268,8 +7371,7 @@ if ($choice -eq '1') {
     }
     if (-not (Test-Path -LiteralPath $rootPath)) {
         Write-Host "`n  That folder does not exist: $rootPath" -ForegroundColor Red
-        $create = Read-Host "  Create it? (y/n)"
-        if ($create -notmatch '^(y|yes)$') { Write-Host "  Aborted."; exit 0 }
+        if (-not (Read-ExplicitYes "  Create it? (y/n)")) { Write-Host "  Aborted."; exit 0 }
         New-Item -ItemType Directory -Path $rootPath -Force | Out-Null
         Write-Host "  Created: $rootPath" -ForegroundColor Green
     } else {
@@ -7418,10 +7520,8 @@ if ($wsCount -gt 0) {
     Write-Host ""
     for ($i = 1; $i -le $wsCount; $i++) {
         while ($true) {
-            $wsName = Read-Host "  Name for Workspace $i"
-            if ([string]::IsNullOrWhiteSpace($wsName)) {
-                $wsName = "Workspace $i"
-            }
+            $wsAnswer = Read-Host "  Name for Workspace $i"
+            $wsName = if ([string]::IsNullOrWhiteSpace($wsAnswer)) { "Workspace $i" } else { $wsAnswer }
             $wsPath = Join-Path $rootPath $wsName
             if (Test-Path $wsPath) {
                 Write-Host "  A folder named '$wsName' already exists in this workspace." -ForegroundColor Red
@@ -7432,6 +7532,11 @@ if ($wsCount -gt 0) {
                 Write-Host "  Please choose a different name.`n" -ForegroundColor Yellow
             } else {
                 $workspaceNames += $wsName
+                break
+            }
+            # Input has ended (no console, redirected input at its end): do not ask forever.
+            if ($null -eq $wsAnswer) {
+                Write-Host "  No further input - Workspace $i is skipped." -ForegroundColor Yellow
                 break
             }
         }
@@ -7511,8 +7616,7 @@ if (-not $pbivizMapReadable) {
         Write-Host '  PBIVIZ folder: not configured.' -ForegroundColor White
         $pbivizPrompt = '  Configure now? (y/N)'
     } else { $pbivizPrompt = '  Create a dedicated folder for Power BI custom visual development? (y/N)' }
-    $pbivizAns = Read-Host $pbivizPrompt
-    if ($pbivizAns -match '^\s*(y|yes)\s*$') {
+    if (Read-ExplicitYes $pbivizPrompt) {
         $pbivizRelativePath = & $readPbivizName
         if ($pbivizRelativePath) { $pbivizEnabled = $true; $pbivizDecision = 'new' } else { $pbivizDecision = 'declined' }
     } else {
@@ -7529,8 +7633,7 @@ Write-Host '  Clone your own GitHub or Azure DevOps repositories used for Fabric
 Write-Host '  Git integration or ALM. Each repository keeps its own live branches and' -ForegroundColor DarkGray
 Write-Host '  stays independent of this outer workspace repository.' -ForegroundColor DarkGray
 Write-Host ''
-$repoOnboardingAnswer = Read-Host '  Set up business source control now? (y/N)'
-if ($repoOnboardingAnswer -match '^(y|yes)$') {
+if (Read-ExplicitYes '  Set up business source control now? (y/N)') {
     $repoCount = Read-NonNegativeCount -Prompt '  How many repositories do you want to clone?'
     $plannedFolderNames = @()
     for ($repoIndex = 1; $repoIndex -le $repoCount; $repoIndex++) {
@@ -7580,8 +7683,16 @@ if ($repoOnboardingAnswer -match '^(y|yes)$') {
     Write-Host '  No business repositories will be cloned. Existing clones remain untouched.' -ForegroundColor DarkGray
 }
 
+if ($StopAfterStep1) {
+    Write-Host ''
+    Write-Host '  [prompt check] Step 1 complete. Stopped before the prerequisite step: nothing was detected, installed or generated.' -ForegroundColor Cyan
+    exit 0
+}
 Read-Host "`n  Press Enter to continue..."
 }
+
+# Unconditional second stop for the prompt check: Step 2 must not start, whatever Step 1 did.
+if ($StopAfterStep1) { exit 0 }
 
 # =====================================================================
 # STEP 2  -- Prerequisites check
@@ -7674,26 +7785,32 @@ if ($tmdlExtFound) {
 # Fabric CLI (fab) -- RECOMMENDED (optional). Primary CLI for Fabric control-plane:
 # item lifecycle, jobs, export/import, OneLake file ops, table ops. Not required --
 # the core workflow (Fabric extension + agents editing local files) needs no CLI.
+# Recommended is not consent: nothing is installed unless the answer is an explicit Yes.
 if (-not (Test-CliResilient -Name 'fab' -VersionPattern '(?im)^\s*fab version')) {
-    Write-Host "  Fabric CLI (fab): not found (recommended)" -ForegroundColor Yellow
+    Write-Host "  Fabric CLI (fab): not found (recommended, optional)" -ForegroundColor Yellow
     Write-Host "         Primary CLI for Fabric API, jobs, export/import, OneLake and table ops." -ForegroundColor DarkGray
     Write-Host "         Needs Python $(Get-FabPythonRangeLabel). Reference: https://github.com/microsoft/fabric-cli" -ForegroundColor DarkGray
-    # Ensure a REAL Python exists (install it if missing), then install fab via pip.
-    $realPy = Ensure-Python
-    if ($realPy) {
-        # Two shots, each resilient to transient network failures (--retries/--timeout):
-        #   1. plain install -> lands in the interpreter's own Scripts dir, which is
-        #      already on PATH for a winget/python.org per-user Python (the common case)
-        #   2. --user fallback -> for system Pythons where the prefix isn't writable
-        # Listing both also gives a free retry if the first attempt dies mid-download.
-        Try-InstallOptionalTool -Name "Fabric CLI (fab)" -CheckCmd "fab" -Attempts @(
-            @{ Exe = $realPy; Args = @("-m", "pip", "install", "--upgrade", "--retries", "5", "--timeout", "60", "ms-fabric-cli") }
-            @{ Exe = $realPy; Args = @("-m", "pip", "install", "--user", "--upgrade", "--retries", "5", "--timeout", "60", "ms-fabric-cli") }
-        ) -ManualUrl "https://github.com/microsoft/fabric-cli (pip install ms-fabric-cli)" | Out-Null
+    Write-Host "         How: pip install ms-fabric-cli with your Python. If no supported Python exists you are asked separately before one is installed." -ForegroundColor DarkGray
+    if (Read-ExplicitYes "         Install Fabric CLI (fab) now? (Y/N)") {
+        # Reuses a supported Python; asks again before installing one.
+        $realPy = Ensure-Python
+        if ($realPy) {
+            # Two shots, each resilient to transient network failures (--retries/--timeout):
+            #   1. plain install -> lands in the interpreter's own Scripts dir, which is
+            #      already on PATH for a winget/python.org per-user Python (the common case)
+            #   2. --user fallback -> for system Pythons where the prefix isn't writable
+            # Listing both also gives a free retry if the first attempt dies mid-download.
+            Try-InstallOptionalTool -Name "Fabric CLI (fab)" -CheckCmd "fab" -Attempts @(
+                @{ Exe = $realPy; Args = @("-m", "pip", "install", "--upgrade", "--retries", "5", "--timeout", "60", "ms-fabric-cli") }
+                @{ Exe = $realPy; Args = @("-m", "pip", "install", "--user", "--upgrade", "--retries", "5", "--timeout", "60", "ms-fabric-cli") }
+            ) -ManualUrl "https://github.com/microsoft/fabric-cli (pip install ms-fabric-cli)" | Out-Null
+        } else {
+            Write-Host "         No supported Python is available, so the Fabric CLI was not installed." -ForegroundColor DarkGray
+            Write-Host "         No problem -- the workspace works fine without it. Open the workspace and ask the" -ForegroundColor DarkGray
+            Write-Host "         Fabric agent to walk you through installing Python + the Fabric CLI when convenient." -ForegroundColor DarkGray
+        }
     } else {
-        Write-Host "         Could not install Python automatically (corporate policy, no winget, or no network)." -ForegroundColor DarkGray
-        Write-Host "         No problem -- the workspace works fine without it. Open the workspace and ask the" -ForegroundColor DarkGray
-        Write-Host "         Fabric agent to walk you through installing Python + the Fabric CLI when convenient." -ForegroundColor DarkGray
+        Write-Host "         Skipped. Install later: pip install ms-fabric-cli (https://github.com/microsoft/fabric-cli)" -ForegroundColor DarkGray
     }
 } else {
     Write-Host "  Fabric CLI (fab): found" -ForegroundColor Green
@@ -7708,33 +7825,38 @@ if ($azState -eq 'unhealthy') {
 } elseif ($azState -eq 'missing') {
     Write-Host "  az CLI: not found (optional, fallback)" -ForegroundColor Yellow
     Write-Host "         Only needed for SQL/TDS (sqlcmd) and non-Fabric token audiences; fab covers the rest." -ForegroundColor DarkGray
-    Write-Host "    Installing az CLI automatically..." -ForegroundColor White
+    Write-Host "         How: Microsoft's Azure CLI package through winget (a system-wide installer; it can fail without" -ForegroundColor DarkGray
+    Write-Host "         administrator rights), then a per-user Python environment (%USERPROFILE%\.fabric-az) if a real Python exists." -ForegroundColor DarkGray
+    # Optional: nothing is installed unless the answer is an explicit Yes.
+    if (Read-ExplicitYes "         Install Azure CLI (az) now? (Y/N)") {
+        # 1) winget (per-machine MSI). Silent, no admin where allowed; commonly
+        #    blocked with exit 1603 on locked-down PCs, in which case we fall through.
+        if (Get-Command winget -ErrorAction SilentlyContinue) {
+            Write-Host "    Trying winget: Microsoft.AzureCLI ..." -ForegroundColor White
+            try { & winget install --silent --accept-package-agreements --accept-source-agreements -e --id Microsoft.AzureCLI 2>$null | Out-Null } catch { }
+            Sync-ToolPaths
+        }
 
-    # 1) winget (per-machine MSI). Silent, no admin where allowed; commonly
-    #    blocked with exit 1603 on locked-down PCs, in which case we fall through.
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Write-Host "    Trying winget: Microsoft.AzureCLI ..." -ForegroundColor White
-        try { & winget install --silent --accept-package-agreements --accept-source-agreements -e --id Microsoft.AzureCLI 2>$null | Out-Null } catch { }
-        Sync-ToolPaths
-    }
-
-    # 2) Isolated-venv pip install -- the reliable no-admin route. A plain
-    #    `pip install azure-cli` overflows the Windows 260-char MAX_PATH limit on
-    #    the Microsoft Store Python (azure-cli has a very deep package tree); a
-    #    venv at a short profile-root path sidesteps it (see Install-AzCliViaVenv).
-    if (Test-CliResilient -Name 'az' -Retries 1) {
-        Write-Host "  az CLI: installed (via winget)." -ForegroundColor Green
-    } elseif (Install-AzCliViaVenv) {
-        Write-Host "  az CLI: installed (isolated environment)." -ForegroundColor Green
+        # 2) Isolated-venv pip install -- the reliable no-admin route. A plain
+        #    `pip install azure-cli` overflows the Windows 260-char MAX_PATH limit on
+        #    the Microsoft Store Python (azure-cli has a very deep package tree); a
+        #    venv at a short profile-root path sidesteps it (see Install-AzCliViaVenv).
+        if (Test-CliResilient -Name 'az' -Retries 1) {
+            Write-Host "  az CLI: installed (via winget)." -ForegroundColor Green
+        } elseif (Install-AzCliViaVenv) {
+            Write-Host "  az CLI: installed (isolated environment)." -ForegroundColor Green
+        } else {
+            Write-Host "  az CLI: could not be installed (optional -- the workspace works without it)." -ForegroundColor Yellow
+            Write-Host "         Install it later if you need SQL/TDS or non-Fabric tokens: https://aka.ms/installazurecli" -ForegroundColor DarkGray
+        }
     } else {
-        Write-Host "  az CLI: could not be installed automatically (optional -- the workspace works without it)." -ForegroundColor Yellow
-        Write-Host "         Install it later if you need SQL/TDS or non-Fabric tokens: https://aka.ms/installazurecli" -ForegroundColor DarkGray
+        Write-Host "         Skipped. Install later if you need SQL/TDS or non-Fabric tokens: https://aka.ms/installazurecli" -ForegroundColor DarkGray
     }
 } else {
     Write-Host "  az CLI: found" -ForegroundColor Green
 }
 
-# -- MCP server extensions for full-live / hybrid modes (auto-installed) ------
+# -- MCP server extensions for full-live / hybrid modes (offered, never installed unasked) --
 # These two VS Code extensions provide the MCP servers the agents use for the
 # full-live and hybrid ways of working. They are optional for full-LOCAL mode.
 Write-Host ""
@@ -7753,16 +7875,21 @@ if (-not $vscodeCmd) {
         if ($mcpFound) {
             Write-Host "  $($mcp.Name): found" -ForegroundColor Green
         } else {
-            Write-Host "  $($mcp.Name): not found -- installing ($($mcp.Desc))..." -ForegroundColor Yellow
-            if (Install-VsCodeExtension -VsCode $vscodeCmd -Id $mcp.Id) {
-                Write-Host "  $($mcp.Name): installed" -ForegroundColor Green
-                $installedExts = Get-InstalledVsCodeExtensions -VsCode $vscodeCmd
+            Write-Host "  $($mcp.Name): not found (optional; $($mcp.Desc))" -ForegroundColor Yellow
+            # Optional: nothing is installed unless the answer is an explicit Yes.
+            if (Read-ExplicitYes "         Install the VS Code extension $($mcp.Id) now? (Y/N)") {
+                if (Install-VsCodeExtension -VsCode $vscodeCmd -Id $mcp.Id) {
+                    Write-Host "  $($mcp.Name): installed" -ForegroundColor Green
+                    $installedExts = Get-InstalledVsCodeExtensions -VsCode $vscodeCmd
+                } else {
+                    Write-Host "  $($mcp.Name): install failed -- install manually:" -ForegroundColor Yellow
+                    Write-Host "         code --install-extension $($mcp.Id)" -ForegroundColor DarkGray
+                    Write-Host "         (On a corporate network this is usually a TLS/proxy certificate" -ForegroundColor DarkGray
+                    Write-Host "          issue -- installing from the VS Code Extensions view works.)" -ForegroundColor DarkGray
+                    $warnings += "$($mcp.Name) ($($mcp.Id)) install failed -- run: code --install-extension $($mcp.Id)"
+                }
             } else {
-                Write-Host "  $($mcp.Name): auto-install failed -- install manually:" -ForegroundColor Yellow
-                Write-Host "         code --install-extension $($mcp.Id)" -ForegroundColor DarkGray
-                Write-Host "         (On a corporate network this is usually a TLS/proxy certificate" -ForegroundColor DarkGray
-                Write-Host "          issue -- installing from the VS Code Extensions view works.)" -ForegroundColor DarkGray
-                $warnings += "$($mcp.Name) ($($mcp.Id)) auto-install failed -- run: code --install-extension $($mcp.Id)"
+                Write-Host "         Skipped. Install later: code --install-extension $($mcp.Id)" -ForegroundColor DarkGray
             }
         }
     }
@@ -7778,15 +7905,15 @@ if (-not $vscodeCmd) {
 Write-Host ""
 Write-Host "  Building tool inventory for the agents (tool-status.json)..." -ForegroundColor Cyan
 
-# -- Core tools (auto best-effort above) -- record their final detected state.
+# -- Core tools (offered above; installed only on an explicit Yes) -- record their final detected state.
 $fabHit = Resolve-ToolCommand -Aliases @('fab')
 $fabVersion = if ($fabHit) { Get-ToolVersion -Exe $(if ($fabHit.path) { $fabHit.path } else { 'fab' }) } else { $null }
 if ($fabHit -and $fabVersion -match '(?im)^\s*fab version') {
-    Set-ToolStatus -Key 'fab' -Found $true -Command $fabHit.command -Path $fabHit.path -Version $fabVersion -Category 'core-cli' -InstallMode 'auto'
+    Set-ToolStatus -Key 'fab' -Found $true -Command $fabHit.command -Path $fabHit.path -Version $fabVersion -Category 'core-cli' -InstallMode 'ask'
 } elseif ($fabHit) {
-    Set-ToolStatus -Key 'fab' -Found $false -Category 'core-cli' -InstallMode 'auto' -Reason "a different 'fab' command is on PATH ($($fabHit.path)); Microsoft Fabric CLI (ms-fabric-cli) not detected"
+    Set-ToolStatus -Key 'fab' -Found $false -Category 'core-cli' -InstallMode 'ask' -Reason "a different 'fab' command is on PATH ($($fabHit.path)); Microsoft Fabric CLI (ms-fabric-cli) not detected"
 } else {
-    Set-ToolStatus -Key 'fab' -Found $false -Category 'core-cli' -InstallMode 'auto' -Reason 'not installed'
+    Set-ToolStatus -Key 'fab' -Found $false -Category 'core-cli' -InstallMode 'ask' -Reason 'not installed'
 }
 
 # Python: recorded for the agents, never installed for this entry. Project Osmos helpers need 3.11 or later.
@@ -7803,9 +7930,9 @@ if ($pythonInvoke -and $pythonProbe -and $pythonProbe.Version) {
 
 $azHit = Resolve-ToolCommand -Aliases @('az')
 if ($azHit) {
-    Set-ToolStatus -Key 'az' -Found $true -Command $azHit.command -Path $azHit.path -Version (Get-ToolVersion -Exe 'az' -VersionArgs @('version','-o','tsv')) -Category 'core-cli' -InstallMode 'auto'
+    Set-ToolStatus -Key 'az' -Found $true -Command $azHit.command -Path $azHit.path -Version (Get-ToolVersion -Exe 'az' -VersionArgs @('version','-o','tsv')) -Category 'core-cli' -InstallMode 'ask'
 } else {
-    Set-ToolStatus -Key 'az' -Found $false -Category 'core-cli' -InstallMode 'auto' -Reason 'not installed'
+    Set-ToolStatus -Key 'az' -Found $false -Category 'core-cli' -InstallMode 'ask' -Reason 'not installed'
 }
 
 # -- MCP server extensions -- record final state (advisory; gated by this JSON).
@@ -7818,10 +7945,26 @@ if ($azHit) {
 # ('unknown' until the agent runs the startup MCP self-test).
 $fabMcpFound = Test-VsCodeExtension -Id 'fabric.vscode-fabric-mcp-server' -List $installedExts
 $fabMcpReason = $null; if (-not $fabMcpFound) { $fabMcpReason = 'extension not installed' }
-Set-ToolStatus -Key 'fabricMcpServer' -Found $fabMcpFound -Category 'mcp-extension' -InstallMode 'auto' -ExtensionId 'fabric.vscode-fabric-mcp-server' -Reason $fabMcpReason -Extra @{ extensionInstalled = $fabMcpFound; mcpToolsCallable = 'unknown' }
+Set-ToolStatus -Key 'fabricMcpServer' -Found $fabMcpFound -Category 'mcp-extension' -InstallMode 'ask' -ExtensionId 'fabric.vscode-fabric-mcp-server' -Reason $fabMcpReason -Extra @{ extensionInstalled = $fabMcpFound; mcpToolsCallable = 'unknown' }
 $pbiMcpFound = Test-VsCodeExtension -Id 'analysis-services.powerbi-modeling-mcp' -List $installedExts
 $pbiMcpReason = $null; if (-not $pbiMcpFound) { $pbiMcpReason = 'extension not installed' }
-Set-ToolStatus -Key 'powerBiModelMcpServer' -Found $pbiMcpFound -Category 'mcp-extension' -InstallMode 'auto' -ExtensionId 'analysis-services.powerbi-modeling-mcp' -Reason $pbiMcpReason -Extra @{ extensionInstalled = $pbiMcpFound; mcpToolsCallable = 'unknown' }
+Set-ToolStatus -Key 'powerBiModelMcpServer' -Found $pbiMcpFound -Category 'mcp-extension' -InstallMode 'ask' -ExtensionId 'analysis-services.powerbi-modeling-mcp' -Reason $pbiMcpReason -Extra @{ extensionInstalled = $pbiMcpFound; mcpToolsCallable = 'unknown' }
+
+# -- Remote MCP servers (Fabric IQ, Fabric Data Warehouse): recorded only, never added or signed in to.
+# `found` = an entry with that endpoint is in this workspace's .vscode/mcp.json. Whether its tools are
+# callable is a per-session fact only an agent in that session can establish (mcpToolsCallable 'unknown').
+$remoteMcpConfig = $null
+$workspaceMcpJson = Join-Path $rootPath '.vscode\mcp.json'
+if (Test-Path -LiteralPath $workspaceMcpJson) { try { $remoteMcpConfig = ConvertFrom-JsonLenient ([IO.File]::ReadAllText($workspaceMcpJson)) } catch { } }
+foreach ($remoteMcp in @(Get-RemoteMcpServers $remoteMcpConfig)) {
+    $remoteReason = $null
+    if (-not $remoteMcp.Configured) { $remoteReason = 'no entry with this endpoint in .vscode/mcp.json (the kit never adds one)' }
+    elseif (-not $remoteMcp.KeyMatchesGrant) { $remoteReason = "saved under another server key; the agents' grant expects: $($remoteMcp.GrantKeys -join ' or ')" }
+    Set-ToolStatus -Key $remoteMcp.Key -Found $remoteMcp.Configured -Category 'mcp-remote' -InstallMode 'detect' -Reason $remoteReason -Extra @{
+        documented = $true; release = $remoteMcp.Release; access = $remoteMcp.Access; configured = $remoteMcp.Configured
+        serverKeys = @($remoteMcp.ServerKeys); scope = $remoteMcp.Scope; keyMatchesGrant = $remoteMcp.KeyMatchesGrant; mcpToolsCallable = 'unknown'
+    }
+}
 
 # -- Specialist tools -- detect, explain, and ask Y/N per tool.
 Write-Host ""
@@ -7991,8 +8134,7 @@ if ($adoFound) {
     Write-Host "  Azure DevOps CLI extension: not found (optional)" -ForegroundColor Yellow
     Write-Host "         Purpose:  Azure DevOps PRs, pipelines and boards from the CLI." -ForegroundColor DarkGray
     Write-Host "         Provider: az extension (azure-devops)" -ForegroundColor DarkGray
-    $adoAns = Read-Host "         Install the azure-devops az extension now? (Y/N)"
-    if ($adoAns -match '^(y|yes)$') {
+    if (Read-ExplicitYes "         Install the azure-devops az extension now? (Y/N)") {
         try { & az extension add --name azure-devops 2>$null | Out-Null } catch { }
         $adoFound2 = $false
         try { if ((& az extension list --query "[].name" -o tsv 2>$null) -match 'azure-devops') { $adoFound2 = $true } } catch { }
@@ -8058,8 +8200,7 @@ Write-Host "  Tool inventory built (written to .github/agent-docs/tool-status.js
 # latest version of each installed tool and offer a per-tool Y/N upgrade. Every
 # lookup is best-effort -- blocked/offline lookups are silently skipped.
 Write-Host ""
-$updAns = Read-Host "  Check installed tools for updates now? (y/N)"
-if ($updAns -match '^(y|yes)$') {
+if (Read-ExplicitYes "  Check installed tools for updates now? (y/N)") {
     try { Invoke-ToolUpdateCheck } catch { }
 } else {
     Write-Host "  Update check skipped." -ForegroundColor DarkGray
@@ -8210,8 +8351,7 @@ if ($businessRepoPlans.Count -gt 0 -and $repositoryMapReadable) {
                 # re-run never silently moves the user's working branches. When
                 # accepted, only clean worktrees strictly behind upstream are
                 # fast-forwarded (never merged/rebased/reset) further below.
-                $pullAns = Read-Host '    You already have this repository locally. Pull existing branches so they match online? (y/N)'
-                if ($pullAns -match '^\s*(y|yes)\s*$') { $doPull = $true }
+                if (Read-ExplicitYes '    You already have this repository locally. Pull existing branches so they match online? (y/N)') { $doPull = $true }
             } else {
                 $children = @(Get-ChildItem -LiteralPath $container -Force -ErrorAction SilentlyContinue)
                 if ($children.Count -gt 0) {
@@ -8936,7 +9076,9 @@ No template is verified against JSON produced by the Fabric editor. When the edi
    It carries the ids of the workspace it came from. See "Changing a deployed pipeline".
 4. **Run the pipeline check before every save**
    (`.github/agent-docs/Test-PipelineDefinition.ps1`, described below). Only
-   `RESULT: PASS` allows a save without a question to the user.
+   `RESULT: PASS` allows a save without a question to the user. `BLOCKED` is never saved.
+   `UNCHECKED`, or a check that could not be run, is saved only after the user decided on
+   each point that could not be checked.
 5. **An activity without a verified contract is built in the Fabric editor first**, and its
    JSON is copied from there. Do not invent a `type` or its properties.
 6. **No credentials in a definition.** Reference a connection
@@ -9579,6 +9721,15 @@ How a pipeline's references behave when the definition moves to another workspac
 - **A promotion is verified by evidence, never by the HTTP status**: read the definition
   back from the target, run the pipeline check against the target's inventory, and run the
   pipeline (or report the run as not executed).
+- **Upstream skills (catalog checked 2026-11-18).** Microsoft's `skills-for-fabric` has no
+  skill dedicated to rebinding a pipeline's item references across workspaces. The related
+  skills cover their own subject only and are pinned where they belong: `variable-library-cli`
+  (per-environment values; 036 and 054), `deployment-pipelines-authoring-cli` (stage
+  promotion; the 050 team), `git-integration-operations-cli` (Git sync; its own text puts
+  cross-workspace rebinding out of scope) and `pipeline-migration` (Synapse to Fabric only).
+  None of them replaces the rules of this section, and none is used in place of a binding
+  skill. If Microsoft publishes one, Capability Maintenance maps it through the normal skill
+  compatibility process; until then this section is the reference.
 
 ---
 
@@ -9768,7 +9919,7 @@ $cliPolicySkillPath = "$rootPath\.github\skills\fabric-cli-policy\SKILL.md"
 $cliPolicyContent = @'
 ---
 name: fabric-cli-policy
-description: "CLI decision policy for Fabric/Power BI work, including the PBIR report edit policy (pbir first; direct JSON only as an approved exception). Read this BEFORE any terminal CLI or REST API task. Triggers: fabric cli, fab, fab api, call Fabric API, run notebook, run job, export item, import item, deploy item, onelake copy, table load, az rest, sqlcmd, capacity, governance, workspace item CRUD, pbir, PBIR edit."
+description: "CLI decision policy for Fabric/Power BI work, including the PBIR report edit policy (pbir first; direct JSON only as an approved exception), the SQL route and permission classes, and the evidence states for remote MCP servers (Fabric IQ, Fabric Data Warehouse). Read this BEFORE any terminal CLI or REST API task. Triggers: fabric cli, fab, fab api, call Fabric API, run notebook, run job, export item, import item, deploy item, onelake copy, table load, az rest, sqlcmd, run SQL, executeSQL, Fabric IQ MCP, SQL endpoint MCP, capacity, governance, workspace item CRUD, pbir, PBIR edit."
 ---
 
 # Fabric CLI Policy -- prefer `fab`, fall back to `az`
@@ -9882,6 +10033,82 @@ cannot perform**. So:
 - Once the kernel is attached (or the HTTP path is chosen), the agent drives authoring,
   execution, iteration, and reconciliation itself.
 
+## SQL work - permission class first, then the route
+
+A SQL tool on this machine is a way to run a statement. It is never permission to run it.
+Decide the class of the statement, then pick the route.
+
+| Class | Examples | Who | What it needs |
+|---|---|---|---|
+| **S0 Definition work** | writing or reviewing a script; no connection | the agent that owns the artifact | nothing |
+| **S1 Metadata read** | `INFORMATION_SCHEMA`, `sys` views, item and endpoint lookup | 033, 034, 063; 043 for diagnosis | the WORK ORDER |
+| **S2 Data read** | `SELECT` | 033, 034, 063 | the WORK ORDER; the smallest result that answers the question (`TOP`, aggregates) |
+| **S3 Data or schema change** | `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `CREATE`, `ALTER`, `DROP`, `TRUNCATE`, `COPY INTO`, a procedure that writes | 033 (Warehouse), 034 (SQL database) | an environment-changing action under the operating contract: the script shown to the user and the approval token in the WORK ORDER. Destructive statements need their own `APPROVED:<ACTION>:<object>` |
+| **S4 Administration** | permissions, roles, security policies, workspace or capacity settings | the 040 team | its own approval; never a side effect of SQL work |
+
+Rules:
+- A statement you cannot classify is S3. A batch takes the class of its highest statement.
+- The token names the kind of statement and the object, for example `APPROVED:INSERT:dbo.Stage`
+  or `APPROVED:ALTER:dbo.FactSales`. `DELETE`, `TRUNCATE`, `DROP` and an `UPDATE` or `MERGE` that
+  overwrites existing rows are destructive: one token per object, never covered by another
+  approval.
+- Read-only roles (043, 063 for analysis) stop at S2 whatever tool is present.
+- The SQL analytics endpoint of a lakehouse or mirrored database serves table data read-only;
+  what else it accepts is in the `sqldw-cli` skill. Anything that changes it is still S3.
+
+Route, in this order, for S1 to S3 against a Warehouse or SQL analytics endpoint:
+1. **`sqlcmd -G`** when tool-status says `sqlcmd` is found and TDS is reachable. It is generally
+   available, scriptable and leaves a script file as evidence; S3 always runs from a script file.
+2. **Fabric Data Warehouse MCP `executeSQL`** when it is configured, callable in this session and
+   you hold its grant (033 only): see the next section. It is in preview and runs whatever
+   statement it is given, so the class rules above apply unchanged. Good for S1 and S2 when TDS is
+   blocked; for S3 only when route 1 is impossible and the approval names this route. To name
+   the route, the approval request you return says that the statement will run through
+   `executeSQL`.
+3. **Alternates** when neither works: a Script activity in a pipeline (`fab job run`), a notebook
+   with Spark SQL for lakehouse tables (not T-SQL), or the portal SQL editor run by the user.
+   `az` only supplies a token for a non-Fabric audience; it is not a SQL route by itself.
+4. **Otherwise S0**: return the script and say exactly which route failed and how.
+
+## Remote MCP servers - Fabric IQ and Fabric Data Warehouse
+
+Microsoft hosts both. This kit does not add, register or sign in to them; it records whether the
+workspace `.vscode/mcp.json` already holds an entry (tool-status `fabricIqMcp`,
+`fabricDataWarehouseMcp`) and grants their tools to named agents only. Facts were read on
+Microsoft Learn on 2026-11-18.
+
+| | Fabric IQ MCP | Fabric Data Warehouse MCP |
+|---|---|---|
+| Status | generally available | **preview** |
+| Does | finds Power BI reports and semantic models, reads their metadata, searches values, runs DAX the calling agent writes | runs a T-SQL statement against a Warehouse or SQL analytics endpoint |
+| Does not | answer in natural language by itself; create or change anything; cover dashboards, paginated reports, apps, ontologies or data agents | offer metadata, history or schema tools: it has one tool |
+| Tools | `DiscoverArtifacts`, `ResolveFabricItem`, `GetReportMetadata`, `GetSemanticModelSchema`, `ValueSearch`, `ExecuteQuery` (read `tools/list` at run time) | `executeSQL` |
+| Writes | no (read-only) | **yes**, whatever the signed-in user may run, including DDL and DML |
+| Endpoint | `https://fabriciq.svc.cloud.microsoft/v1/mcp/fabriciq` (private links: `https://api.fabric.microsoft.com/v1/mcp/fabriciq`) | `https://api.fabric.microsoft.com/v1/mcp/dataPlane/sqlEndpoint` (global) or `.../v1/mcp/dataPlane/workspaces/<workspace-id>/items/<item-id>/sqlEndpoint` (one item) |
+| Sign-in | the user's Microsoft Entra account, delegated; no service principal; RLS and OLS apply | the user's Microsoft account; Fabric and SQL permissions apply |
+| Server key the grants expect | `FabricIQ` | `fabric-dw-global`, `fabric-dw-item` |
+| Agents holding the grant | 038 and 043 | 033 only |
+| Microsoft documents the VS Code setup | no: the page shows GitHub Copilot CLI, and says some clients need their own app registration | yes: `.vscode/mcp.json`, type `http` |
+
+**Five states. Report the highest one you have evidence for, by its name.**
+1. **Documented** - Microsoft describes it. Says nothing about this machine.
+2. **Configured** - tool-status shows `configured: true`: an entry with that URL is in
+   `.vscode/mcp.json`. `keyMatchesGrant: false` means it is saved under another key, so the
+   agents' grant does not reach it.
+3. **Callable** - its tools are in *your* tool list in this session. Configured servers that were
+   not started, or that exceed the tool budget, are not callable.
+4. **Signed in** - a first read-only call returned data, not a sign-in or permission error.
+5. **Executed** - the operation you report returned a result; quote it.
+
+Never write "available" or "connected" for a server that is only documented or configured. A
+skill that describes an endpoint is state 1. When a server is not callable, the documented
+fallback applies and belongs to the agent that owns that work (model questions: the semantic-model
+team with REST `executeQueries` or the modeling MCP; SQL: route 1 or 3 above). Say which state you
+reached; when the fallback is not yours, return NEEDS INPUT so the Master can route it. Adding a
+server to `mcp.json` is the user's decision: give
+them the Microsoft Learn page, prefer the item-scoped warehouse endpoint, and do not edit
+`mcp.json` yourself.
+
 ## Guardrails
 - Never hardcode tokens, secrets, or IDs -- parameterise (dev/test/prod).
 - Confirm before destructive `fab rm` / delete operations.
@@ -9937,6 +10164,193 @@ Write-ManagedFile $cliPolicySkillPath $cliPolicyContent
 Write-Host "  Written: .github/skills/fabric-cli-policy/SKILL.md" -ForegroundColor Green
 Write-ManagedFile "$rootPath\.github\skills\fabric-housekeeping\SKILL.md" $housekeepingSkillContent
 Write-Host "  Written: .github/skills/fabric-housekeeping/SKILL.md" -ForegroundColor Green
+
+# ----- fabric-ai-readiness/SKILL.md ----------------------------------
+$aiReadinessContent = @'
+---
+name: fabric-ai-readiness
+description: "Use when: preparing, reviewing or validating a Power BI / Fabric semantic model for Copilot, Fabric data agents and other AI consumers. Covers what agents may change (names, descriptions, hiding, measures, model properties), what they only draft for the user (AI instructions, AI data schema, verified answers), the settings only a person changes (Q&A, Approved for Copilot, tenant settings), security, and the validation ladder (offline, local tool, live model, Desktop or service). Triggers: AI readiness, Copilot readiness, prep data for AI, AI instructions, AI data schema, verified answers, approved for Copilot, data agent, descriptions for Copilot."
+---
+
+# Semantic model AI readiness (house skill)
+
+How this workspace prepares a semantic model so that Copilot in Power BI, Fabric data agents and
+other natural-language consumers answer from it reliably. It is a house workflow, not a product
+manual: it says who does what, what must stay with the user, and how each claim is checked.
+
+**Evidence.** Product facts were read on Microsoft Learn on 2026-11-18 and are marked `[LEARN]`:
+*Prepare your data for AI* (`learn.microsoft.com/power-bi/create-reports/copilot-prepare-data-ai`,
+with its pages on AI data schemas, verified answers and AI instructions), *Semantic model best
+practices for data agent* (`learn.microsoft.com/fabric/data-science/semantic-model-best-practices`)
+and *Fabric IQ MCP* (`learn.microsoft.com/fabric/iq/connectors/fabric-iq-mcp`). Guidance taken from
+Microsoft's `semantic-model-authoring` skill and not re-checked in product documentation is marked
+`[MS-SKILL]`. Prep data for AI is a **preview** feature `[LEARN]`: re-read the pages before
+quoting a limit to a user, and say so when a fact here is older than your task.
+
+House style for TMDL and DAX stays in `fabric-tmdl`; this skill never overrides it.
+
+## 1. Who does what
+
+| Work | Owner |
+|---|---|
+| Scope the review, agree consumers and passes with the user, collect approvals | 010 Semantic Model Team Lead (through the Master) |
+| Model shape findings (star schema, grain, storage mode) | 011 |
+| Table and column properties, hiding, hierarchies, display folders, data categories | 013 |
+| Explicit measures, format strings, measure descriptions that need DAX knowledge | 014 |
+| Descriptions, security review, and every **draft** of Prep data for AI content | 015 |
+| Validation, with the level each check was run at | 016 |
+| Questions over a published model through Fabric IQ, data agents | 038 (via the Master) |
+| A report visual that will carry a verified answer | 020 team builds the visual; the user sets the verified answer |
+
+## 2. Three classes of change
+
+Label every finding and every result with exactly one class.
+
+| Class | What it covers | Who changes it |
+|---|---|---|
+| **AGENT-EDITABLE** | Standard model metadata: descriptions, hidden flag, data types, `summarizeBy`, format strings, data category, default label column, hierarchies, display folders, explicit measures, relationships | The owning worker, inside its WORK ORDER. Renames, hiding, deletions, `IsAvailableInMDX` and role changes need the approval token the Lead requests (they break report bindings or change what people can see) |
+| **USER-CONFIGURED (draft only)** | Prep data for AI content: **AI instructions**, **AI data schema** (which tables, columns and measures AI consumers should use, and its synonyms), **verified answers**; and whatever already sits in the model's `Copilot/` folder or in `linguisticMetadata` | 015 drafts; the user reviews and applies it in Power BI Desktop or the Power BI service `[LEARN]`. Agents never write it |
+| **HUMAN SETTING** | Q&A enabled on the model, the **Approved for Copilot** mark, Copilot tenant and workspace settings, the admin option to show only approved items, endorsement and sensitivity labels | A person with the right role, in Power BI. Agents report the current state when they can read it and never change or claim it |
+
+Facts behind the table:
+- All Prep data for AI updates are saved on the semantic model, not on the report `[LEARN]`.
+- Q&A must be enabled on the model or the Prep data for AI features are unavailable `[LEARN]`. In a
+  PBIP project the switch is `settings.qnaEnabled` in `definition.pbism` `[MS-SKILL]`; this
+  workspace does not edit `definition.pbism`, so enabling it is the user's action. An absent key
+  establishes nothing: report the Q&A state as not established, never as on or off.
+- Approval tokens follow the operating contract, one per object, for example
+  `APPROVED:RENAME:Sales[CustNm]`, `APPROVED:HIDE:Sales[SalesKey]`, `APPROVED:DELETE:<object>`.
+- *Approved for Copilot* (earlier name: *prepped for AI*) is set in the Power BI service, in the
+  settings of the semantic model. A report, dashboard or app cannot be marked `[LEARN]`.
+- Power BI Desktop offers Prep data for AI only for Import, DirectQuery and local composite
+  models; the service offers it for all model types `[LEARN]`.
+
+## 3. What you must not promise
+
+- That Prep data for AI content can be authored, deployed or round-tripped through TMDL, REST,
+  XMLA, Git or a deployment pipeline. Microsoft states that AI instructions and AI data schemas are
+  saved to the model's linguistic schema (LSDL) and that, after a change arrives through Git or a
+  deployment pipeline, the model must be refreshed in the service before it takes effect - for
+  DirectQuery and Direct Lake models only once a day `[LEARN]`. That is the user's route to manage.
+- That a specific Copilot answer will come out. Microsoft states the features cannot guarantee a
+  given output `[LEARN]`.
+- That a model is "AI ready" or "approved". Report what was checked, at which level (section 7).
+  Give no verdict the other way either: list the findings instead of calling the model
+  "not ready".
+
+**Preservation rule.** The model's `Copilot/` folder, `linguisticMetadata` in cultures and any
+metadata you do not recognise are user-authored state. Every edit, deployment and formatting pass
+leaves them byte-identical. If a tool or route cannot guarantee that, stop and return NEEDS INPUT.
+
+## 4. Workflow A - readiness review (changes nothing)
+
+1. **Consumers.** Ask which consumers are planned: reports only, Copilot in Power BI, a Fabric
+   data agent, Fabric IQ, or several. Reports only: sections on drafts do not apply.
+2. **Business context.** Collect the key metrics, the questions people ask and the terms each team
+   uses. Never invent business meaning: a description or instruction written without context is
+   reported as a gap, not filled in.
+3. **Foundation** (011, 013, 014): star schema with clear fact and dimension tables; correct data
+   types; an explicit measure for every key metric; `summarizeBy` none on identifiers, years and
+   codes; no duplicate measures with unclear differences; unused tables and columns listed
+   `[MS-SKILL]`.
+4. **Names** (013, 014; renames are proposals): visible objects have names a business user would
+   say. House naming in `fabric-tmdl` wins where it differs.
+5. **Descriptions** (015, 014): every visible table, column and measure has one; the first 200
+   characters carry the meaning, because that is the part Copilot reads `[MS-SKILL]`; no secrets,
+   no personal data, no restating of the name.
+6. **AI-facing scope** (015): helper measures, bridge tables and technical columns that should not
+   be offered to AI consumers. Recommend an AI data schema entry only where the wanted AI
+   visibility differs from the model's own visibility `[MS-SKILL]`.
+7. **Security** (015): section 8.
+8. **Report** a table: finding, class (section 2), evidence (file and object), owner, and whether
+   an approval token is needed. No edits in this workflow.
+
+## 5. Workflow B - apply the agent-editable part
+
+1. The Lead sends one WORK ORDER per worker with the exact objects and passes; never two workers
+   on the same `.tmdl` file.
+2. Before the first edit, record the state of the `Copilot/` folder and the culture files (a hash
+   or a clean Git state) in the task folder.
+3. Apply only AGENT-EDITABLE changes named in the WORK ORDER. Anything needing a token that is not
+   in the WORK ORDER comes back as NEEDS APPROVAL with the proposed change list.
+4. 016 validates (section 7) and confirms the `Copilot/` folder and linguistic metadata are
+   unchanged.
+
+## 6. Workflow C - hand-over package for the user
+
+015 returns, in the WORK RESULT and as a file in the task folder when long:
+- **Draft AI instructions**: metric routing for ambiguous terms, business vocabulary tied to named
+  model objects, time definitions (fiscal year, reporting cadence), which date to use, direction
+  of good, when to ask the user a clarifying question. Short, consistent with the descriptions,
+  objects named exactly. Keep them under 10,000 characters `[MS-SKILL]`. Hard rules belong in the
+  model, not in instructions.
+- **Draft AI data schema**: the tables, columns and measures to include, every object a selected
+  measure depends on, and the helper objects to leave out.
+- **Verified answer candidates**: the question phrasings users really ask and the existing visual
+  that answers each. A verified answer is set on a visual and saved to the model; it supports up
+  to three filters that users can vary, filters applied at setup are saved with it, and slicers
+  are not supported `[LEARN]`.
+- **How to apply it**: Power BI Desktop or the service, *Prep data for AI*; for verified answers,
+  the visual's menu. To set a verified answer in the service the user needs a Copilot-enabled
+  workspace, authoring permission on the model and the report in edit mode `[LEARN]`.
+- **How to test it**: the Copilot pane in Desktop (close and reopen it after each change), the
+  skill picker to imitate the standalone, read and edit experiences, and *How Copilot arrived at
+  this* plus the diagnostics download when an answer is wrong `[LEARN]`.
+- **The decision that stays with the owner**: marking the model *Approved for Copilot*.
+
+## 7. Validation ladder
+
+State the level of every check. A check is never reported at a higher level than it was run, and
+a check that was not run is NOT RUN, never passed.
+
+| Level | Needs | What it can establish |
+|---|---|---|
+| **L0 Offline** | Only the files; no network, no live model, no Desktop | TMDL post-edit checklist from `fabric-tmdl`; every visible object has a description and its length; naming and hidden flags; `summarizeBy` and data types present; measures have format strings; `Copilot/` folder and culture files unchanged against the recorded state; `settings.qnaEnabled` read from `definition.pbism` |
+| **L1 Local tool** | A tool that tool-status reports as found, run on the local files | Tabular Editor 2 Best Practice Analyzer or the `te` CLI on the model folder; `pbir validate` on reports bound to changed objects. Absent tool: NOT RUN, with the L0 result standing |
+| **L2 Live model** | The modeling MCP connection the Master opened, or REST `executeQueries` | DAX compiles and evaluates; measure regression values; a role-scoped query for RLS; metadata read back after a deployment |
+| **L3 Power BI Desktop or service** | A person, or `pbir desktop` for report checks only | Prep data for AI content was applied; Copilot answers the test questions; Q&A is on; the model is marked Approved for Copilot. Agents report these as NOT RUN unless the user confirms them |
+
+"Offline" means L0 only. A check that needs a connection, a sign-in or Desktop is L2 or L3 even
+when it is quick.
+
+The comparison of the `Copilot/` folder and the culture files uses the state recorded in
+Workflow B step 2. A review (Workflow A) writes nothing and records no state: say that nothing
+was written, and do not list that comparison as run.
+
+## 8. Security and privacy
+
+- Security filters data, not text. For Fabric IQ, Microsoft states that row-level and object-level
+  security keep restricting the data returned and that different users can therefore get different
+  results for the same query `[LEARN]`; confirm it for your model with a role-scoped query (L2)
+  instead of assuming it. Names, descriptions, synonyms, AI instructions and trigger phrases are
+  metadata: put nothing in them that the least-privileged reader of the model may not see.
+- Never describe or route to an object protected by object-level security in a draft instruction.
+- No secrets, personal data, customer names or confidential figures in descriptions or drafts.
+- Role, RLS and OLS changes are never part of an AI readiness pass unless the WORK ORDER carries
+  their approval token; state who gains or loses visibility.
+- Record the identity every test ran under.
+
+## 9. Who reads the result
+
+- **Copilot in Power BI** uses the model metadata and the Prep data for AI content `[LEARN]`.
+- **Fabric data agents**: their DAX generation tool relies only on the model's metadata and its
+  Prep data for AI configuration and ignores DAX instructions written at data-agent level
+  `[LEARN]`. Readiness work on the model is therefore what improves a data agent.
+- **Fabric IQ MCP** reads report and model metadata and runs DAX the calling agent writes; it is
+  read-only and has no tool that answers in natural language `[LEARN]`. Use and limits: 038 and
+  the remote MCP section of `fabric-cli-policy`.
+
+## 10. Before you report
+
+- [ ] Every finding has a class: AGENT-EDITABLE, USER-CONFIGURED or HUMAN SETTING.
+- [ ] Nothing in `Copilot/` or the linguistic metadata changed (evidence named).
+- [ ] Drafts are marked as drafts and say where the user applies them.
+- [ ] Every validation line names its level L0 to L3; anything not run says NOT RUN.
+- [ ] No statement that the model is approved, AI ready or that Copilot will answer correctly.
+- [ ] Renames, hiding, deletions and role changes were applied only with their token.
+'@
+Write-ManagedFile "$rootPath\.github\skills\fabric-ai-readiness\SKILL.md" $aiReadinessContent
+Write-Host "  Written: .github/skills/fabric-ai-readiness/SKILL.md" -ForegroundColor Green
 
 # ----- PBIVIZ house skills (custom visual development, 080 team) -------
 # Original house procedures; no vendor text. Vendor skills and Microsoft Learn own syntax.
@@ -10817,6 +11231,41 @@ else {
 }
 $out.Add("IDENTITY $identity")
 
+# Remote Microsoft-hosted MCP servers this kit knows, matched by URL in a parsed mcp.json.
+# Configured means an entry exists; it says nothing about sign-in or callable tools.
+function Get-RemoteMcpServers {
+    param($McpConfig)
+    $known = @(
+        @{ Key = 'fabricIqMcp'; Name = 'Fabric IQ MCP'; Release = 'generally available'; Access = 'read-only'; GrantKeys = @('FabricIQ')
+           Urls = @(@{ Scope = 'global'; Pattern = '^https://(fabriciq\.svc\.cloud\.microsoft|api\.fabric\.microsoft\.com)/v1/mcp/fabriciq/?$' }) },
+        @{ Key = 'fabricDataWarehouseMcp'; Name = 'Fabric Data Warehouse MCP'; Release = 'preview'; Access = 'runs T-SQL, including statements that change data'; GrantKeys = @('fabric-dw-global', 'fabric-dw-item')
+           Urls = @(@{ Scope = 'global'; Pattern = '^https://api\.fabric\.microsoft\.com/v1/mcp/dataPlane/sqlEndpoint/?$' },
+                    @{ Scope = 'item'; Pattern = '^https://api\.fabric\.microsoft\.com/v1/mcp/dataPlane/workspaces/[^/]+/items/[^/]+/sqlEndpoint/?$' }) }
+    )
+    $servers = @()
+    if ($McpConfig -and $McpConfig.PSObject.Properties['servers'] -and $McpConfig.servers) {
+        $servers = @($McpConfig.servers.PSObject.Properties | ForEach-Object { @{ Name = [string]$_.Name; Url = [string]$_.Value.url } })
+    }
+    foreach ($k in $known) {
+        $keys = @(); $scopes = @()
+        foreach ($u in $k.Urls) {
+            foreach ($s in $servers) {
+                if ($s.Url -match $u.Pattern) { $keys += $s.Name; if ($scopes -notcontains $u.Scope) { $scopes += $u.Scope } }
+            }
+        }
+        [pscustomobject]@{
+            Key = $k.Key; Name = $k.Name; Release = $k.Release; Access = $k.Access
+            Configured = ($keys.Count -gt 0); ServerKeys = @($keys); Scope = ($scopes -join '+')
+            KeyMatchesGrant = (@($keys | Where-Object { $k.GrantKeys -ccontains $_ }).Count -gt 0)
+            GrantKeys = @($k.GrantKeys)
+        }
+    }
+}
+$remoteMcpConfig = $null
+$workspaceMcpJson = Join-Path $root '.vscode\mcp.json'
+if (Test-Path -LiteralPath $workspaceMcpJson) { $remoteMcpConfig = ConvertFrom-JsoncText (Get-Content -LiteralPath $workspaceMcpJson -Raw) }
+$remoteMcp = @(Get-RemoteMcpServers $remoteMcpConfig)
+
 # -- Live tool re-check + tool-status.json refresh --
 $present = @(); $missing = @(); $changed = @(); $mcpInstalled = @(); $mcpMissing = @()
 if (Test-Path -LiteralPath $toolStatusPath) {
@@ -10832,6 +11281,8 @@ if (Test-Path -LiteralPath $toolStatusPath) {
                 if ($t.found) { $mcpInstalled += $label } else { $mcpMissing += $label }
                 continue
             }
+            # Remote MCP servers are re-read from .vscode/mcp.json below; there is no executable to check.
+            if ($t.category -eq 'mcp-remote') { continue }
             if ($t.category -eq 'az-extension') { if ($t.found) { $present += $prop.Name }; continue }
             # Informational PBIVIZ entries (Git identity, per-project pbiviz MCP) have no executable to re-check.
             if ($t.category -eq 'pbiviz-info') { continue }
@@ -10850,6 +11301,16 @@ if (Test-Path -LiteralPath $toolStatusPath) {
             # Detect-only products (te CLI, TE3) are reported when present, never nagged about.
             if ($ok) { $present += $prop.Name } elseif ($t.installMode -ne 'detect') { $missing += $prop.Name }
         }
+        foreach ($r in $remoteMcp) {
+            $reason = ''
+            if (-not $r.Configured) { $reason = 'no entry with this endpoint in .vscode/mcp.json (the kit never adds one)' }
+            elseif (-not $r.KeyMatchesGrant) { $reason = "saved under another server key; the agents' grant expects: $($r.GrantKeys -join ' or ')" }
+            $ts | Add-Member -Force -NotePropertyName $r.Key -NotePropertyValue ([pscustomobject][ordered]@{
+                found = $r.Configured; version = $null; command = $null; path = $null; category = 'mcp-remote'; installMode = 'detect'; reason = $reason
+                documented = $true; release = $r.Release; access = $r.Access; configured = $r.Configured
+                serverKeys = @($r.ServerKeys); scope = $r.Scope; keyMatchesGrant = $r.KeyMatchesGrant; mcpToolsCallable = 'unknown'
+            })
+        }
         $ts._meta | Add-Member -NotePropertyName lastSessionCheck -NotePropertyValue ((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')) -Force
         [IO.File]::WriteAllText($toolStatusPath, ($ts | ConvertTo-Json -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
     } catch { $out.Add("TOOLS    tool-status.json unreadable: $($_.Exception.Message)") }
@@ -10858,7 +11319,9 @@ if (Test-Path -LiteralPath $toolStatusPath) {
     if ($changed.Count -gt 0) { $out.Add("         changed since install: $($changed -join '; ') -> tool-status.json refreshed") }
     $mcpLine = if ($mcpInstalled.Count -gt 0) { "installed: $($mcpInstalled -join ', ')" } else { 'installed: none' }
     if ($mcpMissing.Count -gt 0) { $mcpLine += " | not installed: $($mcpMissing -join ', ')" }
-    $out.Add("MCP      $mcpLine | connected: none yet - the Master opens a Power BI modeling connection (ConnectFabric) in the main chat before dispatching live-model work; installed != callable")
+    $remoteConfigured = @($remoteMcp | Where-Object { $_.Configured } | ForEach-Object { "$($_.Name) ($($_.Release)$(if ($_.Scope) { ', ' + $_.Scope })$(if (-not $_.KeyMatchesGrant) { ', key not the one the agents hold' }))" })
+    $remoteLine = if ($remoteConfigured.Count -gt 0) { "remote servers in .vscode/mcp.json: $($remoteConfigured -join ', ') - configured is not signed in or callable" } else { 'remote servers (Fabric IQ, Fabric Data Warehouse): none configured' }
+    $out.Add("MCP      $mcpLine | connected: none yet - the Master opens a Power BI modeling connection (ConnectFabric) in the main chat before dispatching live-model work; installed != callable | $remoteLine")
 } else { $out.Add('TOOLS    tool-status.json not found -> re-run the installer') }
 
 # -- Agent working files: one line, only when they have piled up enough to deserve a look --
@@ -11093,8 +11556,9 @@ setting is window-scoped: a window opened from a saved `.code-workspace` that la
 only the locations its own settings register (the session status block reports this).
 
 - **Custom (house style, always wins on style/conventions):** `.github/skills/`
-  -> `fabric-tmdl`, `fabric-pipelines`, `fabric-cli-policy` (including the PBIR edit policy),
-  and the PBIVIZ house skills
+  -> `fabric-tmdl`, `fabric-pipelines`, `fabric-cli-policy` (including the PBIR edit policy,
+  the SQL permission classes and the remote MCP evidence states), `fabric-housekeeping`,
+  `fabric-ai-readiness`, and the PBIVIZ house skills
   `pbiviz-pbip-reconstruction`, `pbiviz-source-conversion`, `pbiviz-ibcs-semantic-contract`,
   `pbiviz-interaction-regression`, `pbiviz-release-safety`, `pbiviz-alm-release`.
 - **Microsoft skills-for-fabric (MIT):** `skills-for-fabric/skills/<skill>/SKILL.md`
@@ -11489,6 +11953,20 @@ foreach ($mcpAgentId in $pbivizMcpAgents) {
     if ($mcpServersById.ContainsKey($mcpAgentId)) { $mcpServersById[$mcpAgentId] += 'pbiviz' }
     else { $mcpServersById[$mcpAgentId] = @('pbiviz') }
 }
+# Remote Microsoft-hosted MCP servers. The installer never adds them to mcp.json; the names are the
+# server keys Microsoft documents, so a grant only takes effect when the user saved the server under
+# that key. Fabric IQ is read-only. The Fabric Data Warehouse server runs T-SQL including writes,
+# so it goes to the Warehouse worker alone - never to a read-only or analysis role.
+$fabricIqMcpAgents = @('fabric-intelligence-ontology-agent', 'monitoring-catalog-operations-agent')
+$fabricDataWarehouseMcpAgents = @('warehouse-sql-agent')
+foreach ($mcpAgentId in $fabricIqMcpAgents) {
+    if ($mcpServersById.ContainsKey($mcpAgentId)) { $mcpServersById[$mcpAgentId] += 'FabricIQ' }
+    else { $mcpServersById[$mcpAgentId] = @('FabricIQ') }
+}
+foreach ($mcpAgentId in $fabricDataWarehouseMcpAgents) {
+    if ($mcpServersById.ContainsKey($mcpAgentId)) { $mcpServersById[$mcpAgentId] += @('fabric-dw-global', 'fabric-dw-item') }
+    else { $mcpServersById[$mcpAgentId] = @('fabric-dw-global', 'fabric-dw-item') }
+}
 
 function ConvertTo-AgentYamlList {
     param([object[]]$Values)
@@ -11598,13 +12076,14 @@ $agentKnowledge = @{
             @{ ref = "$MS/semantic-model-authoring"; why = 'Direct Lake, TMDL deployment, refresh and read-only DAX/metadata via REST' },
             @{ ref = "$KP/tabular-editor/skills/te2-cli"; why = 'Tabular Editor 2 CLI when installed' },
             @{ ref = "$KP/semantic-models/skills/organize-semantic-model"; why = 'model organisation passes - only for an explicit request, split by pass across your workers; never a licence for a full clean-up' },
+            @{ ref = "$CS/fabric-ai-readiness/SKILL.md"; why = 'house workflow for AI readiness: the three classes of change, the review / apply / hand-over workflows and the validation ladder - WINS on who does what' },
             @{ ref = "$MS/semantic-model-authoring/references/semantic-model-ai-readiness.md"; why = 'AI readiness: what agents may edit and what stays user-configured in Prep data for AI' }
         )
         playbook = @(
             'Decompose the request per artifact: table/column/partition -> 013 TMDL; measure/calc group -> 014 DAX; relationship/storage mode -> 012; RLS/OLS/descriptions/synonyms -> 015; design question -> 011; BPA/performance/regression -> 016.',
             'Model organisation ("organize", "tidy", "clean up", "standardize", "make report-ready") is coordinated here and never run as one sweep: agree the exact passes and objects with the user (via the Master), run the inventory and downstream lineage first, then split: display folders, hierarchies, sort-by, hiding, data categories and table/column structure -> 013; measure names, format strings and DAX formatting -> 014; descriptions, synonyms, perspectives, translations and roles -> 015; 016 validates. House naming in fabric-tmdl wins over upstream naming rules (numeric table prefixes and Dim_/Facts_ names stay). organize-semantic-model assumes the Tabular Editor 3 MCP or the `te` CLI; without them (tool-status) the passes are TMDL edits by the owning worker.',
             'Consequential organisation changes need an approval token naming them before any worker applies them: renames of tables, columns, measures or hierarchies (they break report bindings), hiding, IsAvailableInMDX (Analyze in Excel), deletions or duplicate removal, perspective or translation membership, RLS/OLS and role changes. Without the token, return the proposed change list as NEEDS APPROVAL.',
-            'AI readiness: names, descriptions and standard properties are agent-editable (013/015); AI instructions, AI data schema, verified answers and other Prep data for AI content are drafted by 015 and applied by the user in Power BI. Every deployment or TMDL write leaves the model''s `Copilot/` folder and linguistic metadata as they were.',
+            'AI readiness follows the house skill fabric-ai-readiness: a review changes nothing (Workflow A); names, descriptions and standard properties are agent-editable (013/014/015, Workflow B); AI instructions, AI data schema, verified answers and other Prep data for AI content are drafted by 015 and applied by the user in Power BI (Workflow C); Q&A, the Approved for Copilot mark and tenant settings are the user''s. Every deployment or TMDL write leaves the model''s `Copilot/` folder and linguistic metadata as they were. Never report a model as AI ready or approved: report what was checked and at which validation level (L0 to L3).',
             'Choose the mechanism: local TMDL files (default) vs live model via Power BI modeling MCP (use the `mcp connection: <name>` the Master put in your WORK ORDER context; if it says none, use REST executeQueries / fab api getDefinition).',
             'Send one WORK ORDER per worker; never two workers on the same .tmdl file.',
             'After implementation, dispatch 016 for validation (or validate yourself for a single trivial edit), then return a WORK RESULT with evidence.'
@@ -11666,12 +12145,13 @@ $agentKnowledge = @{
             @{ ref = "$CS/fabric-tmdl/SKILL.md"; why = 'roles, descriptions and synonyms placement' },
             @{ ref = "$MS/semantic-model-authoring"; why = 'permissions and RLS deployment via REST' },
             @{ ref = "$KP/pbip/skills/tmdl"; why = 'role/tablePermission TMDL syntax' },
+            @{ ref = "$CS/fabric-ai-readiness/SKILL.md"; why = 'house workflow you follow for AI readiness: classes of change, what you draft versus apply, the hand-over package and the security rules - WINS on who does what' },
             @{ ref = "$MS/semantic-model-authoring/references/semantic-model-ai-readiness.md"; why = 'AI readiness checklist and the agent-editable vs user-configured split this agent follows' },
             @{ ref = "$KP/semantic-models/skills/semantic-model/references/ai-copilot-readiness.md"; why = 'what reaches Copilot grounding (200-character descriptions, synonyms, hidden objects); its direct Copilot-folder editing route is not used here' },
             @{ ref = "$KP/semantic-models/skills/organize-semantic-model/references/naming-rules.md"; why = 'business-name rules for AI-facing metadata (reference only; house naming in fabric-tmdl wins)' }
         )
         playbook = @('Inventory existing roles, tablePermissions, descriptions, synonyms and linguistic schema before changing anything.', 'Implement RLS/OLS as roles with explicit filter expressions; role, RLS and OLS changes need the approval token in your WORK ORDER.', 'Agent-editable within your WORK ORDER: descriptions (front-load the first 200 characters), data categories and other standard model properties; renames only with the approval token.', 'Draft only, never written: AI instructions, AI data schema (including its synonyms), verified answers and any other Prep data for AI content (the model''s `Copilot/` folder, LSDL Copilot entries). Return the drafts in your WORK RESULT for the user to apply in Power BI (Prep data for AI); upstream guidance that edits these files directly is not followed.', 'Preserve existing `Copilot/` content and linguistic metadata during every other edit; if a tool or deployment path cannot guarantee that, stop and return NEEDS INPUT.', 'State the security impact explicitly in the WORK RESULT (who gains/loses visibility).')
-        validate = @('Every role has at least one tablePermission; filter DAX compiles; test with a role-scoped EVALUATE when a live model is available; no PII in descriptions.', 'Every recommendation is labelled agent-editable (applied, with evidence) or user-configured (draft); the `Copilot/` folder is unchanged.')
+        validate = @('Every role has at least one tablePermission; filter DAX compiles; test with a role-scoped EVALUATE when a live model is available; no PII in descriptions.', 'Every recommendation is labelled AGENT-EDITABLE (applied, with evidence), USER-CONFIGURED (draft) or HUMAN SETTING (reported only); the `Copilot/` folder is unchanged.')
         tools = @('local TMDL edit; powerbi-modeling-mcp/* security_role operations on live models; REST for role membership.')
         avoid = @('Changing role membership in PROD without approval.', 'Weakening an existing filter to make a query work.', 'Writing or regenerating AI instructions, AI data schema, verified answers or other `Copilot/` files.', 'Promising that Prep data for AI content deploys or round-trips through TMDL, REST or Git.')
     }
@@ -11681,10 +12161,11 @@ $agentKnowledge = @{
             @{ ref = "$KP/tabular-editor/skills/te2-cli"; why = 'running BPA and schema checks from the TE2 CLI' },
             @{ ref = "$KP/semantic-models/skills/semantic-model"; why = 'VertiPaq/size and model audit' },
             @{ ref = "$MS/semantic-model-authoring"; why = 'DAX regression via REST' },
-            @{ ref = "$CS/fabric-tmdl/SKILL.md"; why = 'post-edit checklist' }
+            @{ ref = "$CS/fabric-tmdl/SKILL.md"; why = 'post-edit checklist' },
+            @{ ref = "$CS/fabric-ai-readiness/SKILL.md"; why = 'validation ladder L0 to L3 (section 7) and the AI readiness checks you run' }
         )
-        playbook = @('Run the fabric-tmdl post-edit checklist on every changed file.', 'After organisation, rename or metadata work: check downstream impact (reports and field references bound to changed objects, via lineage when available) and that the model''s `Copilot/` folder is unchanged; a rename without a rebinding plan is a FAIL.', 'If Tabular Editor 2 is found in tool-status, run BPA against the model; otherwise apply the top BPA rules manually (unused columns, missing formatStrings, bidirectional filters, high-cardinality text columns).', 'Run regression DAX queries provided by 014 (or write minimal ones) and compare results.', 'For Direct Lake models check fallback behaviour and column count/size hot spots.')
-        validate = @('Report a table: check -> result -> evidence. FAIL any check you could not run; never mark it as passed.')
+        playbook = @('Run the fabric-tmdl post-edit checklist on every changed file.', 'Name the level of every check, as defined in fabric-ai-readiness section 7: L0 offline (files only: no network, no live model, no Desktop), L1 local tool (TE2 or `te` on the local files, only when tool-status says found), L2 live model (the Master-opened modeling MCP connection or REST executeQueries), L3 Power BI Desktop or service (a person; report NOT RUN unless the user confirms). Never report a check at a higher level than it was run, and never call an L2 or L3 check offline.', 'After organisation, rename or metadata work: check downstream impact (reports and field references bound to changed objects, via lineage when available) and that the model''s `Copilot/` folder is unchanged; a rename without a rebinding plan is a FAIL.', 'If Tabular Editor 2 is found in tool-status, run BPA against the model; otherwise apply the top BPA rules manually (unused columns, missing formatStrings, bidirectional filters, high-cardinality text columns).', 'Run regression DAX queries provided by 014 (or write minimal ones) and compare results.', 'For Direct Lake models check fallback behaviour and column count/size hot spots.')
+        validate = @('Report a table: check -> level (L0-L3) -> result -> evidence. A check you could not run is NOT RUN with the reason, never passed and never guessed; with any NOT RUN or FAIL line the overall result is not a pass.')
         tools = @('execute only (TE2 CLI, sqlcmd for source checks, REST); powerbi-modeling-mcp/* trace/dax_query for live diagnostics. You do not edit.')
         avoid = @('Fixing defects yourself - return them to the owning worker via the Lead.')
     }
@@ -11821,23 +12302,24 @@ $agentKnowledge = @{
             @{ ref = "$MS/sqldw-cli"; why = 'Warehouse T-SQL authoring, read-only analytics, performance diagnostics' },
             @{ ref = "$MC/SQLDW-AUTHORING-CORE.md"; why = 'warehouse T-SQL constraints' },
             @{ ref = "$MC/SQLDW-CONSUMPTION-CORE.md"; why = 'read-only query patterns' },
-            @{ ref = "$CS/fabric-cli-policy/SKILL.md"; why = 'sqlcmd -G and TDS fallback ladder' }
+            @{ ref = "$CS/fabric-cli-policy/SKILL.md"; why = 'SQL permission classes S0-S4, the route order (sqlcmd, Fabric Data Warehouse MCP, alternates) and the TDS fallback ladder' }
         )
-        playbook = @('Read existing schema (INFORMATION_SCHEMA / sys views) before DDL.', 'Author idempotent scripts (IF NOT EXISTS / CREATE OR ALTER), parameterized by environment.', 'Execute with sqlcmd -G when tool-status says found and TDS is reachable; otherwise return the script with the REST/portal fallback.')
-        validate = @('Script executes without error; row counts or object existence confirmed; no cross-database references unsupported by Warehouse.')
-        tools = @('sqlcmd (path from tool-status); Fabric MCP/* for warehouse items; fab api for endpoints. If 1433 is blocked on THIS machine, use the fabric-cli-policy fallback and say so.')
-        avoid = @('Assuming a TDS block is global.', 'Unsupported T-SQL features (check the core doc).')
+        playbook = @('Read existing schema (INFORMATION_SCHEMA / sys views) before DDL.', 'Classify every statement first (fabric-cli-policy, SQL work): S1 metadata read and S2 data read run inside your WORK ORDER; S3 (any statement that changes data or schema) is an environment-changing action and runs only from a script the user has seen, with the approval token in your WORK ORDER; S4 administration is not yours - return it for the 040 team.', 'Author idempotent scripts (IF NOT EXISTS / CREATE OR ALTER), parameterized by environment.', 'Execute with sqlcmd -G when tool-status says found and TDS is reachable. The Fabric Data Warehouse MCP (`executeSQL`, preview) is the second route and only when it is callable in this session (its tool is in your tool list - tool-status `fabricDataWarehouseMcp.configured` alone is not enough): it runs whatever statement it is given, so the same classes apply, and S3 goes through it only when sqlcmd is impossible and the approval names that route. Otherwise return the script with the pipeline/portal fallback.')
+        validate = @('Script executes without error; row counts or object existence confirmed; no cross-database references unsupported by Warehouse.', 'The result names the class of each statement run (S1-S3), the route used, and for the MCP route the state reached (configured / callable / signed in / executed).')
+        tools = @('sqlcmd (path from tool-status); fabric-dw-global/* or fabric-dw-item/* (`executeSQL`) only when the user configured that server and it is callable; Fabric MCP/* for warehouse items; fab api for endpoints. If 1433 is blocked on THIS machine, use the fabric-cli-policy fallback and say so.')
+        avoid = @('Assuming a TDS block is global.', 'Unsupported T-SQL features (check the core doc).', 'Treating a SQL tool being present as permission to change data.', 'Adding the Fabric Data Warehouse MCP server to mcp.json yourself, or calling it configured, connected or available without the evidence for that state.')
     }
     'sql-database-agent' = @{
         skills = @(
             @{ ref = "$MS/sqldb-cli"; why = 'Fabric SQL Database authoring, querying and diagnostics' },
             @{ ref = "$MC/SQLDB-AUTHORING-CORE.md"; why = 'OLTP features: temporal, JSON, vectors' },
-            @{ ref = "$MC/SQLDB-CONSUMPTION-CORE.md"; why = 'query patterns' }
+            @{ ref = "$MC/SQLDB-CONSUMPTION-CORE.md"; why = 'query patterns' },
+            @{ ref = "$CS/fabric-cli-policy/SKILL.md"; why = 'SQL permission classes S0-S4 and the route order' }
         )
-        playbook = @('Distinguish OLTP SQL Database from Warehouse - do not apply Warehouse constraints here.', 'Author procedures/temporal/JSON/vector objects idempotently; execute via sqlcmd when available.')
-        validate = @('Objects exist; procedures execute; security (roles/permissions) explicit.')
-        tools = @('sqlcmd; Fabric MCP/*; fab api.')
-        avoid = @('Mixing Warehouse and SQL Database guidance.')
+        playbook = @('Distinguish OLTP SQL Database from Warehouse - do not apply Warehouse constraints here.', 'Classify every statement first (fabric-cli-policy, SQL work): S1 and S2 reads run inside your WORK ORDER; S3 (any change to data or schema) runs only from a script the user has seen, with the approval token in your WORK ORDER; S4 administration goes back for the 040 team.', 'Author procedures/temporal/JSON/vector objects idempotently; execute via sqlcmd when available.')
+        validate = @('Objects exist; procedures execute; security (roles/permissions) explicit.', 'The result names the class of each statement run.')
+        tools = @('sqlcmd; Fabric MCP/*; fab api. You hold no grant for the Fabric Data Warehouse MCP.')
+        avoid = @('Mixing Warehouse and SQL Database guidance.', 'Treating a SQL tool being present as permission to change data.')
     }
     'dataflows-gen2-agent' = @{
         skills = @(
@@ -11868,7 +12350,7 @@ $agentKnowledge = @{
             '**No round-trip.** Never send a getDefinition answer back as it is, and never to another workspace. Edit a copy of the target''s current definition; blocks you did not change are trusted by the check, everything else is checked.',
             '**Change plan and recovery.** Return the change plan the check prints (activities added, removed, changed; every binding that changes) and state the recovery: re-send the kept definition to the same pipeline and confirm it by read-back.',
             '**Approval.** A save to a workspace is an environment-changing action. Without the token in `approvals granted`, return NEEDS APPROVAL with the change plan and a proposed token `APPROVED:DEPLOY:<pipeline name>`. `recreateTables: true`, an unverified activity type and a cross-workspace reference each need the user''s explicit confirmation before the matching switch of the check is used.',
-            '**Scope.** Only `RESULT: PASS` allows the save. BLOCKED -> fix or ask. UNCHECKED -> say what could not be checked and ask. Send only the approved change, as the `pipeline-content.json` part.',
+            '**Scope.** Only `RESULT: PASS` allows the save. BLOCKED -> fix or ask; it is never saved. UNCHECKED -> never saved on your own decision: say what could not be checked and return NEEDS INPUT; only a later WORK ORDER that carries the user''s decision on exactly those points, together with the token, allows it. A check that could not be run at all counts as UNCHECKED for every point; without its change plan you return NEEDS INPUT, not NEEDS APPROVAL. Send only the approved change, as the `pipeline-content.json` part.',
             '**Read back.** Read the definition again after the save and compare it with what you sent; a difference is a failure to report, not to repair silently.',
             '**Validate bindings.** Run the check on the read-back definition with the same inventory.',
             '**Run.** Execute only a synthetic pipeline, or the real one when the WORK ORDER says the user authorised that run; otherwise report the run as NOT EXECUTED. A SQL analytics endpoint refresh is judged by its per-table output, not by the activity status alone.',
@@ -11876,7 +12358,7 @@ $agentKnowledge = @{
             '**Fail closed.** Whenever a safeguard cannot be decided, stop and return NEEDS INPUT or NEEDS APPROVAL - never proceed on an assumption.',
             '**Local authoring** (no workspace is touched): read pipeline-content.json fully and map activities and dependsOn chains. Use only activity types of the fabric-pipelines matrix, with the exact letter case; an activity without a verified contract is built in the Fabric editor by the user and its JSON copied, never invented. Wire Variable Library values instead of literal ids; make schedule, retry and failure paths explicit. Run the pipeline check (`-Format Git` for a file in a Git-connected folder) and quote its RESULT line.'
         )
-        validate = @('The pipeline check result line is quoted; BLOCKED or UNCHECKED results were not saved.', 'Every dependsOn target exists; parameters or Variable Library values for environment-specific ids; retry policy on remote activities.', 'For a live change: current definition kept, change plan approved, read-back compared, run executed or marked NOT EXECUTED.')
+        validate = @('The pipeline check result line is quoted; a BLOCKED result was never saved, and an UNCHECKED result (or a check that could not be run) was not saved unless the WORK ORDER carried the user''s decision on each unchecked point.', 'Every dependsOn target exists; parameters or Variable Library values for environment-specific ids; retry policy on remote activities.', 'For a live change: current definition kept, change plan approved, read-back compared, run executed or marked NOT EXECUTED.')
         tools = @('local JSON edit (default); `.github/agent-docs/Test-PipelineDefinition.ps1` (offline check); Fabric MCP/* or fab api to read and deploy live definitions.')
         avoid = @('Hardcoded workspace/item GUIDs in activities.', 'Sending a definition read from one workspace to another.', 'Reporting an HTTP success as proof that a pipeline works.', 'Activity types or properties that are not in the fabric-pipelines matrix or the editor''s JSON.')
     }
@@ -11895,19 +12377,20 @@ $agentKnowledge = @{
     }
     'fabric-intelligence-ontology-agent' = @{
         skills = @(
-            @{ ref = "$MS/fabriciq"; why = 'FabricIQ MCP: natural-language questions over existing Power BI reports and semantic models (read-only; not Ontology work)' },
+            @{ ref = "$MS/fabriciq"; why = 'Fabric IQ MCP: questions over existing Power BI reports and semantic models (read-only; not Ontology work)' },
             @{ ref = "$MS/ontology-cli"; why = 'Fabric Ontology items: legacy V1 definition authoring and questions over new-experience (V2) Ontologies' },
-            @{ ref = "$MS/search-consumption-cli"; why = 'search over Fabric items' }
+            @{ ref = "$MS/search-consumption-cli"; why = 'search over Fabric items' },
+            @{ ref = "$CS/fabric-cli-policy/SKILL.md"; why = 'remote MCP servers: what Fabric IQ does and does not do, and the five evidence states (documented, configured, callable, signed in, executed)' }
         )
         playbook = @(
             'These features change quickly: read the skill and check current API behaviour before acting.',
             'Ontology work uses ontology-cli only. Authoring = legacy V1 JSON definitions (create, then updateDefinition after a preview the user approves). Questions = new-experience (V2) Ontologies through the Ontology agent endpoint (its `tools/list` must show `ask_ontology`). V2 authoring or a V1-to-V2 upgrade is unsupported - report it; V1 natural-language queries are unsupported - never hand-compose KQL or SQL from the definition instead.',
-            'fabriciq answers questions over Power BI reports and semantic models; it is never a substitute for Ontology work, and semantic model or DAX authoring belongs to 010 via the Master.',
-            'FabricIQ and the Ontology agent are remote MCP endpoints the installer does not configure: confirm they are callable in this session before relying on them; otherwise return NEEDS INPUT. Data Agents have no dedicated upstream skill in the current catalogs - check current product documentation before acting.'
+            'Fabric IQ MCP is read-only and covers Power BI reports and semantic models only - not dashboards, paginated reports, apps, ontologies or data agents. It has no tool that answers a question: you find the item (`DiscoverArtifacts` / `ResolveFabricItem`), read its metadata and schema, write the DAX yourself and run it with `ExecuteQuery` (250 rows unless `maxRows` is set; one model per call). Row-level and object-level security apply to what it returns, so record the identity the question ran under. It is never a substitute for Ontology work, and semantic model or DAX authoring belongs to 010 via the Master.',
+            'Before relying on Fabric IQ or the Ontology agent, establish the state you can prove (fabric-cli-policy, remote MCP servers): tool-status `fabricIqMcp.configured` says only that an entry exists in `.vscode/mcp.json`; callable means its tools are in your tool list in this session; signed in means a first `DiscoverArtifacts` returned a result. The installer never configures or signs in to these endpoints, and an upstream skill describing one proves nothing about this machine. Not callable: say which state was reached and return NEEDS INPUT asking the Master to route the question to 010 (modeling MCP or REST executeQueries); you do not answer it from another source yourself. Data Agents have no dedicated upstream skill in the current catalogs - check current product documentation before acting.'
         )
-        validate = @('Authoring: the updateDefinition call returned success and a read-back matches the approved preview.', 'Questions: the answer came from the Ontology agent or FabricIQ endpoint, never from a hand-written source query.')
-        tools = @('Fabric MCP/*; fab api; remote FabricIQ or Ontology agent endpoints only when callable in this session.')
-        avoid = @('Assuming last-known API shapes without checking.', 'Using fabriciq for Ontology authoring, or ontology-cli for Power BI report or model questions.', 'Claiming V2 Ontology authoring or upgrade support.')
+        validate = @('Authoring: the updateDefinition call returned success and a read-back matches the approved preview.', 'Questions: the answer came from the Ontology agent or Fabric IQ endpoint, never from KQL or SQL you composed against the underlying source; the result names the state reached (configured / callable / signed in / executed) and quotes the query that was run.')
+        tools = @('Fabric MCP/*; fab api; FabricIQ/* and the Ontology agent endpoint only when callable in this session.')
+        avoid = @('Assuming last-known API shapes without checking.', 'Using Fabric IQ for Ontology authoring, or ontology-cli for Power BI report or model questions.', 'Claiming V2 Ontology authoring or upgrade support.', 'Calling Fabric IQ available, connected or configured without the evidence for that state, or adding it to mcp.json yourself.')
     }
     # ---------------- administration & governance ----------------
     'fabric-administration-governance-team-lead' = @{
@@ -11964,9 +12447,9 @@ $agentKnowledge = @{
             @{ ref = "$MC/SPARK-MONITORING-CORE.md"; why = 'Spark monitoring patterns' },
             @{ ref = "$KP/semantic-models/skills/refresh-semantic-model"; why = 'model refresh history' }
         )
-        playbook = @('Inventory items and jobs (fab, MCP list tools, REST).', 'Diagnose failures from job/refresh history; correlate with recent changes.', 'Governance audits report coverage with scope, denominator and freshness caveats; capacity reads never start, pause or repair anything.', 'Report findings and the owning team for remediation - do not remediate yourself.')
+        playbook = @('Inventory items and jobs (fab, MCP list tools, REST).', 'Diagnose failures from job/refresh history; correlate with recent changes.', 'Governance audits report coverage with scope, denominator and freshness caveats; capacity reads never start, pause or repair anything.', 'Fabric IQ MCP (read-only) may be used to look up a report or semantic model and read its metadata when it is callable in this session; state the evidence state reached (fabric-cli-policy, remote MCP servers). SQL stays at class S1 for you: metadata and query-insight reads, never data changes.', 'Report findings and the owning team for remediation - do not remediate yourself.')
         validate = @('Evidence for each finding (job id, timestamp, error text).')
-        tools = @('read-only: fab ls/get, Fabric MCP/* list tools, REST GETs.')
+        tools = @('read-only: fab ls/get, Fabric MCP/* list tools, REST GETs; FabricIQ/* only when callable in this session.')
         avoid = @('Restarting, cancelling or re-running jobs without approval.', 'Any write mode of onelake-catalog-cli, and capacity start or pause.')
     }
     # ---------------- ALM & DevOps ----------------
@@ -12082,12 +12565,12 @@ $agentKnowledge = @{
             @{ ref = "$MS/sqldw-cli"; why = 'Warehouse/SQL endpoint consumption' },
             @{ ref = "$MS/sqldb-cli"; why = 'SQL Database consumption' },
             @{ ref = "$MC/SQLDW-CONSUMPTION-CORE.md"; why = 'query patterns' },
-            @{ ref = "$CS/fabric-cli-policy/SKILL.md"; why = 'sqlcmd -G and TDS fallback ladder' }
+            @{ ref = "$CS/fabric-cli-policy/SKILL.md"; why = 'SQL permission classes S0-S4, sqlcmd -G and the TDS fallback ladder' }
         )
-        playbook = @('Use sqlcmd -G / pyodbc / SQLAlchemy with Entra auth; parameterize queries.', 'If TDS 1433 fails on this machine, use the fallback ladder and say so - do not generalize the block.')
+        playbook = @('Use sqlcmd -G / pyodbc / SQLAlchemy with Entra auth; parameterize queries.', 'Your SQL stops at class S2 (fabric-cli-policy, SQL work): metadata and data reads for building and validating data-access code. A statement that changes data or schema (S3) is not yours to run - return it for 033 or 034 with the script.', 'If TDS 1433 fails on this machine, use the fallback ladder and say so - do not generalize the block.')
         validate = @('Connection succeeds or fallback used; query results sampled.')
-        tools = @('sqlcmd (path from tool-status), pyodbc/SQLAlchemy; execute only.')
-        avoid = @('String-concatenated SQL; embedded passwords.')
+        tools = @('sqlcmd (path from tool-status), pyodbc/SQLAlchemy; execute only. You hold no grant for the Fabric Data Warehouse MCP.')
+        avoid = @('String-concatenated SQL; embedded passwords.', 'Running a statement that changes data or schema.')
     }
     # ---------------- capability maintenance ----------------
     'capability-maintenance-team-lead' = @{
@@ -13103,9 +13586,12 @@ user questions: approvals and open questions bubble up to the agent you selected
 ### Custom skills (embedded by installer  -- source of truth is the PS1)
 - `.github/skills/fabric-tmdl/SKILL.md`  -- TMDL syntax, indentation, property ordering
 - `.github/skills/fabric-pipelines/SKILL.md`  -- Pipeline activity contract with its evidence, endpoint refresh, portability, safe updates
-- `.github/skills/fabric-cli-policy/SKILL.md`  -- CLI decision policy: prefer `fab`, `az` fallback
+- `.github/skills/fabric-cli-policy/SKILL.md`  -- CLI decision policy: prefer `fab`, `az` fallback; SQL permission
+  classes and route; evidence states for remote MCP servers
 - `.github/skills/fabric-housekeeping/SKILL.md`  -- Where agent working files go, end-of-task cleanup,
   concurrent sessions, credentials in files, housekeeping preview and execute
+- `.github/skills/fabric-ai-readiness/SKILL.md`  -- Preparing a semantic model for Copilot and data agents: what
+  agents change, what they only draft, what stays with the user, and the validation ladder
 - `.github/skills/pbiviz-*/SKILL.md`  -- six PBIVIZ house skills: PBIP reconstruction, source conversion,
   IBCS semantic contract, interaction regression, release safety, ALM and release
 
@@ -13133,6 +13619,13 @@ reuse it and never try to connect themselves. For Fabric MCP the owning Team Lea
 makes one cheap read-only call on first live use. If either is unavailable, the
 REST/CLI fallback described in `working-flow-reference.md` applies. Mind the
 ~128-tool chat picker budget.
+
+Two remote Microsoft-hosted MCP servers are known to the kit but never added or signed
+in to by it: Fabric IQ (read-only questions over reports and semantic models) and the
+Fabric Data Warehouse server (preview; runs T-SQL, including changes). tool-status
+`fabricIqMcp` / `fabricDataWarehouseMcp` only say whether `.vscode/mcp.json` holds an
+entry. Agents report the state they can prove - documented, configured, callable,
+signed in, executed - as defined in `fabric-cli-policy`.
 
 ### Microsoft skills (cloned repo -- registered in `chat.agentSkillsLocations`)
 - `skills-for-fabric/skills/`  -- Spark, SQL, Eventhouse, Power BI, Medallion, OneLake catalog, Ontology
@@ -13254,7 +13747,7 @@ the mapped repository, active branch, status, remote, environment and write poli
 
 | Source | Location | Updated |
 |--------|----------|---------|
-| Custom (TMDL, Pipelines, CLI policy, Housekeeping, six PBIVIZ skills) | `.github/skills/` | Re-run installer |
+| Custom (TMDL, Pipelines, CLI policy, Housekeeping, AI readiness, six PBIVIZ skills) | `.github/skills/` | Re-run installer |
 | Microsoft skills-for-fabric | `skills-for-fabric/` | Offered on session start / via Capability Maintenance |
 | Kurt/data-goblin plugins | `power-bi-agentic-development/` | Offered on session start / via Capability Maintenance |
 '@
@@ -13278,9 +13771,9 @@ Fabric-Agentic-Workspace.code-workspace
 Thumbs.db
 .DS_Store
 
-# Fabric local cache
-.pbi/
-*.pbicache
+# Power BI project files local to one user and machine (the rules Power BI Desktop writes itself)
+**/.pbi/localSettings.json
+**/.pbi/cache.abf
 
 # Machine-specific tool inventory (regenerated by the installer each run)
 .github/agent-docs/tool-status.json
@@ -13319,7 +13812,7 @@ if (-not (Test-Path $gitignorePath)) {
         -Rules @('source-control-repositories/', $workspaceFileName, '.github/agent-docs/local/')
     Add-GitIgnoreRules -Path $gitignorePath -Heading 'VS Code local' -Rules @('.vscode/')
     Add-GitIgnoreRules -Path $gitignorePath -Heading 'Operating-system files' -Rules @('Thumbs.db', '.DS_Store')
-    Add-GitIgnoreRules -Path $gitignorePath -Heading 'Fabric local cache' -Rules @('.pbi/', '*.pbicache')
+    Add-PowerBiProjectIgnoreRules -Path $gitignorePath
     Add-GitIgnoreRules -Path $gitignorePath -Heading 'Machine-specific tool inventory' `
         -Rules @('.github/agent-docs/tool-status.json', '.github/agent-docs/session-status.last.txt')
     Add-GitIgnoreRules -Path $gitignorePath -Heading 'Machine-specific self-test / guardrail report' `
@@ -13377,8 +13870,7 @@ if (-not $EmitAgentsTo -and $pbivizMapReadable -and $pbivizDecision -ne 'not-ask
             Write-Host "  WARNING: this folder is inside a OneDrive-synced location." -ForegroundColor Yellow
             Write-Host "  Sync clients rewrite and lock files inside .git and can corrupt the repository." -ForegroundColor Yellow
             Write-Host "  Recommended: choose a non-synced folder (re-run the installer and pick another workspace path)." -ForegroundColor Yellow
-            $syncAns = Read-Host '  Initialize Git here anyway? (y/N)'
-            $allowSynced = ($syncAns -match '^\s*(y|yes)\s*$')
+            $allowSynced = Read-ExplicitYes '  Initialize Git here anyway? (y/N)'
         }
         $pbivizInit = Initialize-PbivizRepository -Root $pbivizRootPath -FolderWasEmpty:$pbivizFolderWasEmpty -AllowSyncedPath:$allowSynced -OuterRoot $rootPath
         $pbivizInitStatus = $pbivizInit.InitStatus
@@ -13490,8 +13982,7 @@ if (-not $EmitAgentsTo) {
     Write-Host "      in windows that contain this workspace - never in unrelated projects." -ForegroundColor DarkGray
     Write-Host "  Edited in place (your other settings, comments and formatting are kept):" -ForegroundColor DarkGray
     Write-Host "    $userSettingsPath" -ForegroundColor DarkGray
-    $userAns = Read-Host '  Enable the agent team in your VS Code user settings now? (Y/n)'
-    if ($userAns -notmatch '^\s*(n|no)\s*$') {
+    if (Read-DefaultYes '  Enable the agent team in your VS Code user settings now? (Y/n)') {
         try {
             $ur = Update-UserSettingsInPlace -Path $userSettingsPath -SkillLocations $relativeSkillLocs
             $userLevelEnabled = $true
@@ -13539,8 +14030,7 @@ if (-not $EmitAgentsTo -and -not $userLevelEnabled) {
             Write-Host "    $($uw.Path)" -ForegroundColor Yellow
             Write-Host "      $($why -join '; ')" -ForegroundColor DarkGray
         }
-        $patchAns = Read-Host '  Update their settings block (adds only what is missing)? (Y/n)'
-        if ($patchAns -notmatch '^\s*(n|no)\s*$') {
+        if (Read-DefaultYes '  Update their settings block (adds only what is missing)? (Y/n)') {
             foreach ($uw in $userWsFiles) {
                 try {
                     $hadComments = Update-UserWorkspaceFile -Path $uw.Path -SkillLocations $uw.MissingSkillLocations
@@ -13793,12 +14283,20 @@ try {
     $createdGitRepository = -not (Test-Path "$rootPath\.git")
     if ($createdGitRepository) {
         try { & git init 2>$null | Out-Null } catch { }
-        Write-Host "  Initialised git repository" -ForegroundColor Green
+        if (Test-Path -LiteralPath "$rootPath\.git") { Write-Host "  Initialised git repository" -ForegroundColor Green }
     }
 
-    $gitUser  = git config user.name  2>$null
-    $gitEmail = git config user.email 2>$null
-    if ([string]::IsNullOrWhiteSpace($gitUser) -or [string]::IsNullOrWhiteSpace($gitEmail)) {
+    # Nothing is staged or committed unless Git accepts this folder as its own repository.
+    $gitUsable = Test-GitWorkTreeUsable -Path $rootPath
+    $gitUser = $null; $gitEmail = $null
+    if ($gitUsable) {
+        $gitUser  = git config user.name  2>$null
+        $gitEmail = git config user.email 2>$null
+    }
+    if (-not $gitUsable) {
+        Write-Host "  Warning: Git did not accept this folder as a repository  -- no commit was made." -ForegroundColor Yellow
+        Write-Host "           The workspace files are complete. Run 'git status' in the folder to see Git's reason." -ForegroundColor DarkGray
+    } elseif ([string]::IsNullOrWhiteSpace($gitUser) -or [string]::IsNullOrWhiteSpace($gitEmail)) {
         Write-Host "  Warning: git user.name/email not configured  -- skipping initial commit." -ForegroundColor Yellow
     } else {
         $commitPaths = @()

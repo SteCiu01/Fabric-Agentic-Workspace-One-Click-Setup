@@ -273,3 +273,78 @@ Describe 'Installer source: manifest ownership and purge containment (static)' {
         $m.Groups[1].Value | Should -Match 'Remove-Item -LiteralPath \$backup' -Because 'backup removal must sit outside the rollback try/catch'
     }
 }
+
+Describe 'Final step: a commit only when Git accepts the workspace folder (Canary finding)' {
+
+    BeforeAll {
+        . (Get-InstallerFunctionLoader 'Test-GitWorkTreeUsable')
+        $script:Src9 = Get-Content -LiteralPath $script:Installer -Raw
+        $script:Step9 = [regex]::Match($script:Src9, '(?s)Show-Step 9 \$totalSteps "Finishing Up".*?Setup complete!').Value
+        $script:GitDir = Join-Path $script:Root 'git guard'
+        New-Item -ItemType Directory -Path $script:GitDir | Out-Null
+    }
+
+    It 'a folder without its own .git is not usable, and Git is not even asked' {
+        $d = Join-Path $script:GitDir 'no repo'
+        New-Item -ItemType Directory -Path $d | Out-Null
+        function git { $script:GitAsked = $true; $global:LASTEXITCODE = 0; 'true' }
+        $script:GitAsked = $false
+        Test-GitWorkTreeUsable -Path $d | Should -BeFalse -Because 'after a failed git init the next commands would act on an enclosing repository'
+        $script:GitAsked | Should -BeFalse
+    }
+
+    It 'no path and a missing folder are not usable' {
+        Test-GitWorkTreeUsable -Path '' | Should -BeFalse
+        Test-GitWorkTreeUsable -Path (Join-Path $script:GitDir 'does not exist') | Should -BeFalse
+    }
+
+    It 'is usable when Git answers true with exit code 0' {
+        $d = Join-Path $script:GitDir 'accepted'
+        New-Item -ItemType Directory -Path (Join-Path $d '.git') -Force | Out-Null
+        function git { $global:LASTEXITCODE = 0; 'true' }
+        Test-GitWorkTreeUsable -Path $d | Should -BeTrue
+    }
+
+    It 'is not usable when Git refuses the folder: <Name>' -TestCases @(
+        @{ Name = 'non-zero exit code'; Exit = 128; Out = '' }
+        @{ Name = 'exit code 0 but not a work tree'; Exit = 0; Out = 'false' }
+        @{ Name = 'exit code 0 and no answer'; Exit = 0; Out = '' }
+    ) {
+        param($Name, $Exit, $Out)
+        $d = Join-Path $script:GitDir ('refused ' + [guid]::NewGuid().ToString('N').Substring(0, 6))
+        New-Item -ItemType Directory -Path (Join-Path $d '.git') -Force | Out-Null
+        $script:FakeExit = $Exit; $script:FakeOut = $Out
+        function git { $global:LASTEXITCODE = $script:FakeExit; if ($script:FakeOut) { $script:FakeOut } }
+        Test-GitWorkTreeUsable -Path $d | Should -BeFalse
+    }
+
+    It 'never throws when Git itself fails to run or writes an error' {
+        $d = Join-Path $script:GitDir 'throws'
+        New-Item -ItemType Directory -Path (Join-Path $d '.git') -Force | Out-Null
+        function git { throw 'fatal: detected dubious ownership in repository' }
+        { Test-GitWorkTreeUsable -Path $d } | Should -Not -Throw
+        Test-GitWorkTreeUsable -Path $d | Should -BeFalse
+    }
+
+    It 'real Git: an empty .git folder is not a repository, so nothing would be committed' -Skip:(-not (Get-Command git -CommandType Application -ErrorAction SilentlyContinue)) {
+        $d = Join-Path $script:GitDir 'empty git folder'
+        New-Item -ItemType Directory -Path (Join-Path $d '.git') -Force | Out-Null
+        Test-GitWorkTreeUsable -Path $d | Should -BeFalse
+    }
+
+    It 'the final step asks before it stages, and reports the skipped commit as a warning' {
+        $script:Step9 | Should -Not -BeNullOrEmpty
+        $guard = $script:Step9.IndexOf('$gitUsable = Test-GitWorkTreeUsable -Path $rootPath')
+        $guard | Should -BeGreaterThan 0
+        foreach ($cmd in 'git add --', 'git diff --cached', 'git commit', 'git config user.name', 'git ls-files', 'git check-ignore') {
+            $first = $script:Step9.IndexOf($cmd)
+            $first | Should -BeGreaterThan $guard -Because "'$cmd' must come after the check that Git accepts the folder"
+        }
+        $script:Step9 | Should -Match '(?s)if \(-not \$gitUsable\) \{\s*Write-Host "  Warning: Git did not accept this folder as a repository'
+        $script:Step9 | Should -Match '\} elseif \(\[string\]::IsNullOrWhiteSpace\(\$gitUser\)' -Because 'everything that stages or commits sits in the branches after the usable check'
+    }
+
+    It 'only announces a new repository when git init really created one' {
+        $script:Step9 | Should -Match ([regex]::Escape('if (Test-Path -LiteralPath "$rootPath\.git") { Write-Host "  Initialised git repository"'))
+    }
+}

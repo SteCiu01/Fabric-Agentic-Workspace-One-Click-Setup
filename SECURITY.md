@@ -65,6 +65,12 @@ The project aims to follow these security principles:
 
 These principles describe the project's intended security model and do not constitute a guarantee that every implementation is free from vulnerabilities.
 
+## Installer consent
+
+**Nothing optional is installed without a typed Yes.** The installer requires Git and VS Code and stops when they are missing; it never installs them. Every other tool (command-line tools, Python, VS Code extensions) is offered with its own question, and only `Y` or `YES` installs or updates it. Enter, `N`, any other text, an empty answer and a question that receives no answer at all (closed or redirected input, an unattended run) are all treated as No. Looking for tools does not change the user PATH; it is extended only by an install the user approved.
+
+**Remote MCP servers are never configured for you.** The installer does not add, register or sign in to a remote MCP server. Agents hold a grant for a named server only; it takes effect when the user adds that server to `.vscode/mcp.json`. A write-capable server (Fabric Data Warehouse, `executeSQL`) is granted to one agent, and a tool being available is never treated as permission: changes to data or schema need the user's approval token for the named object.
+
 ## Custom visual (PBIVIZ) development safeguards
 
 **User approval boundaries.** Agents stop and ask for an explicit token before they install or download packages (`APPROVED:INSTALL:<visual>`), connect a remote, push, open or merge a pull request, tag, distribute a release, archive a package from outside the build output (bound to its SHA-256) or discard an uncommitted release candidate. A request in plain words is not a token. A merge additionally needs every required review and check reported satisfied by the provider.

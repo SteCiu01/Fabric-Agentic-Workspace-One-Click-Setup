@@ -2,8 +2,10 @@
 # -------------------------------------------------------------------
 # Installer side of the optional PBIVIZ (custom visual) development folder:
 #   * Step 1 prompt flows, driven through the REAL installer with scripted
-#     answers (the run is killed as soon as Step 2 starts, so nothing is
-#     installed, cloned or created beyond the scratch workspace);
+#     answers and its -StopAfterStep1 prompt check: the installer exits by
+#     itself before the prerequisite step, so nothing is detected, installed,
+#     cloned or created beyond the scratch workspace, and no process has to
+#     be killed to guarantee that;
 #   * folder-name validation, the Level 1 repository decision tree, the
 #     outer .gitignore rule, the .vscode/mcp.json merge and the status line,
 #     exercised as the installer's own functions (extracted by AST, never
@@ -60,26 +62,17 @@ BeforeAll {
     }
     function Get-TBytes { param([string]$Path) if (Test-Path -LiteralPath $Path) { return [Convert]::ToBase64String([IO.File]::ReadAllBytes($Path)) } return $null }
 
-    # Runs the REAL installer through Step 1 against an existing scratch workspace:
+    # Runs the REAL installer's Step 1 questions against an existing scratch workspace:
     # option 1, the workspace path, zero Fabric workspaces, then $Pbiviz answers,
-    # then "no business repositories". Killed as soon as Step 2 starts.
+    # then "no business repositories". The installer stops by itself after Step 1.
+    $script:Step1Runs = New-Object 'System.Collections.Generic.List[object]'
+    $script:StopMarker = '\[prompt check\] Step 1 complete\. Stopped before the prerequisite step'
     function Invoke-Step1Pbiviz {
         param([string]$Workspace, [string[]]$Pbiviz, [int]$TimeoutSec = 120)
         $answers = @('1', $Workspace, '0') + $Pbiviz + @('n', '')
-        $answersFile = Join-Path $script:Root ([guid]::NewGuid().ToString('N') + '.txt')
-        [IO.File]::WriteAllText($answersFile, (($answers -join "`r`n") + "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
-        $outFile = "$answersFile.out"
-        $cmd = 'set "USERPROFILE={2}"&& set FABRIC_AGENTIC_SKIP_VSCODE_LAUNCH=1&& powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{0}" < "{1}" > "{3}" 2>&1' -f $script:Installer, $answersFile, $script:Root, $outFile
-        $p = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', $cmd -PassThru -WindowStyle Hidden
-        $deadline = (Get-Date).AddSeconds($TimeoutSec)
-        while ((Get-Date) -lt $deadline) {
-            Start-Sleep -Milliseconds 400
-            $text = [string](Get-Content -LiteralPath $outFile -Raw -ErrorAction SilentlyContinue)
-            if ($text -match 'STEP 2 of 9|Press Enter to close|^ERROR' -or $p.HasExited) { break }
-        }
-        if (-not $p.HasExited) { & taskkill.exe /PID $p.Id /T /F 2>$null | Out-Null }
-        Start-Sleep -Milliseconds 300
-        return [string](Get-Content -LiteralPath $outFile -Raw -ErrorAction SilentlyContinue)
+        $r = Invoke-InstallerPromptCheck -Answers $answers -ProfileRoot $script:Root -TimeoutSec $TimeoutSec
+        $script:Step1Runs.Add($r)
+        return $r.Output
     }
     function Write-TMap {
         param([string]$Workspace, [string]$Json)
@@ -105,13 +98,23 @@ Describe 'Step 1: PBIVIZ prompt (real installer, scripted answers)' {
 
     # Note: with redirected stdin, Read-Host prompt texts are not echoed to the transcript;
     # assertions use the installer's Write-Host lines and the static prompt text instead.
-    It 'declining (or EOF) creates nothing and continues to Step 2' {
+    It 'declining creates nothing and completes Step 1' {
         $ws = New-TDir 'ws'
         $out = Invoke-Step1Pbiviz -Workspace $ws -Pbiviz @('n')
         $out | Should -Match 'PBIVIZ DEVELOPMENT \(OPTIONAL\)'
         $script:InstallerRaw | Should -Match ([regex]::Escape("'  Create a dedicated folder for Power BI custom visual development? (y/N)'"))
         $out | Should -Match 'No PBIVIZ folder'
-        $out | Should -Match 'STEP 2 of 9'
+        $out | Should -Match $script:StopMarker
+        Test-Path -LiteralPath (Join-Path $ws '0 - PBIVIZ Developing Environment') | Should -BeFalse
+    }
+
+    It 'end of input at the PBIVIZ question is a No' {
+        $ws = New-TDir 'ws'
+        # The answers stop right before the PBIVIZ question: it and every later question get end of input.
+        $r = Invoke-InstallerPromptCheck -Answers @('1', $ws, '0') -ProfileRoot $script:Root
+        $script:Step1Runs.Add($r)
+        $r.Output | Should -Match 'No PBIVIZ folder'
+        $r.Output | Should -Match $script:StopMarker
         Test-Path -LiteralPath (Join-Path $ws '0 - PBIVIZ Developing Environment') | Should -BeFalse
     }
 
@@ -119,7 +122,7 @@ Describe 'Step 1: PBIVIZ prompt (real installer, scripted answers)' {
         $ws = New-TDir 'ws'
         $out = Invoke-Step1Pbiviz -Workspace $ws -Pbiviz @('y', '')
         $out | Should -Match ([regex]::Escape("Will create: $(Join-Path $ws '0 - PBIVIZ Developing Environment')"))
-        $out | Should -Match 'STEP 2 of 9'
+        $out | Should -Match $script:StopMarker
         Test-Path -LiteralPath (Join-Path $ws '0 - PBIVIZ Developing Environment') | Should -BeFalse -Because 'Step 1 only collects the decision'
     }
 
@@ -145,7 +148,7 @@ Describe 'Step 1: PBIVIZ prompt (real installer, scripted answers)' {
         $ws = New-TDir 'ws'
         $out = Invoke-Step1Pbiviz -Workspace $ws -Pbiviz @('y', '..', '..', '..', '..', '..')
         $out | Should -Match 'No valid folder name given'
-        $out | Should -Match 'STEP 2 of 9'
+        $out | Should -Match $script:StopMarker
     }
 
     It 're-asks when the mapping records enabled:false' {
@@ -185,6 +188,18 @@ Describe 'Step 1: PBIVIZ prompt (real installer, scripted answers)' {
         $out = Invoke-Step1Pbiviz -Workspace $ws -Pbiviz @()
         $out | Should -Match 'unreadable or invalid; it is preserved'
         Get-TBytes $map | Should -Be $before
+    }
+
+    It 'every run stopped by itself before Step 2, left no process and started no external program' {
+        $script:Step1Runs.Count | Should -BeGreaterThan 0
+        foreach ($r in $script:Step1Runs) {
+            $r.TimedOut | Should -BeFalse
+            $r.ExitCode | Should -Be 0
+            @($r.Survivors).Count | Should -Be 0
+            @($r.TripwireHits) | Should -BeNullOrEmpty
+            $r.Output | Should -Match $script:StopMarker
+            $r.Output | Should -Not -Match 'STEP 2 of 9'
+        }
     }
 }
 
@@ -357,8 +372,8 @@ Describe 'Level 1: repository initialisation decision tree' {
     }
 
     It 'the installer asks before initialising in a synced path, default No' {
-        $script:InstallerRaw | Should -Match ([regex]::Escape("Read-Host '  Initialize Git here anyway? (y/N)'"))
-        $script:InstallerRaw | Should -Match ([regex]::Escape("`$allowSynced = (`$syncAns -match '^\s*(y|yes)\s*$')"))
+        # Only an explicit Yes allows it: the answer goes through the fail-closed consent helper.
+        $script:InstallerRaw | Should -Match ([regex]::Escape("`$allowSynced = Read-ExplicitYes '  Initialize Git here anyway? (y/N)'"))
     }
 }
 

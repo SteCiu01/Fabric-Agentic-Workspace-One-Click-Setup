@@ -516,6 +516,171 @@ Describe 'Windows paths: spaces and more than 260 characters (HK-08)' {
         (Restore-AgentWorkspaceQuarantine -WorkspaceRoot $root -PlanId $plan.planId).status | Should -Be 'DONE'
         [IO.File]::ReadAllText("$long\definition copy.json") | Should -Be '{ "k": 1 }'
     }
+
+    It 'previews, quarantines and restores files whose names are not ASCII or need quoting' {
+        # Built from code points so this file stays plain ASCII: accented Latin, Greek, CJK, and
+        # characters a shell would otherwise treat specially (space, apostrophe, brackets, ampersand, percent).
+        $accented = 'Verkaufs' + [char]0x00FC + 'bersicht ' + [char]0x00E9 + 't' + [char]0x00E9
+        $greek = [string][char]0x0394 + [char]0x03B5 + [char]0x03B4 + [char]0x03BF + [char]0x03BC + [char]0x03AD + [char]0x03BD + [char]0x03B1
+        $cjk = [string][char]0x62A5 + [char]0x8868
+        $quoting = "it's [draft] & 100% (v2)"
+        $root = Join-Path $script:Base ("unicode ws $greek")
+        New-Item -ItemType Directory -Path $root | Out-Null
+        $task = New-AgentTaskFolder -WorkspaceRoot $root -Project $accented -Topic 'names'
+        Test-Path -LiteralPath $task | Should -BeTrue
+        $files = [ordered]@{
+            "$accented.out.txt"       = 'accented'
+            "$greek\$cjk.json"        = 'greek folder, cjk file'
+            "$quoting.txt"            = 'quoting'
+            "$quoting\$accented.csv"  = 'both'
+        }
+        # Created with .NET calls: square brackets in a name must not be read as a wildcard here.
+        foreach ($rel in $files.Keys) {
+            $full = Join-Path $task $rel
+            [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($full))
+            [IO.File]::WriteAllText($full, $files[$rel], $script:Utf8)
+        }
+        Close-AgentTaskFolder -Path $task | Out-Null
+        Set-HkMarker $task @{ closedUtcTicks = (Get-HkOldTicks) }
+
+        $before = Get-HkListing $root
+        $preview = Get-AgentWorkspacePreview -WorkspaceRoot $root
+        $plan = $preview.Plan
+        foreach ($rel in $files.Keys) {
+            $leaf = Split-Path $rel -Leaf
+            $entry = @($plan.entries | Where-Object { $_.path.EndsWith('/' + $leaf) })
+            $entry.Count | Should -Be 1 -Because "$leaf is listed exactly once, with its real name"
+            $entry[0].class | Should -Be 'Safe'
+        }
+        # The plan file is JSON on disk: the names must survive being written and read back.
+        $reread = Read-HkPlan $root $plan.planId
+        @($reread.entries | ForEach-Object { $_.path } | Sort-Object) | Should -Be @($plan.entries | ForEach-Object { $_.path } | Sort-Object)
+
+        $r = Invoke-AgentWorkspaceCleanup -WorkspaceRoot $root -PlanId $plan.planId -Approval @($plan.tokens.safe)
+        $r.status | Should -Be 'DONE'
+        @($r.skipped) | Should -BeNullOrEmpty
+        foreach ($rel in $files.Keys) { [IO.File]::Exists((Join-Path $task $rel)) | Should -BeFalse }
+        Invoke-AgentWorkspaceCleanup -WorkspaceRoot $root -PlanId $plan.planId -Approval @($plan.tokens.safe) | Out-Null   # a second run finds nothing left to move
+
+        (Restore-AgentWorkspaceQuarantine -WorkspaceRoot $root -PlanId $plan.planId).status | Should -Be 'DONE'
+        foreach ($rel in $files.Keys) { [IO.File]::ReadAllText((Join-Path $task $rel)) | Should -BeExactly $files[$rel] -Because "$rel is back with its content" }
+        @(Get-HkListing $root | Where-Object { $_ -notmatch '\\_housekeeping\\' }) | Should -Be @($before | Where-Object { $_ -notmatch '\\_housekeeping\\' })
+    }
+
+    It 'flags a possible secret in a file with a non-ASCII name and still never shows the value' {
+        $name = 'Schl' + [char]0x00FC + 'ssel ' + [char]0x5BC6 + [char]0x94A5 + '.out.txt'
+        $root = Join-Path $script:Base 'unicode secret ws'
+        New-Item -ItemType Directory -Path $root | Out-Null
+        $task = New-AgentTaskFolder -WorkspaceRoot $root -Project 'P' -Topic 'secret'
+        Set-HkFile (Join-Path $task $name) ("x`n" + $script:FakeJwt + "`n")
+        Close-AgentTaskFolder -Path $task | Out-Null
+        Set-HkMarker $task @{ closedUtcTicks = (Get-HkOldTicks) }
+        $plan = (Get-AgentWorkspacePreview -WorkspaceRoot $root).Plan
+        $entry = @($plan.entries | Where-Object { $_.path.EndsWith('/' + $name) })
+        $entry.Count | Should -Be 1
+        $entry[0].class | Should -Be 'SecretFlagged'
+        $planText = [IO.File]::ReadAllText((Join-Path $root "$script:AwsName\_housekeeping\preview-$($plan.planId).json"))
+        $planText | Should -Not -Match ([regex]::Escape($script:FakeJwtTail))
+        ($plan | ConvertTo-Json -Depth 10) | Should -Not -Match ([regex]::Escape($script:FakeJwtTail))
+    }
+}
+
+Describe 'Ignore rules for Power BI project files (HK-02)' {
+
+    BeforeAll {
+        . (Get-InstallerFunctionLoader 'Add-GitIgnoreRules', 'Add-PowerBiProjectIgnoreRules')
+        $m = [regex]::Match($script:InstallerText, "(?s)\`$gitignoreContent = @'\r?\n(.*?)\r?\n'@")
+        $m.Success | Should -BeTrue
+        $script:IgnoreTemplate = @($m.Groups[1].Value -split "\r?\n")
+        $script:IgnoreDir = Join-Path $script:Base 'ignore rules'
+        New-Item -ItemType Directory -Path $script:IgnoreDir | Out-Null
+        function New-HkIgnoreFile([string]$Text) {
+            $p = Join-Path $script:IgnoreDir ([guid]::NewGuid().ToString('N').Substring(0, 8) + '.gitignore')
+            [IO.File]::WriteAllText($p, $Text, $script:Utf8)
+            return $p
+        }
+        function Get-HkRules([string]$FilePath) { return @([IO.File]::ReadAllLines($FilePath) | Where-Object { $_.Trim() -and -not $_.Trim().StartsWith('#') } | ForEach-Object { $_.Trim() }) }
+    }
+
+    It 'a new workspace ignores exactly the two per-machine files Power BI Desktop ignores itself' {
+        $rules = @($script:IgnoreTemplate | Where-Object { $_.Trim() -and -not $_.StartsWith('#') })
+        $rules | Should -Contain '**/.pbi/localSettings.json'
+        $rules | Should -Contain '**/.pbi/cache.abf'
+        @($rules | Where-Object { $_ -match '\.pbi' }).Count | Should -Be 2 -Because 'the rest of a .pbi folder (editorSettings.json, unappliedChanges.json) is project content'
+    }
+
+    It 'a new workspace has no rule that hides a whole .pbi folder, and no rule for a file type that does not exist' {
+        $rules = @($script:IgnoreTemplate | Where-Object { $_.Trim() -and -not $_.StartsWith('#') })
+        $rules | Should -Not -Contain '.pbi/'
+        @($rules | Where-Object { $_ -match 'pbicache' }) | Should -BeNullOrEmpty
+        $script:InstallerText | Should -Not -Match "'\*\.pbicache'" -Because 'no code path writes that rule any more'
+    }
+
+    It 'every rule of the new-workspace template is anchored to something the kit creates or documents' {
+        # A plain list on purpose: a new line in the template has to be added here with its reason.
+        $expected = @(
+            'skills-for-fabric/', 'power-bi-agentic-development/', 'source-control-repositories/',
+            '.vscode/', 'Fabric-Agentic-Workspace.code-workspace', 'Thumbs.db', '.DS_Store',
+            '**/.pbi/localSettings.json', '**/.pbi/cache.abf',
+            '.github/agent-docs/tool-status.json', '.github/agent-docs/session-status.last.txt',
+            '.github/agent-docs/guardrail-status.json', '.github/agent-docs/installed-manifest.json',
+            '.github/agent-docs/skill-catalog-state.json', '.github/agent-docs/local/',
+            '.dataprojects/', "/$script:AwsName/"
+        )
+        $rules = @($script:IgnoreTemplate | Where-Object { $_.Trim() -and -not $_.StartsWith('#') })
+        @($rules | Sort-Object) | Should -Be @($expected | Sort-Object)
+        $rules | Should -Not -Contain '/scripts/' -Because 'a root scripts/ folder is ignored only after checking that nothing in it is tracked'
+        $rules | Should -Not -Contain 'scripts/'
+    }
+
+    It 'an existing .gitignore without the rules gets the two files appended and keeps its own lines' {
+        $p = New-HkIgnoreFile "# mine`r`nnode_modules/`r`n*.log`r`n"
+        Add-PowerBiProjectIgnoreRules -Path $p
+        $rules = Get-HkRules $p
+        $rules[0] | Should -Be 'node_modules/'
+        $rules[1] | Should -Be '*.log'
+        $rules | Should -Contain '**/.pbi/localSettings.json'
+        $rules | Should -Contain '**/.pbi/cache.abf'
+        $rules.Count | Should -Be 4
+        [IO.File]::ReadAllText($p).StartsWith("# mine`r`nnode_modules/`r`n*.log`r`n") | Should -BeTrue -Because 'existing content is never rewritten'
+    }
+
+    It 'a second run adds nothing' {
+        $p = New-HkIgnoreFile "node_modules/`r`n"
+        Add-PowerBiProjectIgnoreRules -Path $p
+        $once = [IO.File]::ReadAllText($p)
+        Add-PowerBiProjectIgnoreRules -Path $p
+        [IO.File]::ReadAllText($p) | Should -BeExactly $once
+    }
+
+    It 'an existing broader rule (<Rule>) written by an earlier version is left exactly as it is' -TestCases @(
+        @{ Rule = '.pbi/' }, @{ Rule = '.pbi' }, @{ Rule = '**/.pbi/' }, @{ Rule = '/.pbi/' }, @{ Rule = '  .pbi/  ' }
+    ) {
+        param($Rule)
+        $text = "# Fabric local cache`r`n$Rule`r`n*.pbicache`r`n"
+        $p = New-HkIgnoreFile $text
+        Add-PowerBiProjectIgnoreRules -Path $p
+        [IO.File]::ReadAllText($p) | Should -BeExactly $text -Because 'the broader rule already covers both files, and the installer never removes a line from a .gitignore'
+    }
+
+    It 'a rule for another folder that merely contains the text is not mistaken for the broader rule' {
+        $p = New-HkIgnoreFile "my.pbi/`r`n.pbix`r`n# .pbi/`r`n"
+        Add-PowerBiProjectIgnoreRules -Path $p
+        Get-HkRules $p | Should -Contain '**/.pbi/cache.abf'
+    }
+
+    It 'only one of the two rules present: the missing one is added once' {
+        $p = New-HkIgnoreFile "**/.pbi/cache.abf`r`n"
+        Add-PowerBiProjectIgnoreRules -Path $p
+        $rules = Get-HkRules $p
+        @($rules | Where-Object { $_ -eq '**/.pbi/cache.abf' }).Count | Should -Be 1
+        @($rules | Where-Object { $_ -eq '**/.pbi/localSettings.json' }).Count | Should -Be 1
+    }
+
+    It 'the update path calls this function and no longer lists the old rules' {
+        $script:InstallerText | Should -Match '(?m)^\s+Add-PowerBiProjectIgnoreRules -Path \$gitignorePath\s*$'
+        $script:InstallerText | Should -Not -Match "Fabric local cache"
+    }
 }
 
 Describe 'Command line, as the agents run it (Windows PowerShell 5.1)' {

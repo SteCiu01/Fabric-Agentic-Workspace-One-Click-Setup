@@ -7,7 +7,8 @@
 > `fab` does not cover (SQL/TDS queries and non-Fabric token audiences). On top of
 > those two, a handful of **opt-in specialist CLIs** (`pbir`, Tabular Editor CLI,
 > `pbi-tools`, `sqlcmd`, `gh`, `az devops`) give individual agents extra power for
-> reports, semantic models, SQL, and ALM — installed only if you say yes at setup.
+> reports, semantic models, SQL, and ALM. **Every CLI, `fab` and `az` included, is
+> installed only if you type `Y` or `YES` at setup**; any other answer, or none, skips it.
 
 This document is a practical, opinionated catalogue of the CLI actions that are
 most useful in this workspace. It focuses on the commands a Fabric developer is
@@ -36,9 +37,12 @@ Install / detection:
 
 - **`fab`** (recommended): `pip install ms-fabric-cli` (Python 3.10–3.14). Repo: https://github.com/microsoft/fabric-cli
 - **`az`** (fallback): https://aka.ms/installazurecli
+- Both are **offered** at setup (`Install ... now? (Y/N)`) and installed only on an explicit
+  Yes. Python is offered separately, only when you accepted `fab` and no supported Python exists.
 - **Specialist CLIs**: the installer detects each, prints its provider + purpose, and
   asks Y/N before a best-effort install (see the README **Prerequisites** table and each
   Part II chapter). Provider links are listed per chapter below.
+- A **No** is never remembered: a tool that is still missing is offered again on the next run.
 
 Official references:
 
@@ -253,6 +257,24 @@ AAD/Entra token (`-G`), or your preferred SQL client.
 | Query a Warehouse / Lakehouse SQL endpoint | `sqlcmd -G -S <endpoint>.datawarehouse.fabric.microsoft.com -d <db> -Q "SELECT TOP 10 * FROM dbo.sales"` |
 | Run a SQL script file | `sqlcmd -G -S <endpoint> -d <db> -i script.sql` |
 | Python (pyodbc) with Entra token | `conn = pyodbc.connect(connstr, attrs_before={1256: token})` |
+
+**Permission class first, then the route.** A SQL tool being installed is a way to run a
+statement, never permission to run it. The agents class every statement before choosing a tool
+(full rules: `.github/skills/fabric-cli-policy/SKILL.md`):
+
+| Class | What | Needs |
+|---|---|---|
+| `S0` | Writing or reviewing a script, no connection | nothing |
+| `S1` | Metadata read (`INFORMATION_SCHEMA`, `sys` views) | the work order |
+| `S2` | Data read (`SELECT`), smallest result that answers the question | the work order |
+| `S3` | Data or schema change (`INSERT`, `UPDATE`, `DELETE`, `MERGE`, DDL, `COPY INTO`) | the script shown to you and your approval token; destructive statements need their own |
+| `S4` | Administration (permissions, roles, security policies) | the administration team and its own approval; never a side effect of SQL work |
+
+A statement that cannot be classed is treated as `S3`. Route for a Warehouse or SQL analytics
+endpoint: **`sqlcmd -G`** → the **Fabric Data Warehouse MCP server** (`executeSQL`; preview,
+write-capable, used by the Warehouse SQL agent only, and only when *you* added it to
+`.vscode/mcp.json` and it is callable in the chat) → documented alternates (a pipeline Script
+activity, a notebook, the portal SQL editor) → otherwise the script is returned unrun.
 
 ---
 
@@ -470,7 +492,8 @@ underlying Azure capacity resource is an Azure control-plane action → use `az`
 
 The tools below sit **on top of** `fab`/`az`. Each is an opt-in specialist: the
 installer detects it, prints its provider and purpose, and asks **Y/N** before a
-best-effort install (see the README **Prerequisites** table). Each is **owned by one
+best-effort install (see the README **Prerequisites** table). Only `Y` or `YES` installs;
+Enter, `N`, any other text or no answer at all skips the tool. Each is **owned by one
 team/worker agent** and gated at runtime by `.github/agent-docs/tool-status.json` — an
 agent reads `<key>.found` first, optionally does one live `--version`/`Get-Command`
 re-check, then falls back gracefully when the tool is absent. **None of these is
@@ -548,9 +571,9 @@ testing, refresh and VertiPaq analysis.
 | | |
 |---|---|
 | **Owned by** | **010 Semantic Model Team Lead**, via **016 Semantic Validation & Performance Agent** |
-| **tool-status.json key** | `tabularEditor` (aliases checked: `te`, `TabularEditor.exe`, `TabularEditor2.exe`, `TabularEditor3.exe`) |
+| **tool-status.json keys** | Three products, three keys, never inferred from each other: `tabularEditor` = Tabular Editor 2 (`TabularEditor.exe`, `TabularEditor2.exe`; the only one the installer offers to install); `teCli` = the cross-platform `te` CLI (detected only); `tabularEditor3` = Tabular Editor 3 (`TabularEditor3.exe`, paid; detected only) |
 | **Provider** | Tabular Editor — https://docs.tabulareditor.com |
-| **Two binaries** | `TabularEditor.exe` (TE2 CLI) — stable, Windows-only, free, production-ready. `te` — the new cross-platform CLI, in Limited Public Preview. |
+| **Two command lines** | `TabularEditor.exe` (TE2 CLI) — stable, Windows-only, free, production-ready. `te` — the new cross-platform CLI, a preview with its own release train. |
 
 **`TabularEditor.exe` (TE2 — use for production pipelines today):**
 
@@ -577,10 +600,11 @@ testing, refresh and VertiPaq analysis.
 
 - **Fallback when absent** — author/validate TMDL by hand via the `fabric-tmdl` (house style)
   + data-goblin DAX/naming skills; BPA rules live in the data-goblin `bpa-rules` skill.
-- **Caveats** — the `te` preview is time-limited (expires 2026-09-30); TE3 **desktop** needs a
-  paid licence but the CLIs in CI do not. `te` is **not** a real exe name for TE2 — detection
-  checks all four aliases and stores what was actually found.
-- **Install strategy** — setup tries an automated portable install first (works on open networks);
+- **Caveats** — `te` is a preview: confirm its current status and licence terms in the provider
+  documentation before relying on it. TE3 **desktop** needs a paid licence; running the TE2 CLI in
+  CI does not. The installer never installs or updates `te` or TE3, and an agent uses either only
+  when its own tool-status key reports it as found.
+- **Install strategy (Tabular Editor 2 only, after your Yes)** — setup tries an automated portable install first (works on open networks);
   if that fails it prints the exact link (`releases/latest` → `TabularEditor.Portable.zip`, unzip to
   `%LOCALAPPDATA%\Programs\TabularEditor`). **Corporate security can return that zip empty or block it
   outright** (deep content inspection of executables); an IT/download approval may be required. Drop the
@@ -636,7 +660,7 @@ back into a PBIX/PBIT, convert between serialization formats, and deploy.
 
 | | |
 |---|---|
-| **Owned by** | **033 Warehouse SQL Agent** & **063 SQL, ODBC & Data Access Agent** |
+| **Owned by** | **033 Warehouse SQL Agent** & **063 SQL, ODBC & Data Access Agent** (063 reads only: it stops at class `S2`, see §8) |
 | **tool-status.json key** | `sqlcmd` |
 | **Provider** | Microsoft — modern `go-sqlcmd` (https://aka.ms/go-sqlcmd) |
 | **When to use** | Any T-SQL query/script against a Fabric SQL endpoint, when `fab` data-plane commands aren't enough. |

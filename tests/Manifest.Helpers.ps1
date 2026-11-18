@@ -112,3 +112,288 @@ function Get-GeneratedAgentRecord {
         tailSha256      = $tailSha
     }
 }
+
+# Loads named functions from the installer source into the caller's scope (dot-source the result):
+#   . (Get-InstallerFunctionLoader 'Test-ExplicitYes', 'Read-ExplicitYes')
+# The installer itself is never executed.
+function Get-InstallerFunctionLoader {
+    param([Parameter(Mandatory)][string[]]$Name)
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile((Get-InstallerPath), [ref]$null, [ref]$null)
+    $text = New-Object System.Text.StringBuilder
+    foreach ($n in $Name) {
+        $fn = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $n }, $false) | Select-Object -First 1
+        if (-not $fn) { throw "Function $n is not defined at the top level of the installer." }
+        [void]$text.AppendLine($fn.Extent.Text)
+    }
+    return [scriptblock]::Create($text.ToString())
+}
+
+# Process ids started (directly or indirectly) by $RootId after $Since.
+function Get-DescendantProcessIds {
+    param([int]$RootId, [datetime]$Since)
+    $all = @(Get-CimInstance -ClassName Win32_Process -Property ProcessId, ParentProcessId, CreationDate -ErrorAction SilentlyContinue)
+    $found = New-Object 'System.Collections.Generic.List[int]'
+    $queue = New-Object 'System.Collections.Generic.Queue[int]'
+    $queue.Enqueue($RootId)
+    while ($queue.Count -gt 0) {
+        $current = $queue.Dequeue()
+        foreach ($proc in $all) {
+            $id = [int]$proc.ProcessId
+            if ([int]$proc.ParentProcessId -ne $current -or $found.Contains($id)) { continue }
+            if ($proc.CreationDate -and $proc.CreationDate -lt $Since.AddSeconds(-2)) { continue }   # an older process that reused the parent id
+            $found.Add($id); $queue.Enqueue($id)
+        }
+    }
+    return $found.ToArray()
+}
+
+# Starts one child process with its own environment and standard input, waits a bounded time and
+# returns what it printed. No shell is involved. A child that outlives the timeout is stopped
+# together with its descendants (emergency stop only); whatever is still alive afterwards is
+# listed in Survivors so the caller can fail loudly instead of leaving a process behind.
+function Invoke-BoundedChild {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [string]$Arguments = '',
+        [string]$StdinText = '',
+        [hashtable]$Environment = @{},
+        [string[]]$RemoveEnvironment = @(),
+        [int]$TimeoutSec = 120
+    )
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $FilePath
+    $psi.Arguments = $Arguments
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    foreach ($k in $RemoveEnvironment) { if ($psi.EnvironmentVariables.ContainsKey($k)) { $psi.EnvironmentVariables.Remove($k) } }
+    foreach ($k in $Environment.Keys) { $psi.EnvironmentVariables[$k] = [string]$Environment[$k] }
+    $p = New-Object System.Diagnostics.Process
+    $p.StartInfo = $psi
+    $started = Get-Date
+    [void]$p.Start()
+    $outTask = $p.StandardOutput.ReadToEndAsync()
+    $errTask = $p.StandardError.ReadToEndAsync()
+    try { if ($StdinText) { $p.StandardInput.Write($StdinText) } } catch { }
+    try { $p.StandardInput.Close() } catch { }   # end of input: a further Read-Host gets nothing
+    $timedOut = -not $p.WaitForExit($TimeoutSec * 1000)
+    $survivors = @()
+    $stopped = @()
+    if ($timedOut) {
+        $ids = @(Get-DescendantProcessIds -RootId $p.Id -Since $started) + @($p.Id)
+        $stopped = $ids
+        foreach ($id in $ids) { try { [System.Diagnostics.Process]::GetProcessById($id).Kill() } catch { } }
+        [void]$p.WaitForExit(10000)
+        foreach ($id in $ids) {
+            try { $q = [System.Diagnostics.Process]::GetProcessById($id); if (-not $q.WaitForExit(5000)) { $survivors += $id } } catch { }
+        }
+    }
+    [void]$outTask.Wait(10000); [void]$errTask.Wait(10000)
+    $stdout = if ($outTask.IsCompleted) { [string]$outTask.Result } else { '' }
+    $stderr = if ($errTask.IsCompleted) { [string]$errTask.Result } else { '' }
+    $exit = $null
+    if ($p.HasExited) { $exit = $p.ExitCode }
+    return [pscustomobject]@{
+        ExitCode    = $exit
+        TimedOut    = $timedOut
+        Stopped     = @($stopped)
+        Survivors   = @($survivors)
+        Output      = ($stdout + $stderr)
+        DurationSec = [int]((Get-Date) - $started).TotalSeconds
+    }
+}
+
+# Names a prompt test must never reach: package managers, installers and tool CLIs.
+$script:TripwireCommands = @('winget', 'python', 'python3', 'py', 'pip', 'pip3', 'code', 'code-insiders', 'git', 'az', 'fab', 'npm', 'npx', 'node', 'msiexec', 'curl', 'gh', 'sqlcmd', 'pbir', 'choco', 'dotnet')
+
+# The only commands the installer may be able to reach before its prompt-check stop: console
+# output, questions, path and JSON handling, and creating the workspace folder the user named.
+# Anything else (a new cmdlet, a program, an installer function) fails the check until reviewed.
+$script:PromptCheckAllowedCommands = @(
+    'Write-Host', 'Read-Host', 'Join-Path', 'Split-Path', 'Test-Path', 'New-Item', 'Get-Content', 'ConvertFrom-Json',
+    'ForEach-Object', 'Where-Object', 'Select-Object', 'Sort-Object', 'Out-Null', 'Get-Command', 'Get-FileHash', 'New-Object'
+)
+# .NET members that write files, change the environment, download or start a process.
+$script:PromptCheckForbiddenMembers = @(
+    'SetEnvironmentVariable', 'DownloadFile', 'DownloadString', 'DownloadData', 'OpenRead', 'GetResponse',
+    'WriteAllText', 'WriteAllBytes', 'WriteAllLines', 'AppendAllText', 'Start', 'Delete', 'Move', 'Copy', 'CreateSubKey', 'SetValue'
+)
+
+# Static check that launching a script with -StopAfterStep1 is safe. It reports a problem unless
+#   * -StopAfterStep1 is a switch and the script body holds `if ($StopAfterStep1) { exit 0 }` before Step 2;
+#   * every command that can run before that stop - in the script body and, transitively, in the
+#     script's own functions it calls - is on the allow-list above;
+#   * no forbidden .NET member is used there and no computed command is invoked, except script blocks
+#     written in that same code and the embedded helper that is loaded from a here-string, whose own
+#     top level is held to the same rules.
+# It reads the code, it does not run it: reflection, COM objects and .NET calls outside the member
+# list are beyond what it can see.
+# Returns Problems (empty = no problem found) and the Commands found.
+function Get-PromptCheckAnalysis {
+    param([Parameter(Mandatory)][string]$Text)
+    $L = 'System.Management.Automation.Language'
+    $problems = New-Object 'System.Collections.Generic.List[string]'
+    $commands = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $done = { [pscustomobject]@{ Problems = $problems.ToArray(); Commands = @($commands | Sort-Object) } }
+    $errors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseInput($Text, [ref]$null, [ref]$errors)
+    if (@($errors).Count -gt 0) { $problems.Add("the script does not parse: $($errors[0].Message)"); return (& $done) }
+
+    $param = $null
+    if ($ast.ParamBlock) { $param = $ast.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'StopAfterStep1' } | Select-Object -First 1 }
+    if (-not $param -or $param.StaticType -ne [switch]) { $problems.Add('-StopAfterStep1 is not declared as a switch parameter') }
+    $top = @(); if ($ast.EndBlock) { $top = @($ast.EndBlock.Statements) }
+    $banner = $top | Where-Object { $_.Extent.Text -match '^Show-Step 2\b' } | Select-Object -First 1
+    if (-not $banner) { $problems.Add('Step 2 does not start with a "Show-Step 2" statement of the script body'); return (& $done) }
+    $isStop = {
+        param($s)
+        if ($s.GetType().FullName -ne "$L.IfStatementAst") { return $false }
+        if ($s.Clauses.Count -ne 1 -or $s.ElseClause) { return $false }
+        if ($s.Clauses[0].Item1.Extent.Text.Trim() -ne '$StopAfterStep1') { return $false }
+        $body = @($s.Clauses[0].Item2.Statements)
+        return ($body.Count -eq 1 -and $body[0].GetType().FullName -eq "$L.ExitStatementAst" -and $body[0].Pipeline -and $body[0].Pipeline.Extent.Text.Trim() -eq '0')
+    }
+    $stop = $top | Where-Object { $_.Extent.EndOffset -le $banner.Extent.StartOffset -and (& $isStop $_) } | Select-Object -Last 1
+    if (-not $stop) { $problems.Add('no "if ($StopAfterStep1) { exit 0 }" statement of the script body precedes Step 2'); return (& $done) }
+
+    $functions = @{}
+    foreach ($f in $ast.FindAll({ param($n) $n.GetType().FullName -eq "$L.FunctionDefinitionAst" }, $false)) { $functions[$f.Name] = $f }
+    $region = @($top | Where-Object { $_.Extent.StartOffset -lt $stop.Extent.StartOffset -and $_.GetType().FullName -ne "$L.FunctionDefinitionAst" })
+
+    # Here-strings assigned in the script body, by variable name (the embedded helper lives in one).
+    $hereStrings = @{}
+    foreach ($s in $region) {
+        if ($s.GetType().FullName -ne "$L.AssignmentStatementAst" -or $s.Left.GetType().FullName -ne "$L.VariableExpressionAst") { continue }
+        $value = $null
+        if ($s.Right.GetType().FullName -eq "$L.CommandExpressionAst") { $value = $s.Right.Expression }
+        if ($value -and $value.GetType().FullName -eq "$L.StringConstantExpressionAst" -and "$($value.StringConstantType)" -eq 'SingleQuotedHereString') { $hereStrings[$s.Left.VariablePath.UserPath] = $value.Value }
+    }
+
+    $queue = New-Object 'System.Collections.Generic.Queue[object]'
+    foreach ($s in $region) { $queue.Enqueue(@{ Node = $s; Label = "script body (line $($s.Extent.StartLineNumber))"; Root = $s }) }
+    $visited = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $blockVars = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $dynamic = New-Object 'System.Collections.Generic.List[object]'
+    $loaded = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+
+    while ($queue.Count -gt 0) {
+        $unit = $queue.Dequeue()
+        $node = $unit.Node
+        # Defining a function inside this code is not calling it.
+        $inInnerFunction = {
+            param($n)
+            $p = $n.Parent
+            while ($p -and -not [object]::ReferenceEquals($p, $unit.Root)) { if ($p.GetType().FullName -eq "$L.FunctionDefinitionAst") { return $true }; $p = $p.Parent }
+            return $false
+        }
+        foreach ($a in $node.FindAll({ param($n) $n.GetType().FullName -eq "$L.AssignmentStatementAst" }, $true)) {
+            if ($a.Left.GetType().FullName -eq "$L.VariableExpressionAst" -and $a.Right.GetType().FullName -eq "$L.CommandExpressionAst" -and
+                $a.Right.Expression.GetType().FullName -eq "$L.ScriptBlockExpressionAst") { [void]$blockVars.Add($a.Left.VariablePath.UserPath) }
+        }
+        foreach ($c in $node.FindAll({ param($n) $n.GetType().FullName -eq "$L.CommandAst" }, $true)) {
+            if (& $inInnerFunction $c) { continue }
+            $name = $c.GetCommandName()
+            if ($name) {
+                [void]$commands.Add($name)
+                if ($functions.ContainsKey($name)) {
+                    if ($visited.Add($name)) { $fn = $functions[$name]; $queue.Enqueue(@{ Node = $fn.Body; Label = "function $name"; Root = $fn.Body }) }
+                } elseif ($script:PromptCheckAllowedCommands -notcontains $name) {
+                    $problems.Add("$($unit.Label) can run '$name' (line $($c.Extent.StartLineNumber)), which is not on the prompt-check allow-list")
+                }
+                continue
+            }
+            $first = $c.CommandElements[0]
+            $m = [regex]::Match($first.Extent.Text, '^\(\[scriptblock\]::Create\(\$(\w+)\)\)$')
+            if ($m.Success -and $hereStrings.ContainsKey($m.Groups[1].Value)) {
+                $key = $m.Groups[1].Value
+                if (-not $loaded.Add($key)) { continue }
+                $subErrors = $null
+                $sub = [System.Management.Automation.Language.Parser]::ParseInput($hereStrings[$key], [ref]$null, [ref]$subErrors)
+                if (@($subErrors).Count -gt 0) { $problems.Add("the embedded script `$$key does not parse"); continue }
+                foreach ($f in $sub.FindAll({ param($n) $n.GetType().FullName -eq "$L.FunctionDefinitionAst" }, $false)) { if (-not $functions.ContainsKey($f.Name)) { $functions[$f.Name] = $f } }
+                foreach ($block in @($sub.BeginBlock, $sub.ProcessBlock, $sub.EndBlock)) {
+                    if (-not $block) { continue }
+                    foreach ($s in $block.Statements) {
+                        if ($s.GetType().FullName -ne "$L.FunctionDefinitionAst") { $queue.Enqueue(@{ Node = $s; Label = "embedded script `$$key (line $($s.Extent.StartLineNumber))"; Root = $s }) }
+                    }
+                }
+                continue
+            }
+            $dynamic.Add(@{ Label = $unit.Label; Line = $c.Extent.StartLineNumber; Target = $first })
+        }
+        foreach ($mem in $node.FindAll({ param($n) $n.GetType().FullName -eq "$L.InvokeMemberExpressionAst" }, $true)) {
+            if (& $inInnerFunction $mem) { continue }
+            $memberName = $mem.Member.Extent.Text.Trim("'", '"')
+            if ($script:PromptCheckForbiddenMembers -contains $memberName) { $problems.Add("$($unit.Label) calls .$memberName (line $($mem.Extent.StartLineNumber))") }
+        }
+    }
+    # A function that is only reachable through an embedded script is covered: the helper is loaded
+    # before Step 1, so its functions are registered before the Step 1 code is walked.
+    foreach ($d in $dynamic) {
+        $t = $d.Target
+        $isBlockVar = ($t.GetType().FullName -eq "$L.VariableExpressionAst" -and $blockVars.Contains($t.VariablePath.UserPath))
+        $isBlockLiteral = ($t.GetType().FullName -eq "$L.ScriptBlockExpressionAst")
+        if (-not ($isBlockVar -or $isBlockLiteral)) { $problems.Add("$($d.Label) invokes a computed command '$($t.Extent.Text)' (line $($d.Line))") }
+    }
+    return (& $done)
+}
+
+# Throws unless the script at $Path passes Get-PromptCheckAnalysis. Checked once per file version.
+$script:PromptCheckVerified = @{}
+function Assert-PromptCheckSafe {
+    param([Parameter(Mandatory)][string]$Path)
+    $item = Get-Item -LiteralPath $Path
+    $key = "$($item.FullName)|$($item.Length)|$($item.LastWriteTimeUtc.Ticks)"
+    if ($script:PromptCheckVerified.ContainsKey($key)) { return }
+    $analysis = Get-PromptCheckAnalysis -Text ([IO.File]::ReadAllText($item.FullName))
+    if (@($analysis.Problems).Count -gt 0) {
+        throw "Refusing to start '$($item.Name)': it is not safe to run as a prompt check. $(@($analysis.Problems) -join '; ')"
+    }
+    $script:PromptCheckVerified[$key] = $true
+}
+
+# Runs ONLY the installer's Step 1 questions (-StopAfterStep1) with scripted answers on standard
+# input. Safety comes from the installer itself: it exits before the prerequisite step, and this
+# function refuses to start a script that does not pass the static check (Assert-PromptCheckSafe).
+# So nothing can be detected, installed, cloned or generated, and no process has to be killed to
+# prevent it. When the answers run out, further questions get end of input.
+# USERPROFILE and PATH are replaced for the child only. As an extra observation - not the safety
+# mechanism - its PATH starts with tripwire shims named like the package managers and tool CLIs:
+# a call to one of them during Step 1 is recorded in TripwireHits.
+function Invoke-InstallerPromptCheck {
+    param(
+        [string[]]$Answers = @(),
+        [Parameter(Mandatory)][string]$ProfileRoot,
+        [int]$TimeoutSec = 120,
+        [string]$InstallerPath = (Get-InstallerPath)
+    )
+    Assert-PromptCheckSafe -Path $InstallerPath
+    $tripDir = Join-Path $ProfileRoot '_tripwire'
+    $tripLog = Join-Path $tripDir 'calls.log'
+    if (-not (Test-Path -LiteralPath $tripDir)) {
+        New-Item -ItemType Directory -Path $tripDir -Force | Out-Null
+        foreach ($name in $script:TripwireCommands) {
+            [IO.File]::WriteAllText((Join-Path $tripDir "$name.cmd"), "@echo $name %*>>`"$tripLog`"`r`n@exit /b 1`r`n", [Text.Encoding]::ASCII)
+        }
+    }
+    $before = 0
+    if (Test-Path -LiteralPath $tripLog) { $before = @(Get-Content -LiteralPath $tripLog).Count }
+    $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $stdin = ''
+    if (@($Answers).Count -gt 0) { $stdin = (@($Answers) -join "`r`n") + "`r`n" }
+    # A Windows PowerShell child started from PowerShell 7 must build its own module path.
+    $remove = @(); if ($PSVersionTable.PSEdition -eq 'Core') { $remove = @('PSModulePath') }
+    $result = Invoke-BoundedChild -FilePath $powershell -TimeoutSec $TimeoutSec -StdinText $stdin -RemoveEnvironment $remove `
+        -Arguments ('-NoProfile -ExecutionPolicy Bypass -File "{0}" -StopAfterStep1' -f $InstallerPath) `
+        -Environment @{
+            USERPROFILE                       = $ProfileRoot
+            PATH                              = "$tripDir;$env:SystemRoot\System32;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
+            FABRIC_AGENTIC_SKIP_VSCODE_LAUNCH = '1'
+        }
+    $hits = @()
+    if (Test-Path -LiteralPath $tripLog) { $hits = @(Get-Content -LiteralPath $tripLog | Select-Object -Skip $before) }
+    $result | Add-Member -NotePropertyName TripwireHits -NotePropertyValue @($hits)
+    return $result
+}
