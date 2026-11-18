@@ -5,7 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v0.8.0]
+## [v0.9.0]
+
+Upstream skill changes no longer reach the user: every refreshed skills catalogue is checked against the skills the agents rely on, and the last compatible version is kept when they no longer fit. Agent working files get one home, a clean-up rule and a guarded housekeeping operation. Pipeline guidance is rebuilt on evidence: every activity states how it was verified, and a definition is checked offline before it is saved.
+
+### Added
+
+- **`Test-PipelineDefinition.ps1`** in `.github/agent-docs/`: an offline check of a pipeline definition that blocks what it cannot vouch for. It covers activity types and their required properties, `dependsOn` (missing names, cycles), expressions (undeclared parameters, variables, library variables, activity names), workspace ids that are not the target, the all-zero GUID outside the Git format, item and connection ids against the target workspace's inventory and credential-like values, and prints a change plan against the pipeline's current definition. Results: `PASS`, `UNCHECKED` (something could not be checked) or `BLOCKED`. It reads files only.
+- **Deployment safeguards for the pipeline agent (036):** fourteen steps, from confirming the target and keeping the current definition to the read-back, the run and an evidence report. A save needs a `PASS` and an approval token; a definition read from one workspace is never sent to another. No new tools or permissions.
+- Regression suite for pipelines (`tests/Pipeline.Tests.ps1`) with synthetic definitions.
+- **Agent working folder:** `0 - Team of Agents Local Files/` (git-ignored) with one task folder per request (`<Project>/tasks/<date>-<topic>-<id>/`), reusable utilities (`<Project>/scripts/`, `_shared-tools/`), an archive and a housekeeping area. The installer creates it and never moves or removes existing content.
+- **`fabric-housekeeping` skill** and a working-files rule in every agent contract: choose the owning project, work only in the task folder, clean up disposable files at the end, never touch another session's folder, keep credentials out of files. The WORK ORDER carries `task folder:` and the WORK RESULT a `housekeeping:` line.
+- **Housekeeping in Capability Maintenance:** a read-only *preview* (075) classifies files as safe, ambiguous, secret-flagged or protected and prints plan-bound approval tokens; *execute* (074) moves approved files to a quarantine, re-checking each one; a restore undoes it and a purge needs a second token. Git-tracked files, open or unknown task folders, backups, archives, reusable tools and links are never moved; possible secrets are reported by path and pattern class, never by value.
+- **`Agent-Workspace.ps1`** in `.github/agent-docs/`: task folders and the housekeeping operations, safe for paths with spaces and paths longer than 260 characters in Windows PowerShell 5.1.
+- A session status line when agent working files have piled up.
+- **Skills compatibility hold:** after each refresh, the installer and Capability Maintenance check every pinned skill path. If upstream renamed, removed or split one, the whole catalogue stays on its last compatible commit (the one it was on, or the one this release was validated against). Nothing is asked of the user, and the hold lifts by itself once a later refresh is compatible.
+- **`Skill-Compat.ps1`** in `.github/agent-docs/`: the installer's own refresh, hold and settings code, used by Capability Maintenance (`-RefreshCatalogs`) and by the session status script.
+- **`skill-catalog-state.json`** (machine-local, git-ignored): the catalogue state and the skill paths the generated agents carry.
+- Session status lines for a held catalogue and for pinned skill paths missing on disk.
+- Regression suites for the hold (`tests/SkillCompat.Tests.ps1`), for housekeeping (`tests/Housekeeping.Tests.ps1`) and for public-distribution neutrality (`tests/Neutrality.Tests.ps1`), and a static guard that agent files avoid constructs specific to one chat harness.
+
+### Changed
+
+- **`fabric-pipelines` skill rewritten** against Microsoft Learn (reviewed 2026-11-18). Every activity and template carries an evidence class: run in Fabric, documented, partially verified, unverified (no template) or removed. New sections cover the SQL analytics endpoint refresh (contract, per-table results, lock contention, sequencing), system variables with what they return, what does and does not move between environments, and how to change a deployed pipeline safely.
+- Agents no longer use a root `scripts/` folder for scratch work. An existing one is left as it is and is added to `.gitignore` only when it holds nothing tracked.
+- Project Osmos: its auth and routing files stay in the workspace's `.dataprojects/`; the same path is excluded locally in each vendor skill clone so a refresh can never stash them; the detected Python version and whether it meets the 3.11 requirement are recorded in `tool-status.json`.
+- A reference file that moved inside a skill which is still present points the agent at the skill folder instead of counting as unresolved.
+- The session status script registers new skill folders in place, so comments and formatting in `.vscode/settings.json` survive, and adds them to the user settings only where the agent team was already enabled there.
+- Capability Maintenance refreshes the vendor catalogues only through the shipped helper.
+- Optional tools that are still missing are offered again on every installer run; an earlier No is no longer remembered.
+- Microsoft's `powerbi-report-author` CLI is described as a detect-only companion to `pbir` (lookup, second validation, service preview, packaging), never as a second way to edit a report.
+- House skills describe their origin in neutral words, and examples use placeholder identifiers.
+
+### Fixed
+
+- **SQL analytics endpoint refresh template:** it used the type `RefreshSQLEndpoint` with the lakehouse id, which Fabric rejects. The activity is `RefreshSqlEndpoint` with `workspaceId`, `sqlEndpointId` (the endpoint item, not the lakehouse) and a connection. `@pipeline().DataFactory` is given as the workspace reference that works in every environment; an all-zero workspace id sent through the API fails at run time with error 4301.
+- Eleven further pipeline templates used activity type identifiers that the published definition does not have (`DataflowGen2`, `KQL`, `Webhook`, `StoredProcedure`, `SQLScript`, `HDInsightActivity`, `FunctionsActivity`, `CopyJob`, `AzureBatch`, `AzureDatabricks`, `Deactivate`); they are replaced by the published ones or removed. Three templates whose JSON is not published (lakehouse maintenance, materialized lake view refresh, approval) are no longer offered as templates.
+- Pipeline guidance said `pipeline().Pipeline` is the pipeline name (it is its id), mapped Variable Library `Number` values to `Double` (pipelines cannot use them) and said the endpoint refresh takes the lakehouse id.
+
+## [v0.8.0] - 2026-11-16
 
 Introduces end-to-end Power BI custom visual development, from planning and implementation to testing, packaging and controlled release. The organization expands to 54 agents across eight teams.
 

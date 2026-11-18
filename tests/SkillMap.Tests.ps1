@@ -1,6 +1,6 @@
 # SkillMap.Tests.ps1
 # -------------------------------------------------------------------
-# v0.8.0 skill-mapping regression guard. Pinned upstream skill references resolve against
+# Skill-mapping regression guard. Pinned upstream skill references resolve against
 # the recorded catalog snapshot (or a verified alias); retired names do not come back;
 # renames are never guessed from similar folder names; keyword suggestions stay
 # reference-only; and the generated organisation (identities, tools, hierarchy, write
@@ -28,12 +28,12 @@ BeforeAll {
     # Load the installer's resolver tables and functions without running the installer.
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:Installer, [ref]$null, [ref]$null)
     $assignments = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Parent.Parent -eq $ast }, $false)
-    foreach ($name in 'MS', 'MC', 'KP', 'CS', 'AD', 'bt', 'skillAliases', 'agentSkillKeywords', 'autoSuggestExclusions') {
+    foreach ($name in 'MS', 'MC', 'KP', 'CS', 'AD', 'bt', 'skillAliases', 'agentSkillKeywords', 'autoSuggestExclusions', 'vendorCatalogs') {
         $a = @($assignments | Where-Object { $_.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and $_.Left.VariablePath.UserPath -eq $name }) | Select-Object -First 1
         $a | Should -Not -BeNullOrEmpty -Because "the installer must define `$$name"
         Set-Variable -Scope Script -Name $name -Value (Invoke-Expression $a.Right.Extent.Text)
     }
-    foreach ($fnName in 'Get-SkillContainerDirs', 'Get-UpstreamSkillIndex', 'Get-AutoDiscoveredSkills', 'Resolve-KnowledgeRef', 'Get-SkillReviewCandidates') {
+    foreach ($fnName in 'Get-SkillContainerDirs', 'Get-UpstreamSkillIndex', 'Get-AutoDiscoveredSkills', 'Resolve-SkillPin', 'Resolve-KnowledgeRef', 'Get-UnresolvedSkillPins', 'Get-SkillReviewCandidates') {
         $fn = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $fnName }, $true) | Select-Object -First 1
         $fn | Should -Not -BeNullOrEmpty -Because "$fnName must exist in the installer"
         Invoke-Expression $fn.Extent.Text
@@ -118,6 +118,14 @@ Describe 'Pinned upstream skill references (V8-01 to V8-03)' {
         $script:skillAliases['skills-for-fabric/skills/onelake-catalog-govern-cli'].to | Should -Be 'skills-for-fabric/skills/onelake-catalog-cli'
     }
 
+    It 'the approved fallback commit of each catalog is the commit the snapshot was recorded from' {
+        @($script:vendorCatalogs.Keys).Count | Should -Be @($script:Snapshot.sources).Count
+        foreach ($src in @($script:Snapshot.sources)) {
+            $script:vendorCatalogs.Contains([string]$src.path) | Should -BeTrue -Because "$($src.path) is a vendor catalog of this kit"
+            [string]$script:vendorCatalogs[[string]$src.path].approved | Should -BeExactly ([string]$src.commit) -Because 'a catalog may only fall back to the commit every pin was verified against'
+        }
+    }
+
     It 'every pin resolves in the live vendor catalog (FABRIC_AGENTIC_CATALOG_ROOT)' {
         $live = $env:FABRIC_AGENTIC_CATALOG_ROOT
         if (-not $live -or -not (Test-Path -LiteralPath (Join-Path $live 'skills-for-fabric'))) {
@@ -144,9 +152,14 @@ Describe 'Resolve-KnowledgeRef never guesses a rename (V8-04)' {
             New-Item -ItemType Directory -Path (Join-Path $script:ResolverRoot $rel) -Force | Out-Null
             [IO.File]::WriteAllText((Join-Path $script:ResolverRoot "$rel\SKILL.md"), "---`nname: $(Split-Path $rel -Leaf)`ndescription: test`n---`n")
         }
+        foreach ($file in 'skills-for-fabric\skills\spark-cli\references\present.md', 'power-bi-agentic-development\plugins\a\skills\moved-skill\references\kept.md') {
+            New-Item -ItemType Directory -Path (Split-Path (Join-Path $script:ResolverRoot $file) -Parent) -Force | Out-Null
+            [IO.File]::WriteAllText((Join-Path $script:ResolverRoot $file), "reference`n")
+        }
         $script:rootPath = $script:ResolverRoot
         $script:upstreamSkillIndex = @(Get-UpstreamSkillIndex -RootPath $script:ResolverRoot)
         $script:UnresolvedKnowledgeRefs = [ordered]@{}
+        $script:AdvisoryKnowledgeRefs = [ordered]@{}
     }
 
     It 'resolves an existing reference unchanged' {
@@ -221,6 +234,43 @@ Describe 'Resolve-KnowledgeRef never guesses a rename (V8-04)' {
         (@(Get-SkillReviewCandidates -Rel 'skills-for-fabric/skills/widget-maker-cli') -contains 'widget') | Should -BeTrue
         (@(Get-SkillReviewCandidates -Rel 'skills-for-fabric/skills/spark-authoring-cli') -contains 'spark-cli') | Should -BeTrue
     }
+
+    It 'resolves a reference file inside a skill unchanged while it exists' {
+        Resolve-KnowledgeRef 'skills-for-fabric/skills/spark-cli/references/present.md' | Should -BeExactly '`skills-for-fabric/skills/spark-cli/references/present.md`'
+    }
+
+    It 'points at the skill folder when only a reference file inside it is gone (advisory, not unresolved)' {
+        $rel = 'skills-for-fabric/skills/spark-cli/references/gone.md'
+        $r = Resolve-KnowledgeRef $rel
+        $r | Should -Match '^`skills-for-fabric/skills/spark-cli` \*\(its reference file `gone\.md` is not at the pinned path in the installed catalog; start from the skill''s own SKILL\.md\)\*$'
+        $script:AdvisoryKnowledgeRefs.Contains($rel) | Should -BeTrue
+        $script:UnresolvedKnowledgeRefs.Contains($rel) | Should -BeFalse
+        @(Get-UnresolvedSkillPins @($rel)) | Should -BeNullOrEmpty -Because 'a moved reference file never holds a catalog'
+    }
+
+    It 'keeps a reference file unresolved when its skill folder is gone too (critical)' {
+        $rel = 'skills-for-fabric/skills/no-such-skill/references/guide.md'
+        Resolve-KnowledgeRef $rel | Should -Match '^`skills-for-fabric/skills/no-such-skill/references/guide\.md` \*\(not present at install time - not resolved; never substitute'
+        @(Get-UnresolvedSkillPins @($rel)) | Should -Be @($rel)
+    }
+
+    It 'a reference file follows its skill into another container of the same provider' {
+        $r = Resolve-KnowledgeRef 'power-bi-agentic-development/plugins/old/skills/moved-skill/references/kept.md'
+        $r | Should -Match '^`power-bi-agentic-development/plugins/a/skills/moved-skill/references/kept\.md` \*\(same skill name, moved upstream'
+        Resolve-KnowledgeRef 'power-bi-agentic-development/plugins/old/skills/moved-skill/references/lost.md' | Should -Match '^`power-bi-agentic-development/plugins/a/skills/moved-skill` \*\(its reference file `lost\.md`'
+    }
+
+    It 'a reference file of a renamed skill lands on the verified alias target, never on fabriciq' {
+        $r = Resolve-KnowledgeRef 'skills-for-fabric/skills/fabriciq-ontology-cli/references/model.md'
+        $r | Should -Match '^`skills-for-fabric/skills/ontology-cli` \*\(its reference file `model\.md`'
+        $r | Should -Not -Match 'skills/fabriciq`'
+    }
+
+    It 'a shared common file has no skill folder to fall back to and stays critical' {
+        $rel = 'skills-for-fabric/common/GONE.md'
+        Resolve-KnowledgeRef $rel | Should -Match 'not present at install time - not resolved'
+        @(Get-UnresolvedSkillPins @($rel)) | Should -Be @($rel)
+    }
 }
 
 Describe 'Keyword suggestions stay reference-only (V8-04)' {
@@ -279,7 +329,7 @@ Describe 'Keyword suggestions stay reference-only (V8-04)' {
     }
 }
 
-Describe 'Generated organisation matches the v0.8.0 baseline' {
+Describe 'Generated organisation matches the recorded baseline' {
 
     It 'emits exactly 54 agents with the self-test passing' {
         $script:Emit.Exit | Should -Be 0 -Because "emit output:`n$($script:Emit.Output)"

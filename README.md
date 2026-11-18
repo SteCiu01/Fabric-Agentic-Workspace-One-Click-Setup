@@ -3,7 +3,7 @@
 [![Latest Release](https://img.shields.io/github/v/release/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup?include_prereleases&label=version)](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/releases)
 [![Validate](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/actions/workflows/validate.yml/badge.svg)](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/actions/workflows/validate.yml)
 
-**Version:** v0.8.0
+**Version:** v0.9.0
 
 Used regularly by the maintainer in real Fabric work. Contributions and feedback welcome.
 
@@ -102,9 +102,10 @@ The installer **stops** if a required item is missing. It **installs** the auto 
 
 **In your chosen workspace folder**
 - One sub-folder per Fabric workspace you choose to scaffold.
-- Installer-managed files: 54 agent definitions, 9 custom skills, `copilot-instructions.md`, `AGENTS.md`, `.vscode/` settings & tasks, `.github/agent-docs/` (status script, PBIVIZ helper `Pbiviz-Alm.ps1`, flow docs, `tool-status.json`). A `.gitignore` is written only if none exists; an existing one gets only the required exclusions appended.
+- Installer-managed files: 54 agent definitions, 10 custom skills, `copilot-instructions.md`, `AGENTS.md`, `.vscode/` settings & tasks, `.github/agent-docs/` (status script, the helpers `Skill-Compat.ps1`, `Agent-Workspace.ps1`, `Test-PipelineDefinition.ps1` and `Pbiviz-Alm.ps1`, flow docs, `tool-status.json`). A `.gitignore` is written only if none exists; an existing one gets only the required exclusions appended.
+- `0 - Team of Agents Local Files/` (gitignored): where the agents keep their working files — one task folder per request, reusable utilities, housekeeping reports. Created empty; an existing folder of that name is left exactly as it is. A root `scripts/` folder that earlier versions used as scratch space is never moved or emptied; it is added to `.gitignore` only when it exists and holds nothing tracked.
 - `.vscode/mcp.json`: the Microsoft Learn documentation MCP server (`microsoftDocs`, `https://learn.microsoft.com/api/mcp`) is **added** when no server with that URL exists. Your servers and inputs are kept; a malformed file is left untouched; the file is yours (never purged).
-- Two public clones (gitignored): [`microsoft/skills-for-fabric`](https://github.com/microsoft/skills-for-fabric) and [`data-goblin/power-bi-agentic-development`](https://github.com/data-goblin/power-bi-agentic-development). Already present → force-refreshed to upstream.
+- Two public clones (gitignored): [`microsoft/skills-for-fabric`](https://github.com/microsoft/skills-for-fabric) and [`data-goblin/power-bi-agentic-development`](https://github.com/data-goblin/power-bi-agentic-development). Already present → refreshed to upstream, or kept at the last compatible version when upstream dropped a skill the agents use.
 - If you opt in: your business repositories under `source-control-repositories/` (independent Git repos, gitignored by the outer repo).
 - If you opt in: one PBIVIZ folder for custom visual projects (default `0 - PBIVIZ Developing Environment`), initialised as its **own** local Git repository on `main` and ignored by the outer repo. Existing visuals in it are never imported or committed automatically.
 - Git: a new repo gets an initial commit; an existing repo gets a commit limited to installer-owned paths.
@@ -159,7 +160,7 @@ Runs mostly on its own. Order of events:
 2. **Auto-installs if missing** (best-effort): Python → `fab` → `az` → the two MCP extensions. Python is searched on PATH, in the registry and in the usual install folders first; the winget attempt gives up after 4 minutes instead of waiting forever on a blocked download.
 3. **Optional specialist CLIs** — for each missing tool it prints provider + purpose and asks:
    `Install <tool> now? (Y/N)` for `pbir`, Tabular Editor CLI, `pbi-tools`, `sqlcmd`, `gh`, and `Install the azure-devops az extension now? (Y/N)`.
-   **No** is remembered: it stays quiet on later runs. A tool you install yourself later is still detected.
+   **No** installs nothing and is not remembered: a tool that is still missing is offered again on the next run. A tool you install yourself later is detected.
 4. **Custom visual development (detect only)** — Node.js (warns below 20.19.0, the floor of current `powerbi-visuals-tools`), npm, a global `pbiviz` (not required) and your Git identity. Nothing is installed; results go to `tool-status.json`.
 5. `Check installed tools for updates now? (y/N)` — default **No**. **Yes** shows Current / Update / Unverified per installed tool and asks per-tool before updating.
 6. Prints `All prerequisites OK.` (or the missing list and exits).
@@ -188,15 +189,17 @@ No PAT is ever asked or stored; Git uses your credential manager / SSH. Nothing 
 
 ### Step 5 of 9 — Cloning Skill Repositories
 
-No prompts. Clones `skills-for-fabric` and `power-bi-agentic-development`; if they exist, **force-refreshes them to upstream** (local edits are auto-stashed first and the stash name printed — but treat these folders as read-only). Success is only claimed when `HEAD` equals the upstream commit; a failed refresh leaves the clone untouched and warns.
+No prompts. Clones `skills-for-fabric` and `power-bi-agentic-development`; if they exist, **force-refreshes them to upstream** (local edits are auto-stashed first and the stash name printed — but treat these folders as read-only). Success is only claimed when `HEAD` equals the upstream commit; a failed refresh leaves the clone untouched and warns. Whether the refreshed catalogue is kept is decided in Step 7.
 
 ### Step 6 of 9 — Writing Custom Skills
 
-No prompts. Writes the nine maintainer-authored skills under `.github/skills/`: `fabric-tmdl`, `fabric-pipelines`, `fabric-cli-policy`, and six for custom visuals — `pbiviz-pbip-reconstruction`, `pbiviz-source-conversion`, `pbiviz-ibcs-semantic-contract`, `pbiviz-interaction-regression`, `pbiviz-release-safety`, `pbiviz-alm-release`.
+No prompts. Writes the ten maintainer-authored skills under `.github/skills/`: `fabric-tmdl`, `fabric-pipelines`, `fabric-cli-policy`, `fabric-housekeeping`, and six for custom visuals — `pbiviz-pbip-reconstruction`, `pbiviz-source-conversion`, `pbiviz-ibcs-semantic-contract`, `pbiviz-interaction-regression`, `pbiviz-release-safety`, `pbiviz-alm-release`.
 
 ### Step 7 of 9 — Writing Agent Definitions
 
-No prompts. Generates the 54 `.agent.md` files (11 visible + 43 workers), resolving each agent's pinned skill paths against the clones just refreshed. A pinned skill that moved is followed only when the move is certain: a verified upstream rename in the installer's alias table, or the same skill name in exactly one other folder of the same provider (a Microsoft skill is never replaced by a Kurt one, or the reverse). Anything else is written as *not resolved* and listed on the console with possible candidates for a maintainer to review; a similarly named skill is never substituted. Keyword matches against the catalogue are added as a separate, reference-only list. Then self-tests the generated set against the embedded manifest.
+No prompts. Generates the 54 `.agent.md` files (11 visible + 43 workers), resolving each agent's pinned skill paths against the clones just refreshed. A pinned skill that moved is followed only when the move is certain: a verified upstream rename in the installer's alias table, or the same skill name in exactly one other folder of the same provider (a Microsoft skill is never replaced by a Kurt one, or the reverse). A reference file that moved inside a skill which is still there points the agent at the skill folder.
+
+**Compatibility check, no action from you.** Before the agents are written, every pinned skill is checked against the refreshed clones. If upstream renamed, removed or split one, that whole clone is put back on the commit it was on before this run (or, on a first install, on the commit this release was validated against) and the console says it is *kept at the last compatible version*. You are never asked to map, rename or choose a skill; a later run takes upstream again as soon as it fits. Only if no known commit fits is a reference written as *not resolved*, with candidates listed for a maintainer; a similarly named skill is never substituted. Keyword matches against the catalogue are added as a separate, reference-only list. Then self-tests the generated set against the embedded manifest.
 
 ### Step 8 of 9 — Writing Configuration Files
 
@@ -278,7 +281,7 @@ On your first message the Master runs **one** status script and shows **one** bl
 
 | Line | Meaning |
 |---|---|
-| Skill freshness | Upstream commit dates of the two clones; install date of the custom skills. Maintenance is hinted only when > 30 days old. |
+| Skill freshness | Upstream commit dates of the two clones; install date of the custom skills. Maintenance is hinted only when > 30 days old. A clone *kept at the last compatible version* is named as such and never nagged about; new skill folders are registered on the spot. |
 | Skill locations / nested dispatch | What VS Code registers, whether Lead → Worker dispatch is enabled, and a **warning naming any saved `.code-workspace` that opens this folder without the setting**. |
 | Identity | `fab auth status` → `az account show`; informational, never blocking. |
 | Tools | Live re-check; refreshes `tool-status.json` if something was installed/removed since setup. |
@@ -293,14 +296,14 @@ For a live semantic model, the Master opens the Power BI modeling MCP connection
 
 1. [Download the latest two files](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/tree/main/fabric-agentic-installer).
 2. Double-click the `.bat`, point to the **same folder** → **update mode**.
-3. Same 9 steps; declined tools stay quiet; the version check in Step 2 is still offered.
+3. Same 9 steps; optional tools that are still missing are offered again; the version check in Step 2 is still offered.
 4. Reopen / **Developer: Reload Window**.
 
 **The five update rules** (the installer is the source of truth for what it ships):
 
 | # | Rule | Means for you |
 |---|---|---|
-| 1 | Vendor skill clones are force-refreshed to upstream | **Don't edit** `skills-for-fabric/` or `power-bi-agentic-development/`; edits are stashed, not kept. |
+| 1 | Vendor skill clones are force-refreshed to upstream, then kept only if every skill the agents use is still there (otherwise the clone returns to its last compatible commit) | **Don't edit** `skills-for-fabric/` or `power-bi-agentic-development/`; edits are stashed, not kept. A held clone needs nothing from you. |
 | 2 | Installer-managed files are overwritten | **Don't hand-edit** `.github/agents/*`, `.github/skills/*`, `copilot-instructions.md`, `AGENTS.md`, `.vscode/*`. Change the installer instead. |
 | 3 | Obsolete installer files are purged | Strict `old − new` diff over `installed-manifest.json`, never a folder sweep. |
 | 4 | Your own files are never touched | Anything the installer never shipped is outside every manifest. |
@@ -420,7 +423,7 @@ Routing is always by **topic**; a missing tool never changes the owner — the s
 
 > **`pbir` licence.** The `pbir-cli` package is published under a custom non-commercial licence. Whether your use is covered is for you (or your organisation) to decide; the installer only offers it.
 >
-> **Microsoft `powerbi-report-author`** (npm `@microsoft/powerbi-report-authoring-cli`) is **detected only** (`powerbiReportAuthor` in `tool-status.json`): it is never offered or installed and does not replace `pbir`.
+> **Microsoft `powerbi-report-author`** (npm `@microsoft/powerbi-report-authoring-cli`) is **detected only** (`powerbiReportAuthor` in `tool-status.json`): it is never offered or installed. It has no command that changes the pages, visuals or bindings of a report, so it does not replace `pbir`; when present, agents use it for metadata lookup, a second validation, a service preview and definition packaging, and still apply every fix through `pbir`.
 
 `tool-status.json` stays current through: re-running the installer, asking **070 - Capability Maintenance**, or an agent's single live re-check before falling back.
 
@@ -440,20 +443,26 @@ Fabric Workspaces/
 │   │   ├── starting-flow.md                           ← lean session startup
 │   │   ├── working-flow-reference.md                  ← team protocol, routing, WORK ORDER/RESULT
 │   │   ├── Get-SessionStatus.ps1                      ← status script
+│   │   ├── Skill-Compat.ps1                           ← skills refresh + compatibility hold (installer's own code)
+│   │   ├── Agent-Workspace.ps1                        ← task folders + housekeeping preview/execute
+│   │   ├── Test-PipelineDefinition.ps1                ← offline check of a pipeline definition before it is saved
 │   │   ├── Pbiviz-Alm.ps1                             ← deterministic PBIVIZ Git helper
 │   │   ├── local/repository-map.local.json            ← business-repo map (gitignored)
 │   │   ├── local/pbiviz-workspace.json                ← PBIVIZ folder mapping (gitignored)
+│   │   ├── skill-catalog-state.json                   ← catalogue state + pinned skill paths (gitignored)
 │   │   └── tool-status.json                           ← tool inventory (gitignored)
 │   ├── copilot-instructions.md
 │   └── skills/
 │       ├── fabric-tmdl/SKILL.md
 │       ├── fabric-pipelines/SKILL.md
 │       ├── fabric-cli-policy/SKILL.md
+│       ├── fabric-housekeeping/SKILL.md
 │       └── pbiviz-*/SKILL.md                          ← six custom visual skills
 ├── .gitignore
 ├── .vscode/  (settings.json, tasks.json, mcp.json)
 ├── AGENTS.md
 ├── 0 - PBIVIZ Developing Environment/                 ← optional; its own Git repository (gitignored outside)
+├── 0 - Team of Agents Local Files/                    ← agent working files: <Project>/tasks, scripts, _archive; _shared-tools; _housekeeping (gitignored)
 ├── source-control-repositories/                       ← business clones (gitignored)
 ├── skills-for-fabric/                                 ← Microsoft skills (gitignored)
 ├── power-bi-agentic-development/                      ← data-goblin skills (gitignored)
@@ -473,6 +482,10 @@ Fabric Workspaces/
 **Can I add my own agents?** Yes — a new `.agent.md` in `.github/agents/` appears in the dropdown and is never overwritten or purged (it's not in the installer's manifest).
 
 **How do I update skills and tools?** Re-run the installer, or select **070 - Capability Maintenance Team Lead**.
+
+**Where do the agents put their scripts and scratch files?** In `0 - Team of Agents Local Files/<Project>/tasks/<date>-<topic>-<id>/` — one folder per request, created by the agent you selected and cleaned up when the request ends. Reusable utilities go to `<Project>/scripts/` or `_shared-tools/`. Nothing is written to the workspace root, your Fabric item folders or your repositories. The folder is gitignored; ignored is not protected, so the agents are told never to keep tokens in files.
+
+**My workspace is already full of old agent files. How do I clean it?** Ask **070 - Capability Maintenance Team Lead** for a *housekeeping preview*. It inventories only `0 - Team of Agents Local Files/` and a legacy root `scripts/` folder, changes nothing, and reports four classes: *safe* (closed task folders and agent scratch files older than 14 days), *ambiguous* (untracked files of unknown origin), *secret-flagged* (reported by path and pattern, never by value — rotate the credential) and *protected* (Git-tracked files, open or unknown task folders, backups, archives, reusable tools, links). A cleanup runs only with the approval token the preview prints: it **moves** files to `_housekeeping/quarantine/`, can be undone with a restore, and deletes for good only after a second token. Ambiguous files need their own token naming their count and size; flagged files are moved one at a time.
 
 **Does setup connect my repository to Fabric?** No. Onboarding is local only: validate URL, clone with your existing auth, mirror branches, open as an independent repo. No PAT, no push, no Fabric Git configuration.
 
@@ -621,7 +634,7 @@ This workspace targets **VS Code GitHub Copilot Chat / Agent Mode**: the install
 | **060 — Applications & Integration Team Lead** | Python/Fabric SDK, REST/authentication/XMLA, SQL/ODBC, data-access integrations |
 | **070 — Capability Maintenance Team Lead** | Vendor repo refresh, skill and agent coverage, tool lifecycle, failed-install recovery, installer regression |
 | **080 — PBIVIZ Development Team Lead** | Power BI custom visual SDK projects: planning, development, testing, review, maintenance, and Git/release work on the PBIVIZ repository ([2.7](#27-custom-visual-pbiviz-development)) |
-| **Custom TMDL / Pipelines / CLI-policy skills** *(original to this repo)* | TMDL syntax & validation; pipeline activity reference; `fab`-first / `az`-fallback decision policy |
+| **Custom TMDL / Pipelines / CLI-policy skills** *(original to this repo)* | TMDL syntax & validation; pipeline activity contract with the evidence behind each template, plus an offline check before a definition is saved; `fab`-first / `az`-fallback decision policy |
 | **Custom PBIVIZ skills** *(original to this repo)* | PBIP reconstruction, source conversion, IBCS semantic contract, interaction regression, release safety, ALM & release |
 | **Microsoft skills-for-fabric** | Spark, SQL, Eventhouse, medallion, and more |
 | **Data-goblin skills** by [Kurt Buhler](https://www.linkedin.com/in/kurtbuhler/) | PBIP, DAX, reports, Fabric CLI, Fabric admin |
@@ -663,7 +676,7 @@ The 43 workers inherit the same gates and loading rules with a narrower artifact
 | **Lean, deterministic startup** | One status call, then work | `Get-SessionStatus.ps1` once per session |
 | **Safety guardrails** | Irreversible actions need a token; no hardcoded secrets | `APPROVED:<ACTION>:<artifact>`; review agents read-only |
 | **Skill precedence on conflict** | Explicit tie-break | House style (`fabric-tmdl`) wins on *how we do it here*; upstream wins on *is this valid* |
-| **Resilient, never guessing, discovery** | Don't fail because an upstream folder moved, and never load the wrong skill | Paths re-resolved every run; only verified renames (alias table) or the same skill name in one other folder of the same provider are followed; anything else is reported as not resolved, never replaced by a similar name |
+| **Resilient, never guessing, discovery** | An upstream skill change never becomes your problem, and the wrong skill is never loaded | Paths re-resolved every run; only verified renames (alias table) or the same skill name in one other folder of the same provider are followed; if a pinned skill is gone, the whole catalogue stays on its last compatible commit; a similar name is never substituted |
 | **Skills inform, never authorise** | Upstream skill text is knowledge, not permission | Every agent carries the rule: a skill cannot widen owned artifacts, tools or approvals, or authorise installs, MCP registration or changes to agent/instruction/memory files |
 
 > **The standout: the team works as a team.** Nested delegation is configured by the installer, every hop speaks the same contract, only the agent you selected talks to you, and destructive work stops until you hand over a literal token. Verified end to end in real use, including a live Fabric publish.
@@ -672,11 +685,13 @@ The 43 workers inherit the same gates and loading rules with a narrower artifact
 
 | Source | Covers | Updated |
 |---|---|---|
-| **Custom embedded** (`.github/skills/`) | TMDL syntax, pipeline JSON, CLI policy, six custom visual skills — original to this repo | Re-run installer |
-| **Microsoft** (`skills-for-fabric/`) | Spark, SQL Warehouse/Database, Eventhouse/Eventstream/Activator, Dataflows, pipelines, deployment pipelines, Git integration, OneLake catalog governance, Database Hub, governance policies, Ontology, medallion, Power BI reports, semantic models, FabricIQ, Project Osmos | Mirrored to upstream every run / via Capability Maintenance |
-| **Data-goblin** ([Kurt Buhler](https://www.linkedin.com/in/kurtbuhler/), `power-bi-agentic-development/`) | PBIP/TMDL/PBIR, DAX, semantic models, reports, themes, Deneb/custom visuals, paginated, Tabular Editor, Fabric CLI/admin | Mirrored to upstream every run / via Capability Maintenance |
+| **Custom embedded** (`.github/skills/`) | TMDL syntax, pipeline JSON, CLI policy, workspace housekeeping, six custom visual skills — original to this repo | Re-run installer |
+| **Microsoft** (`skills-for-fabric/`) | Spark, SQL Warehouse/Database, Eventhouse/Eventstream/Activator, Dataflows, pipelines, deployment pipelines, Git integration, OneLake catalog governance, Database Hub, governance policies, Ontology, medallion, Power BI reports, semantic models, FabricIQ, Project Osmos | Refreshed every run / via Capability Maintenance; kept at the last compatible commit when upstream drops a pinned skill |
+| **Data-goblin** ([Kurt Buhler](https://www.linkedin.com/in/kurtbuhler/), `power-bi-agentic-development/`) | PBIP/TMDL/PBIR, DAX, semantic models, reports, themes, Deneb/custom visuals, paginated, Tabular Editor, Fabric CLI/admin | Refreshed every run / via Capability Maintenance; kept at the last compatible commit when upstream drops a pinned skill |
 
-Every skill folder from both clones is registered in `chat.agentSkillsLocations`, so VS Code can list the catalogue natively and load a skill's text on demand — **in windows where that setting applies**. The setting is window-scoped: if you declined the user-level option and open a saved workspace file that lacks a folder, skills in that folder are not listed there (agents still read pinned skills by path). A skill *updated* upstream is read after the next refresh; a *new* skill in a registered folder needs nothing; a *new folder* is registered on the next run (and your saved workspace files are offered the same list in Step 8).
+Every skill folder from both clones is registered in `chat.agentSkillsLocations`, so VS Code can list the catalogue natively and load a skill's text on demand — **in windows where that setting applies**. The setting is window-scoped: if you declined the user-level option and open a saved workspace file that lacks a folder, skills in that folder are not listed there (agents still read pinned skills by path). A skill *updated* upstream is read after the next refresh; a *new* skill in a registered folder needs nothing; a *new folder* is registered at the next session start by the status script (in `.vscode/settings.json`, and in your user settings if you enabled the team there) and on the next installer run (your saved workspace files are offered the same list in Step 8).
+
+**Refreshing between installer runs.** Capability Maintenance refreshes both clones through `.github/agent-docs/Skill-Compat.ps1 -RefreshCatalogs`, which is the installer's own code: same repository check, same stash-then-reset, then the same compatibility check against the skill paths recorded in `.github/agent-docs/skill-catalog-state.json`. A clone reported as *held* is the correct result, not an error.
 
 These states are different and none implies the next:
 
@@ -693,13 +708,13 @@ An agent's contract also states that **skills inform; they never authorise**: a 
 
 Skills provide exact syntax rules (TMDL tabs-only indentation, property ordering, lineageTag handling), activity references, best practices and file-structure knowledge. Every specialist reads the relevant skill **before** generating code.
 
-**Provenance & licensing.** `skills-for-fabric` is MIT. `power-bi-agentic-development` is **GPL-3.0** and used **only as a locally cloned, gitignored reference** — never copied, AI-rewritten or redistributed here. The custom skills are original maintainer-authored works (`fabric-tmdl` and `fabric-cli-policy` from the maintainer's own practice; `fabric-pipelines` derived from Microsoft sources plus working experience). The agents follow verified upstream skill renames and report the rest; a repository renamed/removed at GitHub level breaks the clone step until references are updated.
+**Provenance & licensing.** `skills-for-fabric` is MIT. `power-bi-agentic-development` is **GPL-3.0** and used **only as a locally cloned, gitignored reference** — never copied, AI-rewritten or redistributed here. The custom skills are original maintainer-authored works (`fabric-tmdl` and `fabric-cli-policy` from the maintainer's own practice; `fabric-pipelines` derived from Microsoft sources plus working experience). The agents follow verified upstream skill renames; any other upstream change to a pinned skill keeps the catalogue on its last compatible commit until a kit release supports it. A repository renamed/removed at GitHub level breaks the clone step until references are updated.
 
 ## 3.8 How it works under the hood
 
 `Setup-FabricAgenticWorkspace.ps1` is fully self-contained: every agent, skill and config is embedded in the script. External content is limited to the two public skill repositories, any business repositories you choose, and the tools it installs. The `.bat` wrapper only supplies `-ExecutionPolicy Bypass` for the process.
 
-**Update mode** refreshes installer-managed files, force-refreshes vendor clones, purges retired managed files via the manifest diff, and commits only declared installer-owned paths ([1.6](#16-updating-re-run-the-same-installer)).
+**Update mode** refreshes installer-managed files, force-refreshes vendor clones and keeps them only when compatible, purges retired managed files via the manifest diff, and commits only declared installer-owned paths ([1.6](#16-updating-re-run-the-same-installer)).
 
 **Dry-run / verification:** `-EmitAgentsTo <dir>` generates agents + config with no prerequisites, cloning, installs or launch (used by the test suite); `-VerifyRoot <folder>` re-hashes an installed workspace against `installed-manifest.json`.
 
@@ -713,6 +728,8 @@ Before the Fabric VS Code extension and AI agents there were two places to build
 - **Pester suite** (`tests/`) — manifest integrity (54 agents, 3/8/43 tiers, unique ids), hierarchy (single root, no cycles), least-privilege tools, version/doc consistency, generated-file **content** (Knowledge/Playbook/Return-contract, approval-token rule, resolved skill refs, granted tools), emitted settings, vendor refresh failure paths, business-repository branch mirroring under default Git with >260-char paths (plus the phantom `origin` branch and skip diagnostics), Python detection with fake interpreters (Store stub rejected, supported version preferred, cached probe, bounded winget), optional-CLI detection (a warning on stderr is not a missing CLI; an existing CLI is never reinstalled), update-mode safety (JSONC, workspace merge, purge containment, saved-workspace detection/patch idempotency), the status script run offline, and the real installer driven through the Step 1 prompts.
 - **Real generator smoke test** (`tests/Generated.Tests.ps1`) — `-EmitAgentsTo` dry-run asserting on actual generated files.
 - **Skill map** (`tests/SkillMap.Tests.ps1`) — against a committed snapshot of skill names and paths (`tests/fixtures/skill-catalog.snapshot.json`): every pinned skill resolves, retired names follow only verified renames, a missing skill is never replaced by a similar name, keyword suggestions stay reference-only and exclude out-of-scope skills, and the generated organisation still matches the committed identity baseline (`tests/fixtures/agent-baseline.json`: names, tools, delegation targets, write permissions, PBIVIZ agent content). Set `FABRIC_AGENTIC_CATALOG_ROOT` to an installed workspace to also check every pin against the live clones.
+- **Skills compatibility** (`tests/SkillCompat.Tests.ps1`) — throwaway local repositories stand in for the vendor catalogues: a new upstream skill is taken, a renamed, deleted or split pinned skill holds the whole catalogue at the previous or the approved commit, a moved reference file does not, a folder that is not the vendor repository is never touched, and the emitted `Skill-Compat.ps1` holds a catalogue end to end. Each case has a negative control (the same upstream change without the hold leaves an unresolved reference).
+- **Neutrality** (`tests/Neutrality.Tests.ps1`) — static scan of every text file in the repository: GUIDs are placeholders or documented Windows constants, no portal folder numbers, account names or organisation paths, and neutral provenance wording in the shipped skills.
 - **PBIVIZ suites** — `PBIVIZ.Alm.Tests.ps1` runs the shipped Git helper against throwaway repositories and bare remotes under TEMP (remote adoption, archive protection, selective promotion, binary-safe file lists, candidate state, post-merge provenance, safe candidate cleanup, package-content identity and evidence-based `validated`, manifest/package/commit integrity, pruned and fail-closed dependency scan with negative cases for every request form G4 classifies, helper builds with build evidence, process-tree termination of a detached child that inherits the build's output handles, failure-injected rollback of release and legacy archiving, the Level 3 `validated: true` gate, external-package approval, complete vs commit-only integrity, build isolation from the user profile and certificate store, the toolchain preflight that blocks SDK-initiated downloads, lock-based cleanup of build homes with a parallel build, archive-only integrity, the Test-stage `test-sync` procedure and gate output in Windows PowerShell 5.1). Builds in these suites use a stand-in Node script for the project-local `pbiviz` CLI, not the real `powerbi-visuals-tools` (the real SDK is covered by acceptance testing, [3.11](#311-validation-compatibility-and-known-limitations)); `PBIVIZ.Install.Tests.ps1` drives the Step 1 prompt and exercises the Level 1 decision tree (including the exhaustive nested-repository scan), the outer ignore rule and the comment-preserving `mcp.json` merge.
 - **CI** (`.github/workflows/validate.yml`) — PowerShell 7 on every push/PR; badge above.
 - **Install-time self-test + integrity manifest** — `guardrail-status.json` and SHA-256 `installed-manifest.json`.
@@ -775,7 +792,7 @@ The product is validated in two ways: the automated suite ([3.10](#310-quality--
 - Windows PowerShell 5.1 cannot list or delete paths longer than 260 characters in mirrored business repositories; use PowerShell 7 or VS Code there.
 - Behind TLS-inspection proxies, Tabular Editor 2 and `pbi-tools` may need a manual download ([1.7](#17-troubleshooting)).
 - Skill registration (`chat.agentSkillsLocations`) is window-scoped ([3.7](#37-skills--where-they-come-from)); in a window where a skill folder is not registered, agents fall back to reading pinned skills by path.
-- Skill references are resolved at install time. A skill renamed upstream after that is followed only after the next installer run, and only if the rename is verified or unambiguous; otherwise the agent reports the gap.
+- Skill references are resolved at install time. Between installer runs a refresh never removes a skill the agents reference (the catalogue is held instead); skills that are *new* upstream reach the agents' pinned lists only through a kit release.
 - *Prep data for AI* content (AI instructions, AI data schema, verified answers) is drafted for you to apply in Power BI, never written by the agents; the `Copilot/` folder of a model is preserved untouched.
 
 Found a problem? [Open an issue](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/issues).

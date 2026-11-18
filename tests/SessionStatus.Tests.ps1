@@ -170,6 +170,11 @@ Describe 'Get-SessionStatus.ps1 names a user-saved .code-workspace that lacks ne
     It 'still reports settings.json as enabled (the two facts are independent) and says it is folder-only' {
         $script:Output2 | Should -Match 'Nested dispatch: enabled in \.vscode/settings\.json only'
     }
+
+    It 'names the saved workspace file that does not list every skill folder, in neutral words' {
+        $script:Output2 | Should -Match ('do not list every skill folder: ' + [regex]::Escape($script:UserWs))
+        $script:Output2 | Should -Match 're-run the installer \(it adds only what is missing\) or enable the team in your user settings'
+    }
 }
 
 Describe 'Get-SessionStatus.ps1 with the v0.7.2 USER-level setting in effect' {
@@ -188,12 +193,160 @@ Describe 'Get-SessionStatus.ps1 with the v0.7.2 USER-level setting in effect' {
         $script:Output3 | Should -Match 'Nested dispatch: enabled at user level \(every VS Code window\)'
     }
 
-    It 'counts only workspace-relative user locations that resolve under this root' {
-        $script:Output3 | Should -Match '1 workspace-relative in user settings'
+    It 'counts workspace-relative user locations under this root and adds the skill folder that was missing, in place' {
+        $script:Output3 | Should -Match '2 workspace-relative in user settings'
+        $script:Output3 | Should -Match 'Newly registered skill folders'
+        $raw = [IO.File]::ReadAllText($script:UserSettings)
+        $raw | Should -Match '// user prefs' -Because 'the user file is edited in place, comments survive'
+        $raw | Should -Match '"power-bi-agentic-development/plugins/newplugin/skills": true'
+        $raw | Should -Match '"does/not/exist": true'
+        $raw | Should -Match '"C:/abs/skills": true'
+        @([regex]::Matches($raw, 'allowInvocationsFromSubagents')).Count | Should -Be 1 -Because 'the dispatch flag is never touched by the status script'
+    }
+
+    It 'is idempotent: a second run adds nothing to the user file' {
+        $before = [IO.File]::ReadAllText($script:UserSettings)
+        $env:FABRIC_AGENTIC_WORKSPACE_STORAGE = $script:Storage
+        $env:FABRIC_AGENTIC_USER_SETTINGS = $script:UserSettings
+        try { $again = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script:Script 2>&1 | Out-String }
+        finally { Remove-Item Env:\FABRIC_AGENTIC_WORKSPACE_STORAGE, Env:\FABRIC_AGENTIC_USER_SETTINGS -ErrorAction SilentlyContinue }
+        [IO.File]::ReadAllText($script:UserSettings) | Should -BeExactly $before
+        $again | Should -Not -Match 'Newly registered skill folders'
     }
 
     It 'no longer warns about saved workspace files (the user-level setting covers them)' {
         $script:Output3 | Should -Not -Match 'LACK the nested-dispatch setting'
         $script:Output3 | Should -Match 'need no patch'
+        $script:Output3 | Should -Not -Match 'do not list every skill folder' -Because 'user-level skill locations reach every window'
+    }
+}
+
+Describe 'Get-SessionStatus.ps1 never writes to user settings without earlier consent' {
+
+    It 'leaves the user file byte-identical when <Case>' -TestCases @(
+        @{ Case = 'nested dispatch is on but no skill folder of this workspace is listed'; Text = "{`n  // other project`n  `"chat.subagents.allowInvocationsFromSubagents`": true,`n  `"chat.agentSkillsLocations`": { `"some/other/skills`": true }`n}`n" }
+        @{ Case = 'this workspace is listed but nested dispatch is off'; Text = "{`n  `"chat.subagents.allowInvocationsFromSubagents`": false,`n  `"chat.agentSkillsLocations`": { `"skills-for-fabric/skills`": true }`n}`n" }
+        @{ Case = 'the file has neither setting'; Text = "{`n  `"editor.fontSize`": 12`n}`n" }
+    ) {
+        $p = Join-Path $script:Root ('user-noconsent-' + [guid]::NewGuid().ToString('N').Substring(0, 6) + '.json')
+        [IO.File]::WriteAllText($p, $Text, (New-Object System.Text.UTF8Encoding($false)))
+        $env:FABRIC_AGENTIC_WORKSPACE_STORAGE = $script:Storage
+        $env:FABRIC_AGENTIC_USER_SETTINGS = $p
+        try { $null = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script:Script 2>&1 | Out-String }
+        finally { Remove-Item Env:\FABRIC_AGENTIC_WORKSPACE_STORAGE, Env:\FABRIC_AGENTIC_USER_SETTINGS -ErrorAction SilentlyContinue }
+        [IO.File]::ReadAllText($p) | Should -BeExactly $Text
+    }
+}
+
+Describe 'Get-SessionStatus.ps1 reports a held skills catalog and pinned paths missing on disk' {
+
+    BeforeAll {
+        $script:StatePath = Join-Path $script:Root '.github\agent-docs\skill-catalog-state.json'
+        function Invoke-StatusRun {
+            $env:FABRIC_AGENTIC_WORKSPACE_STORAGE = $script:Storage
+            $env:FABRIC_AGENTIC_USER_SETTINGS = $script:NoUserSettings
+            try { return (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script:Script 2>&1 | Out-String) }
+            finally { Remove-Item Env:\FABRIC_AGENTIC_WORKSPACE_STORAGE, Env:\FABRIC_AGENTIC_USER_SETTINGS -ErrorAction SilentlyContinue }
+        }
+        function Set-StatusCatalogState([string]$MicrosoftState, [object[]]$Pins) {
+            $state = [ordered]@{
+                schemaVersion = 1; productVersion = 'test'
+                catalogs = [ordered]@{ 'skills-for-fabric' = [ordered]@{ state = $MicrosoftState; commit = '1111111'; upstreamCommit = '2222222' }; 'power-bi-agentic-development' = [ordered]@{ state = 'upstream' } }
+                pins = @($Pins)
+            }
+            [IO.File]::WriteAllText($script:StatePath, ($state | ConvertTo-Json -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
+        }
+        # The scratch catalogs are plain folders, so the script dates them by file time: make Microsoft's look 90 days old.
+        $old = (Get-Date).AddDays(-90)
+        Get-ChildItem -LiteralPath (Join-Path $script:Root 'skills-for-fabric') -Recurse -File | ForEach-Object { $_.LastWriteTime = $old }
+
+        $present = [ordered]@{ path = 'skills-for-fabric/skills/demo-skill'; critical = $true }
+        Set-StatusCatalogState 'upstream' @($present)
+        $script:OutUpstream = Invoke-StatusRun
+        Set-StatusCatalogState 'held' @($present, [ordered]@{ path = 'skills-for-fabric/skills/gone-skill'; critical = $true }, [ordered]@{ path = 'skills-for-fabric/skills/demo-skill/references/gone.md'; critical = $false })
+        $script:OutHeld = Invoke-StatusRun
+    }
+
+    It 'NEGATIVE CONTROL: an old catalog that is not held gets the refresh hint and no hold line' {
+        $script:OutUpstream | Should -Match 'Upstream older than 30 days: Microsoft \(\d+ d\)'
+        $script:OutUpstream | Should -Not -Match 'Kept at the last compatible version'
+        $script:OutUpstream | Should -Not -Match 'missing on disk'
+    }
+
+    It 'says a held catalog is kept at its last compatible version and does not nag to refresh it' {
+        $script:OutHeld | Should -Match 'Kept at the last compatible version: skills-for-fabric \(upstream changed in a way this kit version does not support yet; nothing to do\)\.'
+        $script:OutHeld | Should -Not -Match 'Upstream older than 30 days' -Because 'refreshing a held catalog changes nothing'
+    }
+
+    It 'counts only critical pinned paths that are missing and points at the installer, not at the user' {
+        $script:OutHeld | Should -Match '(?m)^\s+1 skill path\(s\) the agents reference are missing on disk -> re-run the installer to regenerate the references\.'
+        $lines = @($script:OutHeld -split "`r?`n" | Where-Object { $_ -match 'missing on disk|Kept at the last compatible' })
+        $lines.Count | Should -Be 2
+        ($lines -join ' ') | Should -Not -Match '(?i)\bmap\b|rename|choose' -Because 'an upstream skill change is never handed to the user as a mapping task'
+    }
+}
+
+Describe 'Get-SessionStatus.ps1 registers a new skill folder without rewriting .vscode/settings.json' {
+
+    BeforeAll {
+        $script:SettingsPath = Join-Path $script:Root '.vscode\settings.json'
+        $script:Jsonc = "{`r`n    // keep this comment`r`n    `"chat.subagents.allowInvocationsFromSubagents`": true,`r`n    `"chat.agentSkillsLocations`": {`r`n        `".github/skills`": true,`r`n        `"skills-for-fabric/skills`": true // trailing note`r`n    },`r`n    `"user.customKey`": `"keep-me`"`r`n}`r`n"
+        [IO.File]::WriteAllText($script:SettingsPath, $script:Jsonc, (New-Object System.Text.UTF8Encoding($false)))
+        $env:FABRIC_AGENTIC_WORKSPACE_STORAGE = $script:Storage
+        $env:FABRIC_AGENTIC_USER_SETTINGS = $script:NoUserSettings
+        try { $script:Output4 = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script:Script 2>&1 | Out-String }
+        finally { Remove-Item Env:\FABRIC_AGENTIC_WORKSPACE_STORAGE, Env:\FABRIC_AGENTIC_USER_SETTINGS -ErrorAction SilentlyContinue }
+        $script:SettingsAfter = [IO.File]::ReadAllText($script:SettingsPath)
+    }
+
+    It 'adds exactly the missing folder and reports it' {
+        $script:SettingsAfter | Should -Match '"power-bi-agentic-development/plugins/newplugin/skills": true'
+        $script:Output4 | Should -Match 'Newly registered skill folders \(reload window to load them\): power-bi-agentic-development/plugins/newplugin/skills'
+        $script:Output4 | Should -Match 'Skill locations registered: 3 in \.vscode/settings\.json'
+        $script:Output4 | Should -Match 'Nested dispatch: enabled in \.vscode/settings\.json only'
+    }
+
+    It 'keeps comments, order and every other line of the file' {
+        $script:SettingsAfter | Should -Match '// keep this comment'
+        $script:SettingsAfter | Should -Match '// trailing note'
+        $before = @($script:Jsonc -split "`r`n")
+        $after = @($script:SettingsAfter -split "`r`n")
+        $after.Count | Should -Be ($before.Count + 1) -Because 'one line was added, nothing was reformatted'
+        foreach ($line in @($before | Where-Object { $_ -and $_ -notmatch 'trailing note' })) { ($after -ccontains $line) | Should -BeTrue -Because "line '$line' must survive unchanged" }
+        ($script:SettingsAfter.IndexOf('// keep this comment') -lt $script:SettingsAfter.IndexOf('user.customKey')) | Should -BeTrue
+    }
+
+    It 'leaves an unreadable settings file untouched and says how to repair it' {
+        $broken = "{ `"chat.agentSkillsLocations`": { `".github/skills`": true `r`n"
+        [IO.File]::WriteAllText($script:SettingsPath, $broken, (New-Object System.Text.UTF8Encoding($false)))
+        $env:FABRIC_AGENTIC_WORKSPACE_STORAGE = $script:Storage
+        $env:FABRIC_AGENTIC_USER_SETTINGS = $script:NoUserSettings
+        try { $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script:Script 2>&1 | Out-String }
+        finally { Remove-Item Env:\FABRIC_AGENTIC_WORKSPACE_STORAGE, Env:\FABRIC_AGENTIC_USER_SETTINGS -ErrorAction SilentlyContinue }
+        [IO.File]::ReadAllText($script:SettingsPath) | Should -BeExactly $broken
+        $out | Should -Match 'Nested dispatch: unknown - \.vscode/settings\.json could not be read as JSON; re-run the installer to repair it'
+        $out | Should -Not -Match 'Newly registered skill folders'
+    }
+}
+
+Describe 'Get-SessionStatus.ps1 mentions agent working files only when they have piled up' {
+
+    It 'NEGATIVE CONTROL: a tidy workspace gets no WORKFILES line' {
+        $script:Output | Should -Not -Match '(?m)^WORKFILES'
+    }
+
+    It 'suggests a housekeeping preview when a legacy root scripts/ folder holds many agent scratch files' {
+        $legacy = Join-Path $script:Root 'scripts'
+        New-Item -ItemType Directory -Path $legacy -Force | Out-Null
+        1..30 | ForEach-Object { Set-Content -LiteralPath (Join-Path $legacy ('agent013-probe-20250101-1010{0:d2}.ps1' -f $_)) -Value 'x' }
+        Set-Content -LiteralPath (Join-Path $legacy 'my-own-tool.py') -Value 'x'
+        $before = @(Get-ChildItem -LiteralPath $legacy -File).Count
+        $env:FABRIC_AGENTIC_WORKSPACE_STORAGE = $script:Storage
+        $env:FABRIC_AGENTIC_USER_SETTINGS = $script:NoUserSettings
+        try { $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script:Script 2>&1 | Out-String }
+        finally { Remove-Item Env:\FABRIC_AGENTIC_WORKSPACE_STORAGE, Env:\FABRIC_AGENTIC_USER_SETTINGS -ErrorAction SilentlyContinue }
+        $out | Should -Match '(?m)^WORKFILES agent working files: \d+ file\(s\), [^|]+\| legacy root scripts/: 31 file\(s\), 30 of them agent scratch \| quarantine: 0 file\(s\) -> suggest a housekeeping preview by Capability Maintenance'
+        @(Get-ChildItem -LiteralPath $legacy -File).Count | Should -Be $before -Because 'the status script only counts'
+        $out | Should -Match '(?m)^MCP\s+' -Because 'the helper is loaded in a child scope and must not disturb the rest of the block'
     }
 }

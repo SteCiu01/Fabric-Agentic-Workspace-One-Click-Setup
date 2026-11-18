@@ -251,13 +251,16 @@ Describe 'Generated agent content (specialist knowledge and team protocol)' {
         }
     }
 
-    It 'maintenance agents carry ONE vendor-refresh policy (stop conditions, no blanket never-reset)' {
+    It 'maintenance agents carry ONE vendor-refresh policy (shipped helper, hold is a correct result, no raw git)' {
         foreach ($agent in ($script:Manifest.agents | Where-Object { $_.department -eq 'capability-maintenance' })) {
             $slug = $agent.filename -replace '^\d+-', ''
             $body = $script:BodyBySlug[$slug]
-            $body | Should -Match 'Stop and report instead of resetting' -Because $agent.filename
-            $body | Should -Match 'rev-parse --show-toplevel' -Because "$($agent.filename) must check the repository root before any reset"
+            $body | Should -Match 'Skill-Compat\.ps1 -RefreshCatalogs' -Because "$($agent.filename) must refresh through the installer's own code"
+            $body | Should -Match 'A held catalog is a correct result' -Because $agent.filename
+            $body | Should -Match 'never turn it into a task for the user' -Because "$($agent.filename) must not hand skill mapping to the user"
+            $body | Should -Match 'Never run raw ``?git pull``?/``?git reset``? on a vendor clone' -Because $agent.filename
             $body | Should -Not -Match 'never reset or overwrite it' -Because "$($agent.filename) must not contradict the refresh rule"
+            $body | Should -Not -Match 'Stop and report instead of resetting' -Because 'the hand-run stop list was replaced by the helper'
             $body | Should -Match 'source-control-repositories/[^\r\n]*never' -Because 'business repositories stay protected'
         }
     }
@@ -269,7 +272,8 @@ Describe 'Generated agent content (specialist knowledge and team protocol)' {
             $body | Should -Not -Match 'Use your OWN terminal' -Because 'the shell is shared; a per-agent terminal cannot be guaranteed'
             if (@($agent.tools) -contains 'edit') {
                 $body | Should -Match '\*\*Terminal hygiene\.\*\*' -Because $agent.filename
-                $body | Should -Match 'scripts/<agent>-<purpose>' -Because "$($agent.filename) can write scripts"
+                $body | Should -Match '<task folder>/<agent>-<purpose>' -Because "$($agent.filename) can write scripts, and they belong in its task folder"
+                $body | Should -Not -Match 'scripts/<agent>-<purpose>' -Because "$($agent.filename) must not use the workspace root scripts/ folder"
             } else {
                 $body | Should -Match 'Terminal hygiene \(execute without edit\)' -Because "$($agent.filename) cannot create files"
                 $body | Should -Match 'hand it to an edit-capable worker' -Because "$($agent.filename) must escalate instead of improvising scripts"
@@ -344,6 +348,40 @@ Describe 'Generated agent content (specialist knowledge and team protocol)' {
                 if ($lines[$i] -like '## *') { $lines[$i - 1].Trim() | Should -Be '' -Because "$k line $($i + 1)" }
             }
         }
+    }
+}
+
+# Static guard only: it keeps the agent files free of constructs that are documented as
+# specific to one chat harness. It does not prove that delegation works in another harness.
+Describe 'Agent files avoid harness-specific constructs (static portability guard)' {
+
+    It 'no agent names a harness-internal tool or uses #tool: / #file: references' {
+        foreach ($k in $script:BodyBySlug.Keys) {
+            $script:BodyBySlug[$k] | Should -Not -Match 'runSubagent' -Because "$k must delegate through its agents list, not a tool name of one harness"
+            $script:BodyBySlug[$k] | Should -Not -Match '#tool:|#file:' -Because "$k must not use prompt-file references that only one harness resolves"
+        }
+    }
+
+    It 'every tool grant is a portable capability alias or a whole MCP server' {
+        $portable = @('agent', 'read', 'search', 'execute', 'edit', 'web', 'todo')
+        foreach ($k in $script:GenBySlug.Keys) {
+            foreach ($t in $script:GenBySlug[$k].Tools) {
+                if ($t -match '/') { $t | Should -Match '^[^/*]+/\*$' -Because "$k grants MCP tools per server, never one by one" }
+                else { $portable | Should -Contain $t -Because "$k may only use capability aliases" }
+            }
+        }
+    }
+
+    It 'frontmatter uses only the known keys, and handoffs appear on the Master alone' {
+        $known = @('name', 'description', 'user-invocable', 'disable-model-invocation', 'tools', 'agents', 'handoffs')
+        $withHandoffs = @()
+        foreach ($k in $script:BodyBySlug.Keys) {
+            $front = (($script:BodyBySlug[$k] -replace "`r`n", "`n") -split "`n---`n", 2)[0]
+            foreach ($m in [regex]::Matches($front, '(?m)^([A-Za-z-]+):')) { $known | Should -Contain $m.Groups[1].Value -Because "$k adds a frontmatter key that has not been checked against the supported harnesses" }
+            if ($front -match '(?m)^handoffs:') { $withHandoffs += $k }
+        }
+        $masterSlug = ($script:Manifest.agents | Where-Object { $_.id -eq 'fabric-workspace-master' }).filename -replace '^\d+-', ''
+        $withHandoffs | Should -Be @($masterSlug)
     }
 }
 

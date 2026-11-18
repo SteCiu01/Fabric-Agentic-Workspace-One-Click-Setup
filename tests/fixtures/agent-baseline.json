@@ -1,7 +1,7 @@
 {
     "schemaVersion":  1,
-    "note":  "Generated-agent identities, tool grants, hierarchy and write permissions at the v0.8.0 baseline, plus the PBIVIZ team knowledge (pins, keyword suggestions, Playbook-to-end hash) emitted against tests/fixtures/skill-catalog.snapshot.json.",
-    "capturedFrom":  "7d5547c",
+    "note":  "Generated-agent identities, tool grants, hierarchy and write permissions of the current release, plus the PBIVIZ team knowledge (pins, keyword suggestions, Playbook-to-end hash) emitted against tests/fixtures/skill-catalog.snapshot.json. Refreshed on purpose with an intended change, never to make a run green.",
+    "capturedFrom":  "v0.9.0 working tree on 2641265",
     "agents":  {
                    "000-fabric-workspace-master.agent.md":  {
                                                                 "name":  "000 - Fabric Workspace Master",
@@ -690,7 +690,7 @@
                                                                      },
                    "071-upstream-repository-sync.agent.md":  {
                                                                  "name":  "071 - Upstream Repository Sync Agent",
-                                                                 "description":  "Force-refresh the Microsoft and Kurt vendor repositories to their upstream state so the clones always mirror live upstream, stash any local edits before the hard reset so nothing is lost, record the resulting commits, and report diverged repositories.",
+                                                                 "description":  "Refresh the Microsoft and Kurt vendor repositories to their upstream state through the shipped helper, keep the last compatible catalog when an upstream change would break the skills the agents pin, stash any local edits before the reset so nothing is lost, and report the resulting commits.",
                                                                  "userInvocable":  "false",
                                                                  "tools":  [
                                                                                "read",
@@ -700,7 +700,7 @@
                                                                  "agents":  [
 
                                                                             ],
-                                                                 "writePermission":  "vendor force-refresh to upstream only; stash local edits before hard reset, never hand-edit vendor content."
+                                                                 "writePermission":  "vendor refresh through the shipped helper only (stash local edits, reset to upstream, hold the last compatible catalog); never hand-edit vendor content."
                                                              },
                    "072-skill-inventory-mapping.agent.md":  {
                                                                 "name":  "072 - Skill Inventory \u0026 Mapping Agent",
@@ -906,7 +906,7 @@
                                                                      "auto":  [
 
                                                                               ],
-                                                                     "tailSha256":  "A87A2354B4AEEECEA7D2A4611336494FA34715F2B719213A728F6B4A18F2395B"
+                                                                     "tailSha256":  "E0F2D8E71F91FB406965E687CDA681DB95E4C2E7423B501039D9FD768A452BE3"
                                                                  },
                    "081-pbiviz-planner.agent.md":  {
                                                        "pinned":  [
@@ -920,7 +920,7 @@
                                                        "auto":  [
                                                                     "power-bi-agentic-development/plugins/custom-visuals/skills/deneb-visuals"
                                                                 ],
-                                                       "tailSha256":  "07BC5993967730B55C78B673BC47201A48E6FAA5263621E42DDDCD363173C214"
+                                                       "tailSha256":  "A03CE4B473E0ED61F435462D3D783F1C614D2DE4895CA7471A5597DFAB4CA59D"
                                                    },
                    "082-pbiviz-developer.agent.md":  {
                                                          "pinned":  [
@@ -936,7 +936,7 @@
                                                          "auto":  [
 
                                                                   ],
-                                                         "tailSha256":  "2718B7733A03A6DCE0623638FCF3D4043F0CDBA30BC7216862D69362BEC73953"
+                                                         "tailSha256":  "964E8F3DA55E61480D61E78B7B342CBE4E0346EE686D66FCEEBC8D47C92688BB"
                                                      },
                    "083-pbiviz-tester.agent.md":  {
                                                       "pinned":  [
@@ -948,7 +948,7 @@
                                                       "auto":  [
 
                                                                ],
-                                                      "tailSha256":  "A19D28E4B5C6254A952165CD0CB5E16967CB0A64E0A860EAD5639ED5F092F3CA"
+                                                      "tailSha256":  "FBCC24C2A6F6902204EEFAAA152B3D354FFBDCCE70FC96243CEB70512002060A"
                                                   },
                    "084-pbiviz-reviewer.agent.md":  {
                                                         "pinned":  [
@@ -960,7 +960,7 @@
                                                         "auto":  [
                                                                      "power-bi-agentic-development/plugins/custom-visuals/skills/powerbi-custom-visuals"
                                                                  ],
-                                                        "tailSha256":  "C9F6F08867038D511BC46266885015137DDF0F1E4BCDBC39A2FFA4191CBD858D"
+                                                        "tailSha256":  "0A1AA259D58A7481C1F48C1F592FAA3F226852BE7FD3C09A9C5D6B8BAA51F035"
                                                     },
                    "085-pbiviz-maintainer.agent.md":  {
                                                           "pinned":  [
@@ -972,7 +972,7 @@
                                                           "auto":  [
                                                                        "power-bi-agentic-development/plugins/custom-visuals/skills/powerbi-custom-visuals"
                                                                    ],
-                                                          "tailSha256":  "B6419C7086773B467BF101F229A9FD3330A93A1E34433CB90D7DEAB158806F40"
+                                                          "tailSha256":  "43180B3F8BD6C530FF5D2FD4AAB6141A1867F1600B08379D40881159A3263F37"
                                                       },
                    "086-pbiviz-alm-release.agent.md":  {
                                                            "pinned":  [
@@ -984,7 +984,7 @@
                                                            "auto":  [
 
                                                                     ],
-                                                           "tailSha256":  "4BB5565D87D5D92633A4B9EC64E2B6790822EB89B07E37E2C1C7DFBAED3D0F6B"
+                                                           "tailSha256":  "98822B3888F6AB75978326554973144590E246CCF4ACB7A1920AC9E30B07D499"
                                                        }
                }
 }

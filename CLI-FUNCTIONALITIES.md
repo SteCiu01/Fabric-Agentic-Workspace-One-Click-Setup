@@ -527,12 +527,15 @@ bridge that drives an open Power BI Desktop (reload the canvas, screenshot pages
   folder under `%TEMP%\fabric-report-qa\`, never into the report or the workspace repository.
   `validate` checks structure, not rendering — confirm visually via the Desktop screenshot loop
   or a sandbox `pbir publish`.
-- **Microsoft `powerbi-report-author`** (npm `@microsoft/powerbi-report-authoring-cli`) — an
-  alternative CLI with PBIR validation and Desktop/service preview. **Detect-only**: tool-status
-  key `powerbiReportAuthor`, never prompted for or installed by the installer, and it does not
-  replace `pbir`. A side-by-side evaluation (unsaved-state handling, multiple Desktop instances,
-  structured error recovery, service preview) is still required before it could become a
-  supported option.
+- **Microsoft `powerbi-report-author`** (npm `@microsoft/powerbi-report-authoring-cli`) — a
+  companion CLI, not an editor: it has no command that changes the pages, visuals, bindings,
+  filters or bookmarks of a report (`scaffold` only writes an empty report shell).
+  **Detect-only**: tool-status key `powerbiReportAuthor`, never
+  prompted for or installed by the installer. When it is present, agents use it for metadata and
+  formatting lookup (`catalog`, `formatting`), a second validation (`validate`), a preview of
+  local PBIR against a published model (`preview --host service`) and definition packaging
+  (`pack` / `unpack`). Every fix still goes through `pbir`, one tool's failure is never routed
+  around with the other, and Desktop reload and screenshots stay with `pbir desktop`.
 
 ---
 

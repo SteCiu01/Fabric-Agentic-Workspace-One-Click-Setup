@@ -252,3 +252,51 @@ Describe 'Optional CLI detection: a warning on stderr is not a missing CLI (Cana
         $if.ElseClause.Extent.Text | Should -Not -Match 'winget|Install-AzCliViaVenv'
     }
 }
+
+Describe 'Optional tools are offered again on every run (an earlier No is not remembered)' {
+
+    BeforeAll {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:Installer, [ref]$null, [ref]$null)
+        foreach ($name in 'Set-ToolStatus', 'Invoke-OptionalToolPrompt') {
+            $fn = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true) | Select-Object -First 1
+            $fn | Should -Not -BeNullOrEmpty -Because "$name must exist in the installer"
+            Invoke-Expression $fn.Extent.Text
+        }
+        $script:PromptParams = @(($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-OptionalToolPrompt' }, $true) | Select-Object -First 1).Body.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
+        # The tool is never found on this machine, whatever is installed.
+        function Resolve-ToolCommand { param([string[]]$Aliases, [string[]]$SearchRoots) return $null }
+        function Sync-ToolPaths { }
+        $script:ToolStatus = [ordered]@{}
+        $script:Ask = @{ Key = 'demoTool'; Name = 'demo tool'; Purpose = 'test'; Provider = 'test'; Aliases = @('definitely-not-installed-demo-tool') }
+    }
+
+    It 'asks again although the previous run recorded a No, and installs nothing on No' {
+        Mock Read-Host { 'n' }
+        Mock Write-Host { }
+        $ran = @{ install = 0 }
+        $install = { $ran.install++ }.GetNewClosure()
+        Invoke-OptionalToolPrompt @script:Ask -Install $install
+        $script:ToolStatus['demoTool'].found | Should -BeFalse
+        $script:ToolStatus['demoTool'].reason | Should -Be 'not found; user declined'
+        # Second run: the recorded decline is still in the status table.
+        Invoke-OptionalToolPrompt @script:Ask -Install $install
+        Should -Invoke Read-Host -Times 2 -Exactly
+        $ran.install | Should -Be 0
+    }
+
+    It 'runs the install only on an explicit Yes' {
+        Mock Read-Host { 'y' }
+        Mock Write-Host { }
+        $ran = @{ install = 0 }
+        Invoke-OptionalToolPrompt @script:Ask -Install ({ $ran.install++ }.GetNewClosure())
+        $ran.install | Should -Be 1
+        $script:ToolStatus['demoTool'].reason | Should -Be 'install attempted; not detected'
+    }
+
+    It 'has nothing that could carry an earlier answer into the prompt' {
+        $script:PromptParams | Should -Not -Contain 'Prior'
+        $script:Raw | Should -Not -Match 'Test-PriorDeclined'
+        $script:Raw | Should -Not -Match 'Invoke-OptionalToolPrompt[^\r\n]*-Prior\b'
+        $script:Raw | Should -Not -Match '\$priorToolStatus'
+    }
+}

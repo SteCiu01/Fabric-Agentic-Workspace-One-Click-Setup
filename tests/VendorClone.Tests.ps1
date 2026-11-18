@@ -85,6 +85,20 @@ Describe 'Update-VendorClone (vendor skill repositories mirror upstream)' {
     It 'skips silently when the path does not exist' {
         { Update-VendorClone (Join-Path $script:Root 'missing') 'missing' } | Should -Not -Throw
     }
+
+    It 'never stashes Project Osmos auth output left inside the clone (local exclude, written once)' {
+        $auth = Join-Path $script:Clone '.dataprojects\auth\routing.json'
+        New-Item -ItemType Directory -Path (Split-Path $auth -Parent) -Force | Out-Null
+        Set-Content -LiteralPath $auth -Value 'private service token stand-in'
+        $stashesBefore = @(& git -C $script:Clone stash list 2>$null).Count
+        Update-VendorClone $script:Clone 'test-clone'
+        Update-VendorClone $script:Clone 'test-clone'
+        (Get-Content -LiteralPath $auth) | Should -Be 'private service token stand-in' -Because 'the file stays where the tool wrote it'
+        @(& git -C $script:Clone stash list 2>$null).Count | Should -Be $stashesBefore -Because 'an excluded file is not a local edit'
+        (& git -C $script:Clone stash list --name-only 2>$null | Out-String) | Should -Not -Match 'dataprojects'
+        @(& git -C $script:Clone status --porcelain 2>$null) | Should -BeNullOrEmpty
+        @([regex]::Matches([IO.File]::ReadAllText((Join-Path $script:Clone '.git\info\exclude')), '(?m)^\.dataprojects/\s*$')).Count | Should -Be 1
+    }
 }
 
 Describe 'Update-VendorClone failure paths (never lose edits, never claim a reset that did not happen)' {

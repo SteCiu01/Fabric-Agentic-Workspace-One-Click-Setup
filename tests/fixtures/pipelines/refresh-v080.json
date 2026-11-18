@@ -1,0 +1,17 @@
+{
+  "properties": {
+    "description": "NEGATIVE CONTROL fixture: the SQL analytics endpoint refresh template shipped with v0.8.0. Fabric rejects it; the pipeline check must block it.",
+    "activities": [
+      {
+        "name": "Refresh SQL Endpoint",
+        "type": "RefreshSQLEndpoint",
+        "dependsOn": [],
+        "policy": { "timeout": "0.12:00:00", "retry": 0, "retryIntervalInSeconds": 30 },
+        "typeProperties": {
+          "lakehouseId": "55555555-5555-5555-5555-555555555555",
+          "workspaceId": "11111111-1111-1111-1111-111111111111"
+        }
+      }
+    ]
+  }
+}

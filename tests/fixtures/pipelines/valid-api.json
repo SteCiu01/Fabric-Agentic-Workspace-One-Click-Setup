@@ -1,0 +1,93 @@
+{
+  "properties": {
+    "description": "Synthetic fixture: a definition in API form that the pipeline check accepts. Every GUID is a placeholder.",
+    "activities": [
+      {
+        "name": "Load orders",
+        "type": "TridentNotebook",
+        "dependsOn": [],
+        "policy": { "timeout": "0.12:00:00", "retry": 0, "retryIntervalInSeconds": 30, "secureOutput": false, "secureInput": false },
+        "typeProperties": {
+          "notebookId": "66666666-6666-6666-6666-666666666666",
+          "workspaceId": "11111111-1111-1111-1111-111111111111",
+          "parameters": {
+            "run_date": { "value": { "value": "@pipeline().parameters.RunDate", "type": "Expression" }, "type": "string" }
+          }
+        }
+      },
+      {
+        "name": "For each table",
+        "type": "ForEach",
+        "dependsOn": [ { "activity": "Load orders", "dependencyConditions": [ "Succeeded" ] } ],
+        "typeProperties": {
+          "isSequential": true,
+          "items": { "value": "@pipeline().parameters.Tables", "type": "Expression" },
+          "activities": [
+            {
+              "name": "Collect table",
+              "type": "AppendVariable",
+              "dependsOn": [],
+              "typeProperties": { "variableName": "Processed", "value": { "value": "@item()", "type": "Expression" } }
+            }
+          ]
+        }
+      },
+      {
+        "name": "Refresh SQL endpoint",
+        "type": "RefreshSqlEndpoint",
+        "dependsOn": [ { "activity": "For each table", "dependencyConditions": [ "Succeeded" ] } ],
+        "policy": { "timeout": "0.00:30:00", "retry": 0, "retryIntervalInSeconds": 30, "secureOutput": false, "secureInput": false },
+        "typeProperties": {
+          "workspaceId": { "value": "@pipeline().DataFactory", "type": "Expression" },
+          "sqlEndpointId": "44444444-4444-4444-4444-444444444444",
+          "recreateTables": false
+        },
+        "externalReferences": { "connection": "33333333-3333-3333-3333-333333333333" }
+      },
+      {
+        "name": "Any table processed",
+        "type": "IfCondition",
+        "dependsOn": [ { "activity": "Refresh SQL endpoint", "dependencyConditions": [ "Succeeded" ] } ],
+        "typeProperties": {
+          "expression": { "value": "@greater(length(variables('Processed')), 0)", "type": "Expression" },
+          "ifTrueActivities": [
+            {
+              "name": "Set status",
+              "type": "SetVariable",
+              "dependsOn": [],
+              "policy": { "secureOutput": false, "secureInput": false },
+              "typeProperties": {
+                "variableName": "Status",
+                "value": { "value": "@concat(pipeline().PipelineName, ' loaded into ', pipeline().libraryVariables.target_schema)", "type": "Expression" }
+              }
+            }
+          ],
+          "ifFalseActivities": [
+            {
+              "name": "Nothing to do",
+              "type": "Wait",
+              "dependsOn": [],
+              "typeProperties": { "waitTimeInSeconds": 1 }
+            }
+          ]
+        }
+      }
+    ],
+    "parameters": {
+      "RunDate": { "type": "string", "defaultValue": "2000-01-01" },
+      "Tables": { "type": "array", "defaultValue": [ "orders", "customers" ] }
+    },
+    "variables": {
+      "Processed": { "type": "Array" },
+      "Status": { "type": "String" }
+    },
+    "libraryVariables": {
+      "target_schema": {
+        "libraryName": "Config",
+        "libraryId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "variableName": "target_schema",
+        "type": "String"
+      }
+    }
+  }
+}

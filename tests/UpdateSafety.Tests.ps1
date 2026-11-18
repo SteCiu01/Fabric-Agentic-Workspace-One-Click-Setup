@@ -253,8 +253,13 @@ Describe 'Installer source: manifest ownership and purge containment (static)' {
 
     It 'guards vendor refresh with a repository-root and expected-remote check' {
         $script:Src | Should -Match 'rev-parse --show-toplevel'
-        $script:Src | Should -Match "Update-VendorClone \`"\`$rootPath\\skills-for-fabric\`" 'skills-for-fabric' -ExpectedRemote 'https://github.com/microsoft/skills-for-fabric.git'"
-        $script:Src | Should -Match "Update-VendorClone \`"\`$rootPath\\power-bi-agentic-development\`" 'power-bi-agentic-development' -ExpectedRemote 'https://github.com/data-goblin/power-bi-agentic-development.git'"
+        $script:Src | Should -Match "'skills-for-fabric'\s+= @\{ remote = 'https://github\.com/microsoft/skills-for-fabric\.git'; approved = '[0-9a-f]{40}' \}"
+        $script:Src | Should -Match "'power-bi-agentic-development' = @\{ remote = 'https://github\.com/data-goblin/power-bi-agentic-development\.git'; approved = '[0-9a-f]{40}' \}"
+        $script:Src | Should -Match "Update-VendorClone \`"\`$rootPath\\skills-for-fabric\`" 'skills-for-fabric' -ExpectedRemote \`$vendorCatalogs\['skills-for-fabric'\]\.remote"
+        $script:Src | Should -Match "Update-VendorClone \`"\`$rootPath\\power-bi-agentic-development\`" 'power-bi-agentic-development' -ExpectedRemote \`$vendorCatalogs\['power-bi-agentic-development'\]\.remote"
+        $calls = @([regex]::Matches($script:Src, 'Update-VendorClone ["$][^\r\n]*') | ForEach-Object { $_.Value })
+        $calls.Count | Should -Be 3 -Because 'two installer refreshes and the Maintenance refresh'
+        foreach ($c in $calls) { $c | Should -Match '-ExpectedRemote \$' -Because 'no refresh call may skip the expected-remote guard' }
     }
 
     It 'only accepts a winget payload after a normal zero exit' {
