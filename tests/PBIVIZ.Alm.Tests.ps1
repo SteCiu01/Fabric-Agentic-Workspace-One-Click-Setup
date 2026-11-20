@@ -852,6 +852,163 @@ Describe 'Selective single-visual promotion (#13, #14)' {
     }
 }
 
+Describe 'A promotion targets the current production revision, read where it is decided' {
+
+    BeforeAll {
+        # Level 3 with a remote: main, Prod and Dev pushed to a bare 'origin'; Dev then gets Bar 1.0.0.2.
+        function New-TL3Remote {
+            param([string]$RemoteName = 'origin', [string[]]$Push = @('main', 'PBVIZ_Team_Prod', 'PBVIZ_Team_Dev'))
+            $r = New-TL3
+            $bare = New-TBare
+            TGit $r remote add $RemoteName $bare | Out-Null
+            $pushArgs = @('push', '-q', $RemoteName) + $Push
+            TGit $r @pushArgs | Out-Null
+            Set-TVersion $r 'Bar' 'barGuid0001' '1.0.0.2'
+            Save-TAll $r 'bar 1.0.0.2' | Out-Null
+            return [pscustomobject]@{ Repo = $r; Bare = $bare; Prod = (TGit $r rev-parse PBVIZ_Team_Prod) }
+        }
+        # Somebody else releases to Prod: a second clone commits on the branch and pushes it.
+        function Add-TRemoteProdCommit {
+            param([string]$Bare)
+            $other = New-TDir 'o'
+            TGit $script:Root clone -q --branch PBVIZ_Team_Prod $Bare $other | Out-Null
+            Write-TFile $other 'Column/src/visual.ts' 'export class Visual { releasedElsewhere = 1 }'
+            Save-TAll $other 'released by somebody else' | Out-Null
+            TGit $other push -q origin PBVIZ_Team_Prod | Out-Null
+            return (TGit $other rev-parse HEAD)
+        }
+        function Get-TRefChanges { param($Before, [string]$Repo) $d = Compare-PbivizRefSnapshot -Before $Before -After (Get-TRefs $Repo); return @(@($d.Created) + @($d.Updated) + @($d.Deleted)) }
+    }
+
+    It 'reads the production revision from the remote as it is now, without fetching or writing a ref' {
+        $f = New-TL3Remote
+        $refs = Get-TRefs $f.Repo
+        $p = Get-PbivizProductionRevision -Root $f.Repo
+        $p.Status | Should -Be 'VERIFIED' -Because $p.Reason
+        $p.Sha | Should -Be $f.Prod
+        $p.Source | Should -Match 'remote origin'
+        $new = Add-TRemoteProdCommit $f.Bare
+        $q = Get-PbivizProductionRevision -Root $f.Repo
+        $q.Sha | Should -Be $new -Because 'the remote decides, not the local branch'
+        (TGit $f.Repo rev-parse PBVIZ_Team_Prod) | Should -Be $f.Prod -Because 'the local branch is not moved'
+        @(Get-TRefChanges $refs $f.Repo).Count | Should -Be 0
+        Test-Path -LiteralPath (Join-Path $f.Repo '.git\FETCH_HEAD') | Should -BeFalse
+    }
+
+    It 'a promotion from the current revision is unaffected: candidate and every gate pass, and the evidence names the revision' {
+        $f = New-TL3Remote
+        $p = Invoke-TPromotion -Repo $f.Repo
+        $p.Candidate.Status | Should -Be 'PASS' -Because $p.Candidate.Reason
+        (@($p.Candidate.Evidence) -join "`n") | Should -Match "target $($f.Prod) is the current production revision \(remote origin"
+        $p.Gates.Status | Should -Be 'PASS' -Because $p.Gates.Reason
+        (Get-TGate $p.Gates 'G0').Detail | Should -Match 'is the current production revision'
+    }
+
+    It 'NEGATIVE CONTROL: rejects a local Prod branch that is behind the remote, and writes nothing' {
+        $f = New-TL3Remote
+        $new = Add-TRemoteProdCommit $f.Bare
+        $refs = Get-TRefs $f.Repo; $dirs = Get-TReleaseDirs
+        $c = New-PbivizPromotionCandidate -Root $f.Repo -Visual 'Bar' -SourceRef PBVIZ_Team_Dev -TargetRef PBVIZ_Team_Prod
+        $c.Status | Should -Be 'BLOCKED'
+        $c.Reason | Should -Match '^stale target'
+        $c.Reason | Should -Match $new
+        $c.Reason | Should -Match 'not in this clone'
+        $c.Worktree | Should -BeNullOrEmpty
+        @(Get-TRefChanges $refs $f.Repo).Count | Should -Be 0 -Because 'a refused promotion creates no branch and moves none'
+        (Get-TReleaseDirs) | Should -Be $dirs
+        # After a one-branch fetch the revision is in the clone: the local branch is still behind, the remote-tracking ref is current.
+        TGit $f.Repo fetch -q --no-tags origin '+refs/heads/PBVIZ_Team_Prod:refs/remotes/origin/PBVIZ_Team_Prod' | Out-Null
+        $behind = New-PbivizPromotionCandidate -Root $f.Repo -Visual 'Bar' -SourceRef PBVIZ_Team_Dev -TargetRef PBVIZ_Team_Prod
+        $behind.Status | Should -Be 'BLOCKED'
+        $behind.Reason | Should -Match "^stale target: $($f.Prod) is behind the current production revision $new"
+        $ok = New-PbivizPromotionCandidate -Root $f.Repo -Visual 'Bar' -SourceRef PBVIZ_Team_Dev -TargetRef 'origin/PBVIZ_Team_Prod'
+        $ok.Status | Should -Be 'PASS' -Because $ok.Reason
+        $ok.Target | Should -Be $new
+    }
+
+    It 'refuses a target that is not the production tip: <Case>' -TestCases @(
+        @{ Case = 'the Dev branch'; Ref = 'PBVIZ_Team_Dev'; Prepare = { }; Text = '^invalid target: .* is not the current production revision' }
+        @{ Case = 'a tag that shadows the branch name'; Ref = 'PBVIZ_Team_Prod'; Prepare = { param($Repo) TGit $Repo tag PBVIZ_Team_Prod PBVIZ_Team_Dev | Out-Null }; Text = '^invalid target: .* is not the current production revision' }
+        @{ Case = 'a name that resolves to nothing'; Ref = 'no-such-branch'; Prepare = { }; Text = 'does not resolve to a commit' }
+    ) {
+        param($Case, $Ref, $Prepare, $Text)
+        $f = New-TL3Remote
+        & $Prepare $f.Repo
+        $refs = Get-TRefs $f.Repo
+        $c = New-PbivizPromotionCandidate -Root $f.Repo -Visual 'Bar' -SourceRef PBVIZ_Team_Dev -TargetRef $Ref
+        $c.Status | Should -Be 'BLOCKED'
+        $c.Reason | Should -Match $Text
+        @(Get-TRefChanges $refs $f.Repo).Count | Should -Be 0
+    }
+
+    It 'when the remote cannot be read there is no candidate and no passing gate' {
+        $f = New-TL3Remote
+        $done = Invoke-TPromotion -Repo $f.Repo
+        $done.Gates.Status | Should -Be 'PASS' -Because $done.Gates.Reason
+        Rename-Item -LiteralPath $f.Bare -NewName ((Split-Path $f.Bare -Leaf) + '-gone')
+        $p = Get-PbivizProductionRevision -Root $f.Repo
+        $p.Status | Should -Be 'UNVERIFIED'
+        $p.Sha | Should -BeNullOrEmpty
+        $g = Test-PbivizPromotionGates -Worktree $done.Candidate.Worktree -Visual 'Bar' -TargetRef PBVIZ_Team_Prod
+        $g.Status | Should -Be 'BLOCKED'
+        (Get-TGate $g 'G0').Pass | Should -BeFalse
+        (Get-TGate $g 'G0').Detail | Should -Match 'could not be verified'
+        $f2 = New-TL3Remote
+        Rename-Item -LiteralPath $f2.Bare -NewName ((Split-Path $f2.Bare -Leaf) + '-gone')
+        $c = New-PbivizPromotionCandidate -Root $f2.Repo -Visual 'Bar' -SourceRef PBVIZ_Team_Dev -TargetRef PBVIZ_Team_Prod
+        $c.Status | Should -Be 'BLOCKED'
+        $c.Reason | Should -Match 'production revision could not be verified'
+        $c.Worktree | Should -BeNullOrEmpty
+    }
+
+    It 'Prod advancing after the candidate was cut fails G0 at the gates, while the other gates still report' {
+        $f = New-TL3Remote
+        $p = Invoke-TPromotion -Repo $f.Repo
+        $p.Gates.Status | Should -Be 'PASS' -Because $p.Gates.Reason
+        $new = Add-TRemoteProdCommit $f.Bare
+        $again = Test-PbivizPromotionGates -Worktree $p.Candidate.Worktree -Visual 'Bar' -TargetRef PBVIZ_Team_Prod
+        $again.Status | Should -Be 'BLOCKED'
+        (Get-TGate $again 'G0').Pass | Should -BeFalse
+        (Get-TGate $again 'G0').Detail | Should -Match "^stale target: .*$new"
+        @($again.Gates | Where-Object { $_.Gate -ne 'G0' -and -not $_.Pass }).Count | Should -Be 0 -Because 'only the freshness of the target changed'
+        $again.Reason | Should -Match 'G0'
+    }
+
+    It 'without any remote the local branch is the production revision, and the evidence says so' {
+        $r = New-TL3
+        $p = Get-PbivizProductionRevision -Root $r
+        $p.Status | Should -Be 'VERIFIED'
+        $p.Sha | Should -Be (TGit $r rev-parse PBVIZ_Team_Prod)
+        $p.Source | Should -Match 'no remote'
+        Set-TVersion $r 'Bar' 'barGuid0001' '1.0.0.2'
+        Save-TAll $r 'bar' | Out-Null
+        $c = New-PbivizPromotionCandidate -Root $r -Visual 'Bar' -SourceRef PBVIZ_Team_Dev -TargetRef main
+        $c.Status | Should -Be 'PASS' -Because 'main names the same commit as the Prod tip here; the commit decides, not the spelling'
+    }
+
+    It 'a remote that does not hold the production branch, or is not the one named, verifies nothing' {
+        $f = New-TL3Remote -Push @('main')
+        $p = Get-PbivizProductionRevision -Root $f.Repo
+        $p.Status | Should -Be 'UNVERIFIED'
+        $p.Reason | Should -Match "has no branch 'PBVIZ_Team_Prod'"
+        (New-PbivizPromotionCandidate -Root $f.Repo -Visual 'Bar' -SourceRef PBVIZ_Team_Dev -TargetRef PBVIZ_Team_Prod).Status | Should -Be 'BLOCKED'
+        $u = New-TL3Remote -RemoteName 'upstream'
+        (Get-PbivizProductionRevision -Root $u.Repo).Reason | Should -Match "remote 'origin' is not configured"
+        (Get-PbivizProductionRevision -Root $u.Repo -Remote 'upstream').Status | Should -Be 'VERIFIED'
+        $c = New-PbivizPromotionCandidate -Root $u.Repo -Visual 'Bar' -SourceRef PBVIZ_Team_Dev -TargetRef PBVIZ_Team_Prod -Remote 'upstream'
+        $c.Status | Should -Be 'PASS' -Because $c.Reason
+        $rec = Read-PbivizCandidateRecord -Worktree $c.Worktree
+        $rec.prodRemote | Should -Be 'upstream' -Because 'the gates re-read the remote recorded for the candidate'
+        $rec.prodBranch | Should -Be 'PBVIZ_Team_Prod'
+    }
+
+    It 'rejects an unsafe remote or branch name before Git runs' {
+        $r = New-TL3
+        (Get-PbivizProductionRevision -Root $r -Remote '--upload-pack=x').Reason | Should -Match 'invalid input: remote name'
+        (Get-PbivizProductionRevision -Root $r -Branch '-x').Reason | Should -Match 'invalid input: branch name'
+    }
+}
+
 Describe 'G6 is independent of pathspec mode (S1)' {
 
     It 'BLOCKS deletion of an existing Prod release with identical verdicts when the test process sets <Mode>' -TestCases @(

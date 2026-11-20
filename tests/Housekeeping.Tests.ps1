@@ -633,7 +633,7 @@ Describe 'Ignore rules for Power BI project files (HK-02)' {
             'skills-for-fabric/', 'power-bi-agentic-development/', 'source-control-repositories/',
             '.vscode/', 'Fabric-Agentic-Workspace.code-workspace', 'Thumbs.db', '.DS_Store',
             '**/.pbi/localSettings.json', '**/.pbi/cache.abf',
-            '.github/agent-docs/tool-status.json', '.github/agent-docs/session-status.last.txt',
+            '.github/agent-docs/tool-status.json', '.github/agent-docs/session-status.last.txt', '.github/agent-docs/session-status/',
             '.github/agent-docs/guardrail-status.json', '.github/agent-docs/installed-manifest.json',
             '.github/agent-docs/skill-catalog-state.json', '.github/agent-docs/local/',
             '.dataprojects/', "/$script:AwsName/"

@@ -2,8 +2,9 @@
   "value": [
     { "id": "66666666-6666-6666-6666-666666666666", "type": "Notebook", "displayName": "Load orders" },
     { "id": "44444444-4444-4444-4444-444444444444", "type": "SQLEndpoint", "displayName": "Sales" },
+    { "id": "77777777-7777-7777-7777-777777777777", "type": "SQLEndpoint", "displayName": "Finance" },
     { "id": "55555555-5555-5555-5555-555555555555", "type": "Lakehouse", "displayName": "Sales" },
     { "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "type": "VariableLibrary", "displayName": "Config" },
-    { "id": "33333333-3333-3333-3333-333333333333", "displayName": "SQL endpoint refresh connection" }
+    { "id": "33333333-3333-3333-3333-333333333333", "displayName": "SQL endpoint refresh connection", "connectivityType": "ShareableCloud", "connectionDetails": { "type": "FabricSqlEndpointMetadata", "path": "placeholder" } }
   ]
 }

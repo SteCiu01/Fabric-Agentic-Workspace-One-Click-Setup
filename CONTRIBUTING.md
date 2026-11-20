@@ -1,70 +1,103 @@
 # Contributing to Fabric Agentic Workspace One-Click Setup
 
-First off — thank you for considering contributing! This project is actively
-looking for feedback, ideas, and improvements from the community.
+Bug reports, ideas and pull requests are welcome.
 
-## How can I contribute?
+## Report a bug
 
-### Reporting bugs
+[Open a bug report](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/issues/new?template=bug_report.yml)
+and include:
 
-Found something broken? [Open a bug report](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/issues/new?template=bug_report.yml).
-
-Please include:
 - Your OS and PowerShell version
 - Steps to reproduce
-- What you expected vs what happened
-- Any terminal output or screenshots
+- What you expected and what happened
+- Terminal output or screenshots
 
-### Suggesting features or improvements
+Report a security vulnerability privately instead: see
+[SECURITY.md](SECURITY.md).
 
-Have an idea? [Open a feature request](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/issues/new?template=feature_request.yml).
+## Suggest a feature or improvement
 
-All ideas are welcome — from small quality-of-life tweaks to entirely new
-agent workflows or specialist agents.
+[Open a feature request](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/issues/new?template=feature_request.yml).
+Small tweaks are as welcome as new agent workflows or specialist agents.
 
-### Submitting code changes
+## Submit a code change
 
-1. **Fork** the repository
-2. **Create a branch** from `main`:
-   ```
-   git checkout -b feature/your-feature-name
-   ```
-   Use prefixes: `feature/`, `fix/`, `docs/`, `chore/`
-3. **Make your changes** — keep commits focused and atomic
-4. **Test your changes**:
-   - Run the Pester suite: double-click `tests/Run-Tests.bat` (see [tests/README.md](tests/README.md) for focused runs, prerequisites and how to add a regression test)
-   - Run the `.bat` installer on a clean folder to verify setup works end-to-end
-   - If you modified an agent definition, test it in VS Code Copilot Chat
-   - If you modified the PowerShell script, test on both PowerShell 5.1 and PowerShell 7+ if possible
-   - The PBIVIZ Git helper has a single source, the `$pbivizAlmScript` heredoc inside the installer: change it there and add a test to `tests/PBIVIZ.Alm.Tests.ps1` that fails without your change
-5. **Open a pull request** against `main`
-
-### What's a good first contribution?
-
-Look for issues labelled [`good first issue`](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/labels/good%20first%20issue)
-or check [Validation, compatibility and known limitations](README.md#311-validation-compatibility-and-known-limitations)
-in the README for areas that have not yet been exercised.
-
-Some ideas:
-- Cross-platform setup script (bash/zsh for macOS/Linux)
-- Automated tests for the installer script
-- Improved error messages or UX in the setup flow
-- Additional agent workflows or skill integrations
-- New specialist agents for uncovered Fabric workloads
-- Documentation improvements
-
-## Development setup
-
-To work on this project locally:
-
-1. Clone your fork:
+1. **Fork** the repository and clone your fork:
    ```
    git clone https://github.com/<your-username>/Fabric-Agentic-Workspace-One-Click-Setup.git
    ```
-2. The project has no build step — the deliverable is the two installer files
-   inside `fabric-agentic-installer/`.
-3. To test, double-click `Setup-FabricAgenticWorkspace.bat` or run the `.ps1`
-   directly in PowerShell.
+2. **Create a branch** from `main`, with one of the prefixes `feature/`,
+   `fix/`, `docs/` or `chore/`:
+   ```
+   git checkout -b feature/your-feature-name
+   ```
+3. **Make your changes.** There is no build step: the deliverable is the two
+   installer files in `fabric-agentic-installer/`. Keep each commit to one
+   change.
+4. **Test your changes**:
+   - Run the Pester suite: double-click `tests/Run-Tests.bat`.
+     [tests/README.md](tests/README.md) covers focused runs, prerequisites
+     and how to add a regression test.
+   - Run the installer on a clean folder to check that setup works end to
+     end: double-click `Setup-FabricAgenticWorkspace.bat` or run the `.ps1`
+     in PowerShell.
+   - If you changed the PowerShell script, test under Windows PowerShell 5.1
+     and, if you can, PowerShell 7 or later.
+   - If you changed an agent, install into a test folder and try the agent
+     in VS Code Copilot Chat.
+   - The PBIVIZ Git helper has a single source, the `$pbivizAlmScript`
+     heredoc inside the installer: change it there and add a test to
+     `tests/PBIVIZ.Alm.Tests.ps1` that fails without your change.
+5. **Open a pull request** against `main`.
+
+## Code style
+
+- **PowerShell**: full cmdlet names (no aliases), meaningful variable names,
+  a comment where the logic is not obvious.
+- **Markdown**: ATX headings (`##`); lines under 80 characters where
+  practical.
+- **Agent definitions**: the installer generates the `.agent.md` files, so
+  change an agent in `Setup-FabricAgenticWorkspace.ps1`, not in a generated
+  file: `$agentManifestJson` holds its identity, hierarchy and tools,
+  `$agentKnowledge` its skills and playbook. Follow the structure of the
+  existing entries and keep instructions explicit. `-EmitAgentsTo <dir>`
+  writes the generated files without installing anything. A change to an
+  agent's identity or tools also needs the baseline fixture updated (see
+  [tests/README.md](tests/README.md)).
+
+## Commit messages
+
+Use [Conventional Commits](https://www.conventionalcommits.org/) style:
+
+```
+feat: add macOS setup script
+fix: handle spaces in folder names
+docs: clarify Fabric extension installation steps
+chore: update skills-for-fabric clone URL
+```
+
+## Pull request guidelines
+
+- Reference the related issue if one exists (for example `Closes #12`).
+- Describe what changed and why.
+- Keep each pull request to one feature or fix.
+- Expect review feedback and follow-up changes.
+
+## Good first contributions
+
+Look for issues labelled [`good first issue`](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/labels/good%20first%20issue),
+or pick an item from *Not yet exercised* in
+[Validation, compatibility and known limitations](README.md#311-validation-compatibility-and-known-limitations).
+
+Some ideas:
+
+- A setup script for macOS or Linux (bash/zsh); the installer runs on
+  Windows only
+- A regression test for a case the suite does not cover yet
+- Clearer error messages or prompts in the setup flow
+- More agent workflows or skill integrations
+- Specialist agents for Fabric workloads the team does not cover yet
+- Documentation improvements
 
 ## Maintainer notes: reviewing the upstream skill catalogues
 
@@ -91,29 +124,47 @@ What a review changes, and where:
    `fabric-cli-policy`, `fabric-ai-readiness`) are re-read against Microsoft Learn in the same
    review; change the date only when the text was actually re-checked.
 
-## Code style
+## Keeping the documentation current
 
-- **PowerShell**: Use full cmdlet names (not aliases), meaningful variable names, and comment non-obvious logic
-- **Markdown**: Use ATX headings (`##`), keep lines under 80 characters where practical
-- **Agent definitions**: Follow the existing structure in the `.agent.md` files — clear phases, explicit instructions, no ambiguity
+The documents follow one house style,
+`.github/skills/product-communication/SKILL.md`: what each document is for,
+the changelog rules and the accuracy checks. Read it before you change one.
 
-## Commit messages
+Two pieces of maintainer tooling check that the documents still match the
+source when you work with a coding agent. The installer ships neither.
 
-Use [Conventional Commits](https://www.conventionalcommits.org/) style:
+- **Communication Writer** (`.github/agents/communication-writer.agent.md`): a
+  reviewer that other agents run as a subagent. It compares the documents with
+  the source, updates them and records a verdict. It edits documents only.
+- **End-of-task hook** (`.github/hooks/documentation-review.json`, which runs
+  `.github/hooks/Doc-Review.ps1`): when a task changed a file under
+  `fabric-agentic-installer/` or `schema/`, a Markdown file in the repository
+  root, `LICENSE` or `tests/README.md`, it asks the agent to run the Writer
+  before the task ends. It asks at most twice, then reports the review as
+  incomplete: it can ask an agent to continue, but cannot make it delegate.
+  For a change nobody can observe, the agent can record
+  `-NoImpact -Reason "<one sentence>"` instead; the gate still needs a review.
+  The hook needs Windows PowerShell and does nothing on other systems.
+
+A review is recorded only when the Writer gave the verdict `complete` and the
+hook saw that run start and finish; running the script by hand never records
+one. It is stale as soon as one of the files above differs from what was
+reviewed (a file added to or removed from the two folders counts), and valid
+again when the reviewed content is restored. Records are kept in
+`.git/doc-review/` (under TEMP if the checkout has no `.git` folder), so they
+are never committed.
+
+Before a release, run the gate from the repository root:
 
 ```
-feat: add macOS setup script
-fix: handle spaces in folder names
-docs: clarify Fabric extension installation steps
-chore: update skills-for-fabric clone URL
+powershell -NoProfile -ExecutionPolicy Bypass -File .github/hooks/Doc-Review.ps1 -Gate
 ```
 
-## Pull request guidelines
-
-- Reference the related issue if one exists (e.g. `Closes #12`)
-- Describe what changed and why
-- Keep PRs focused — one feature or fix per PR
-- Be open to feedback and iteration
+It prints `DOC GATE: PASS` and returns exit code 0 only when a recorded review
+matches the current files and the hook configuration, the Writer and the skill
+are in place. Otherwise it prints `DOC GATE: FAIL` and returns 1: ask your
+agent to run a Communication Writer review, then run the gate again. `-Status`
+instead of `-Gate` shows the same state without the pass or fail.
 
 ## Code of Conduct
 
@@ -122,5 +173,4 @@ By participating, you agree to uphold it.
 
 ## Questions?
 
-Open a [discussion](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/issues)
-or reach out via the issue tracker. There are no bad questions.
+Ask in the [issue tracker](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/issues).

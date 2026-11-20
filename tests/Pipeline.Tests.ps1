@@ -275,6 +275,195 @@ Describe 'Workspace portability (PIPE-02, PIPE-06)' {
     }
 }
 
+Describe 'References are checked for identity and item type' {
+
+    BeforeAll {
+        function New-PdId([string]$Digit) { return (($Digit * 8), ($Digit * 4), ($Digit * 4), ($Digit * 4), ($Digit * 12) -join '-') }
+        $script:Id = @{
+            Notebook = New-PdId '6'; SQLEndpoint = New-PdId '4'; Lakehouse = New-PdId '5'; VariableLibrary = New-PdId 'a'; Connection = New-PdId '3'
+            DataPipeline = New-PdId '7'; Dataflow = New-PdId '8'; SemanticModel = New-PdId '9'; CopyJob = New-PdId 'c'; SparkJobDefinition = New-PdId 'd'
+            Environment = New-PdId 'e'; UserDataFunction = New-PdId 'f'; Warehouse = New-PdId '2'
+        }
+        # An inventory as the two list calls answer: items carry "type", connections carry "connectivityType".
+        function New-PdInventory([string]$Name, [string[]]$Without = @(), [string[]]$Untyped = @(), [hashtable]$Top = @{}) {
+            $entries = @()
+            foreach ($t in @($script:Id.Keys | Sort-Object)) {
+                if ($Without -contains $t) { continue }
+                if ($Untyped -contains $t) { $entries += [ordered]@{ id = $script:Id[$t]; displayName = "$t one" } }
+                elseif ($t -eq 'Connection') { $entries += [ordered]@{ id = $script:Id[$t]; displayName = 'Refresh connection'; connectivityType = 'ShareableCloud'; connectionDetails = [ordered]@{ type = 'FabricSqlEndpointMetadata'; path = 'x' } } }
+                else { $entries += [ordered]@{ id = $script:Id[$t]; type = $t; displayName = "$t one"; workspaceId = $script:Target } }
+            }
+            $doc = [ordered]@{ value = $entries }
+            foreach ($k in $Top.Keys) { $doc[$k] = $Top[$k] }
+            return (Save-PdFile $Name (ConvertTo-Json -InputObject $doc -Depth 6))
+        }
+        # One activity per kind of reference the check knows. -Set replaces one id: 'activity name|property path' = value.
+        function New-PdReferences([string]$Name, [hashtable]$Set = @{}) {
+            $ws = $script:Target; $id = $script:Id
+            $policy = [ordered]@{ timeout = '0.01:00:00'; retry = 0; retryIntervalInSeconds = 30 }
+            $acts = @(
+                [ordered]@{ name = 'Notebook'; type = 'TridentNotebook'; dependsOn = @(); typeProperties = [ordered]@{ notebookId = $id.Notebook; workspaceId = $ws } }
+                [ordered]@{ name = 'Refresh'; type = 'RefreshSqlEndpoint'; dependsOn = @(); typeProperties = [ordered]@{ workspaceId = $ws; sqlEndpointId = $id.SQLEndpoint; recreateTables = $false }; externalReferences = [ordered]@{ connection = $id.Connection } }
+                [ordered]@{ name = 'Invoke'; type = 'InvokePipeline'; dependsOn = @(); typeProperties = [ordered]@{ workspaceId = $ws; pipelineId = $id.DataPipeline; waitOnCompletion = $true }; externalReferences = [ordered]@{ connection = $id.Connection } }
+                [ordered]@{ name = 'Execute'; type = 'ExecutePipeline'; dependsOn = @(); typeProperties = [ordered]@{ pipeline = [ordered]@{ referenceName = $id.DataPipeline; type = 'PipelineReference' }; waitOnCompletion = $true } }
+                [ordered]@{ name = 'Dataflow'; type = 'RefreshDataFlow'; dependsOn = @(); policy = $policy; typeProperties = [ordered]@{ dataflowId = $id.Dataflow; workspaceId = $ws } }
+                [ordered]@{ name = 'Spark'; type = 'SparkJobDefinition'; dependsOn = @(); typeProperties = [ordered]@{ sparkJobDefinitionId = $id.SparkJobDefinition; workspaceId = $ws } }
+                [ordered]@{ name = 'CopyJob'; type = 'InvokeCopyJob'; dependsOn = @(); typeProperties = [ordered]@{ copyJobId = $id.CopyJob; workspaceId = $ws } }
+                [ordered]@{ name = 'Model'; type = 'PBISemanticModelRefresh'; dependsOn = @(); typeProperties = [ordered]@{ method = 'POST'; groupId = $ws; datasetId = $id.SemanticModel; type = 'Full'; operationType = 'RefreshDataset' }; externalReferences = [ordered]@{ connection = $id.Connection } }
+                [ordered]@{ name = 'Lookup'; type = 'Lookup'; dependsOn = @(); typeProperties = [ordered]@{ source = [ordered]@{ type = 'LakehouseTableSource' }; firstRowOnly = $true
+                        datasetSettings = [ordered]@{ type = 'LakehouseTable'; typeProperties = [ordered]@{ table = 'config' }; linkedService = [ordered]@{ name = 'lh'; properties = [ordered]@{ type = 'Lakehouse'; typeProperties = [ordered]@{ workspaceId = $ws; artifactId = $id.Lakehouse; rootFolder = 'Tables' } } } } } }
+            )
+            $def = [ordered]@{ properties = [ordered]@{ activities = $acts; libraryVariables = [ordered]@{ schema = [ordered]@{ libraryName = 'Config'; libraryId = $id.VariableLibrary; variableName = 'schema'; type = 'String' } } } }
+            foreach ($k in $Set.Keys) {
+                $actName, $path = $k -split '\|', 2
+                $node = if ($actName -eq 'properties') { $def.properties } else { @($acts | Where-Object { $_.name -eq $actName })[0] }
+                $parts = @($path -split '\.')
+                for ($i = 0; $i -lt $parts.Count - 1; $i++) { $node = $node[$parts[$i]] }
+                $node[$parts[-1]] = $Set[$k]
+            }
+            return (Save-PdFile $Name (ConvertTo-Json -InputObject $def -Depth 30))
+        }
+        function Invoke-PdRefs([string]$Definition, [string]$InventoryFile) { return (Invoke-PdCheck @{ Path = $Definition; TargetWorkspaceId = $script:Target; InventoryPath = $InventoryFile }) }
+        $script:FullInventory = New-PdInventory 'inv-full.json'
+    }
+
+    It 'passes when every reference names an item of the expected type, and says what the inventory held' {
+        $r = Invoke-PdRefs (New-PdReferences 'refs-ok.json') $script:FullInventory
+        $r.Result | Should -Be 'PASS' -Because $r.Text
+        $r.Text | Should -Match 'inventory: 12 item\(s\) with a type, 0 without, 1 connection\(s\)'
+        $j = (& $script:Check -Path (Join-Path $script:Base 'refs-ok.json') -TargetWorkspaceId $script:Target -InventoryPath $script:FullInventory -AsJson | Out-String) | ConvertFrom-Json
+        $endpoint = @($j.bindings | Where-Object { $_.where -eq 'Refresh:typeProperties.sqlEndpointId' })[0]
+        $endpoint.class | Should -Be 'item-known'
+        $endpoint.itemType | Should -Be 'SQLEndpoint'
+        $endpoint.expectedType | Should -Be 'SQLEndpoint'
+    }
+
+    It 'NEGATIVE CONTROL: the lakehouse id as sqlEndpointId is blocked although it is an item of the workspace' {
+        $r = Invoke-PdRefs (New-PdReferences 'refs-lh-as-endpoint.json' @{ 'Refresh|typeProperties.sqlEndpointId' = $script:Id.Lakehouse }) $script:FullInventory
+        $r.Result | Should -Be 'BLOCKED' -Because $r.Text
+        $r.Exit | Should -Be 1
+        $r.Text | Should -Match 'PD084 Refresh:typeProperties\.sqlEndpointId'
+        $r.Text | Should -Match 'is a Lakehouse, not a SQLEndpoint'
+    }
+
+    It 'blocks an existing item of the wrong type under <Where> (expected <Expected>)' -TestCases @(
+        @{ Where = 'Notebook|typeProperties.notebookId'; Expected = 'Notebook' }
+        @{ Where = 'Invoke|typeProperties.pipelineId'; Expected = 'DataPipeline' }
+        @{ Where = 'Execute|typeProperties.pipeline.referenceName'; Expected = 'DataPipeline' }
+        @{ Where = 'Dataflow|typeProperties.dataflowId'; Expected = 'Dataflow' }
+        @{ Where = 'Spark|typeProperties.sparkJobDefinitionId'; Expected = 'SparkJobDefinition' }
+        @{ Where = 'CopyJob|typeProperties.copyJobId'; Expected = 'CopyJob' }
+        @{ Where = 'Model|typeProperties.datasetId'; Expected = 'SemanticModel' }
+        @{ Where = 'Lookup|typeProperties.datasetSettings.linkedService.properties.typeProperties.artifactId'; Expected = 'Lakehouse' }
+        @{ Where = 'properties|libraryVariables.schema.libraryId'; Expected = 'VariableLibrary' }
+        @{ Where = 'Notebook|typeProperties.environmentId'; Expected = 'Environment' }
+        @{ Where = 'Notebook|typeProperties.functionSetId'; Expected = 'UserDataFunction' }
+        @{ Where = 'Notebook|typeProperties.lakehouseId'; Expected = 'Lakehouse' }
+    ) {
+        param($Where, $Expected)
+        $r = Invoke-PdRefs (New-PdReferences 'refs-wrong.json' @{ $Where = $script:Id.Warehouse }) $script:FullInventory
+        $r.Result | Should -Be 'BLOCKED' -Because $r.Text
+        $r.Text | Should -Match "PD084 .*is a Warehouse, not a $Expected"
+        @($r.Lines | Where-Object { $_ -match '\[block\]' }).Count | Should -Be 1 -Because 'only the changed reference is wrong'
+    }
+
+    It 'blocks an item where a connection belongs, and a connection where an item belongs' {
+        $a = Invoke-PdRefs (New-PdReferences 'refs-item-as-conn.json' @{ 'Refresh|externalReferences.connection' = $script:Id.SQLEndpoint }) $script:FullInventory
+        $a.Result | Should -Be 'BLOCKED' -Because $a.Text
+        $a.Text | Should -Match 'PD084 Refresh:externalReferences\.connection .*is a SQLEndpoint item, not a connection'
+        $b = Invoke-PdRefs (New-PdReferences 'refs-conn-as-item.json' @{ 'Refresh|typeProperties.sqlEndpointId' = $script:Id.Connection }) $script:FullInventory
+        $b.Result | Should -Be 'BLOCKED' -Because $b.Text
+        $b.Text | Should -Match 'PD084 Refresh:typeProperties\.sqlEndpointId .*is a connection, not a SQLEndpoint'
+    }
+
+    It 'is UNCHECKED when the inventory entry has no type: the type is never guessed from the id' {
+        $inv = New-PdInventory 'inv-untyped-endpoint.json' -Untyped @('SQLEndpoint')
+        $r = Invoke-PdRefs (Join-Path $script:Base 'refs-ok.json') $inv
+        $r.Result | Should -Be 'UNCHECKED' -Because $r.Text
+        $r.Exit | Should -Be 3
+        $r.Text | Should -Match '\[unchecked\] PD085 Refresh:typeProperties\.sqlEndpointId'
+        $r.Text | Should -Match 'inventory: 11 item\(s\) with a type, 1 without'
+        # The same id shape with every type removed: nothing passes on the shape of a GUID.
+        $none = New-PdInventory 'inv-untyped-all.json' -Untyped @($script:Id.Keys)
+        $all = Invoke-PdRefs (Join-Path $script:Base 'refs-ok.json') $none
+        $all.Result | Should -Be 'UNCHECKED'
+        @($all.Lines | Where-Object { $_ -match 'PD085' }).Count | Should -Be 13 -Because 'ten item references and three connection references'
+    }
+
+    It 'blocks an id that is in no list (sqlEndpointId and connection)' {
+        $r = Invoke-PdRefs (New-PdReferences 'refs-missing.json' @{ 'Refresh|typeProperties.sqlEndpointId' = $script:Unknown }) $script:FullInventory
+        $r.Result | Should -Be 'BLOCKED'
+        $r.Text | Should -Match 'PD075 Refresh:typeProperties\.sqlEndpointId'
+        $c = Invoke-PdRefs (New-PdReferences 'refs-missing-conn.json' @{ 'Refresh|externalReferences.connection' = $script:Unknown }) $script:FullInventory
+        $c.Text | Should -Match 'PD076 Refresh:externalReferences\.connection'
+    }
+
+    It 'a partial inventory is UNCHECKED, not a stale reference: <Case>' -TestCases @(
+        @{ Case = 'the item list without the connection list'; Without = @('Connection'); Top = @{}; Rule = 'PD087'; Text = 'no connection list' }
+        @{ Case = 'the connection list without the item list'; Without = @('Notebook', 'SQLEndpoint', 'Lakehouse', 'VariableLibrary', 'DataPipeline', 'Dataflow', 'SemanticModel', 'CopyJob', 'SparkJobDefinition', 'Environment', 'UserDataFunction', 'Warehouse'); Top = @{}; Rule = 'PD087'; Text = 'no item list' }
+        @{ Case = 'one page of a longer item list'; Without = @('SQLEndpoint'); Top = @{ continuationToken = 'next-page' }; Rule = 'PD087'; Text = 'more pages' }
+    ) {
+        param($Case, $Without, $Top, $Rule, $Text)
+        $inv = New-PdInventory 'inv-partial.json' -Without $Without -Top $Top
+        $r = Invoke-PdRefs (Join-Path $script:Base 'refs-ok.json') $inv
+        $r.Result | Should -Be 'UNCHECKED' -Because $r.Text
+        $r.Exit | Should -Be 3
+        $r.Text | Should -Match "\[unchecked\] $Rule .*$Text"
+        $r.Text | Should -Not -Match 'PD075|PD076'
+    }
+
+    It 'an inventory that cannot be read is exit code 2, never a result' {
+        $r = Invoke-PdRefs (Join-Path $script:Base 'refs-ok.json') (Join-Path $script:Base 'no-such-inventory.json')
+        $r.Exit | Should -Be 2
+        $r.Result | Should -BeNullOrEmpty
+        $r.Text | Should -Match 'inventory file not found'
+    }
+
+    It 'is UNCHECKED for a reference whose expected type the contract does not define (artifactId under another linked service)' {
+        $p = New-PdReferences 'refs-other-ls.json' @{ 'Lookup|typeProperties.datasetSettings.linkedService.properties.type' = 'SomeOtherStore'; 'Lookup|typeProperties.datasetSettings.linkedService.properties.typeProperties.artifactId' = $script:Id.Warehouse }
+        $r = Invoke-PdRefs $p $script:FullInventory
+        $r.Result | Should -Be 'UNCHECKED' -Because $r.Text
+        $r.Text | Should -Match '\[unchecked\] PD086 Lookup:.*artifactId .*Warehouse'
+    }
+
+    It 'still accepts the supported variants: <Case>' -TestCases @(
+        @{ Case = 'the id in upper case'; Set = { @{ 'CopyJob|typeProperties.copyJobId' = $script:Id.CopyJob.ToUpperInvariant() } } }
+        @{ Case = 'the id taken from a Variable Library value'; Set = { @{ 'Refresh|typeProperties.sqlEndpointId' = '@pipeline().libraryVariables.schema' } } }
+        @{ Case = 'the id as an Expression object'; Set = { @{ 'Refresh|typeProperties.sqlEndpointId' = [ordered]@{ value = "@pipeline().parameters.EndpointId"; type = 'Expression' }; 'properties|parameters' = [ordered]@{ EndpointId = [ordered]@{ type = 'string' } } } } }
+    ) {
+        param($Case, $Set)
+        $r = Invoke-PdRefs (New-PdReferences 'refs-variant.json' (& $Set)) $script:FullInventory
+        $r.Result | Should -Be 'PASS' -Because $r.Text
+    }
+
+    It 'reads the type from a saved API answer and compares it without regard to letter case' {
+        $entries = @(([IO.File]::ReadAllText($script:FullInventory) | ConvertFrom-Json).value)
+        foreach ($e in $entries) { if ($e.PSObject.Properties['type']) { $e.type = $e.type.ToLowerInvariant() } }
+        $wrapped = Save-PdFile 'inv-wrapped.json' (ConvertTo-Json -InputObject ([ordered]@{ status_code = 200; text = [ordered]@{ value = $entries } }) -Depth 8)
+        (Invoke-PdRefs (Join-Path $script:Base 'refs-ok.json') $wrapped).Result | Should -Be 'PASS'
+    }
+
+    It 'an unchanged activity of the current definition is not re-checked (the change plan is the place for it)' {
+        $bad = New-PdReferences 'refs-current-bad.json' @{ 'Refresh|typeProperties.sqlEndpointId' = $script:Id.Lakehouse }
+        $r = Invoke-PdCheck @{ Path = $bad; CurrentPath = $bad; TargetWorkspaceId = $script:Target; InventoryPath = $script:FullInventory }
+        $r.Text | Should -Not -Match 'PD084'
+    }
+
+    It 'checks a literal id inside an Expression object like the property it belongs to' {
+        $p = New-PdReferences 'refs-exprobj-literal.json' @{ 'Refresh|typeProperties.sqlEndpointId' = [ordered]@{ value = $script:Id.Lakehouse; type = 'Expression' } }
+        $r = Invoke-PdRefs $p $script:FullInventory
+        $r.Result | Should -Be 'BLOCKED' -Because $r.Text
+        $r.Text | Should -Match 'PD084 Refresh:typeProperties\.sqlEndpointId\.value .*is a Lakehouse, not a SQLEndpoint'
+    }
+
+    It 'says how many references are expressions, because their value cannot be compared offline' {
+        $p = New-PdReferences 'refs-expr-count.json' @{ 'Refresh|typeProperties.sqlEndpointId' = '@pipeline().libraryVariables.schema'; 'Notebook|typeProperties.notebookId' = '@pipeline().libraryVariables.schema' }
+        $r = Invoke-PdRefs $p $script:FullInventory
+        $r.Result | Should -Be 'PASS' -Because $r.Text
+        $r.Text | Should -Match '\[info\] PD088 properties - 2 item or connection reference\(s\) are expressions'
+    }
+}
+
 Describe 'Definition round-trip (PIPE-03)' {
 
     It 'a definition read from another workspace is blocked without the target''s current definition' {
@@ -285,7 +474,7 @@ Describe 'Definition round-trip (PIPE-03)' {
 
     It 'prints a change plan: activities added, changed and every binding that moves' {
         $p = New-PdVariant 'changed.json' { param($def)
-            $def.properties.activities[2].typeProperties.sqlEndpointId = (('5' * 8), ('5' * 4), ('5' * 4), ('5' * 4), ('5' * 12) -join '-')
+            $def.properties.activities[2].typeProperties.sqlEndpointId = (('7' * 8), ('7' * 4), ('7' * 4), ('7' * 4), ('7' * 12) -join '-')
             $def.properties.activities += [pscustomobject]@{ name = 'Pause'; type = 'Wait'; dependsOn = @(); typeProperties = [pscustomobject]@{ waitTimeInSeconds = 5 } }
         }
         $r = Get-PdTargeted $p @{ CurrentPath = (Join-Path $script:Fx 'valid-api.json') }
@@ -293,7 +482,7 @@ Describe 'Definition round-trip (PIPE-03)' {
         $r.Text | Should -Match 'change plan: 1 added, 0 removed, 1 changed, 6 unchanged; 1 binding change'
         $r.Text | Should -Match '\+ Pause'
         $r.Text | Should -Match '~ Refresh SQL endpoint'
-        $r.Text | Should -Match 'binding Refresh SQL endpoint:typeProperties\.sqlEndpointId: 4{8}-\S+ -> 5{8}-'
+        $r.Text | Should -Match 'binding Refresh SQL endpoint:typeProperties\.sqlEndpointId: 4{8}-\S+ -> 7{8}-'
     }
 
     It 'reports an activity that disappears from the current definition' {

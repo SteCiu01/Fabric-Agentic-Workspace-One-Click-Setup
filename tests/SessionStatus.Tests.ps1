@@ -350,3 +350,149 @@ Describe 'Get-SessionStatus.ps1 mentions agent working files only when they have
         $out | Should -Match '(?m)^MCP\s+' -Because 'the helper is loaded in a child scope and must not disturb the rest of the block'
     }
 }
+
+Describe 'Get-SessionStatus.ps1 keeps one status snapshot per session' {
+
+    BeforeAll {
+        $script:AgentDocs = Join-Path $script:Root '.github\agent-docs'
+        $script:SnapDir = Join-Path $script:AgentDocs 'session-status'
+        $script:LastFile = Join-Path $script:AgentDocs 'session-status.last.txt'
+        $script:NoStorage = Join-Path $script:Root 'no-workspace-storage'
+        New-Item -ItemType Directory -Path $script:NoStorage -Force | Out-Null
+        function Start-StatusRun([string]$SessionId) {
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            $psi.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $script:Script + '"' + $(if ($SessionId) { ' -SessionId "' + $SessionId + '"' })
+            $psi.WorkingDirectory = $env:TEMP
+            $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardInput = $true
+            $psi.EnvironmentVariables['FABRIC_AGENTIC_USER_SETTINGS'] = $script:NoUserSettings
+            $psi.EnvironmentVariables['FABRIC_AGENTIC_WORKSPACE_STORAGE'] = $script:NoStorage
+            $p = [Diagnostics.Process]::Start($psi)
+            $p.StandardInput.Close()
+            return [pscustomobject]@{ Process = $p; Out = $p.StandardOutput.ReadToEndAsync() }
+        }
+        function Wait-StatusRun($Run) { $Run.Process.WaitForExit(); return [pscustomobject]@{ Exit = $Run.Process.ExitCode; Text = [string]$Run.Out.Result } }
+        function Invoke-StatusRun([string]$SessionId) { return (Wait-StatusRun (Start-StatusRun $SessionId)) }
+        function Get-Block([string]$Text) { return (($Text -replace "`r`n", "`n").Trim()) }
+    }
+
+    It 'two sessions running at the same moment each keep their own complete block' {
+        $a = Start-StatusRun 'session-alpha'; $b = Start-StatusRun 'session-beta'
+        $ra = Wait-StatusRun $a; $rb = Wait-StatusRun $b
+        $ra.Exit | Should -Be 0; $rb.Exit | Should -Be 0
+        foreach ($pair in @(@('session-alpha', $ra), @('session-beta', $rb))) {
+            $file = Join-Path $script:SnapDir "$($pair[0]).txt"
+            Test-Path -LiteralPath $file | Should -BeTrue
+            $saved = [IO.File]::ReadAllText($file)
+            (Get-Block $saved) | Should -Be (Get-Block $pair[1].Text) -Because 'the snapshot is exactly the block this run printed'
+            $saved | Should -Match "(?m)^SESSION\s+$($pair[0]) "
+            $saved | Should -Match '(?m)^GENERATED \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}'
+            $saved | Should -Match '(?m)^MCP\s+'
+        }
+        @(Get-ChildItem -LiteralPath $script:SnapDir -Filter *.tmp).Count | Should -Be 0
+    }
+
+    It 'a repeated run replaces the session''s own snapshot and leaves the other session''s file byte-identical' {
+        $other = Join-Path $script:SnapDir 'session-beta.txt'
+        $before = [IO.File]::ReadAllBytes($other)
+        $first = [IO.File]::ReadAllText((Join-Path $script:SnapDir 'session-alpha.txt'))
+        Start-Sleep -Milliseconds 1100
+        $r = Invoke-StatusRun 'session-alpha'
+        $now = [IO.File]::ReadAllText((Join-Path $script:SnapDir 'session-alpha.txt'))
+        (Get-Block $now) | Should -Be (Get-Block $r.Text)
+        $now | Should -Not -Be $first -Because 'the GENERATED stamp moved'
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes($other)) | Should -Be ([Convert]::ToBase64String($before))
+        @(Get-ChildItem -LiteralPath $script:SnapDir -Filter 'session-alpha*').Count | Should -Be 1 -Because 'one file per session, not one per run'
+    }
+
+    It 'the shared file is only the latest run of any session, and says whose it is' {
+        Invoke-StatusRun 'session-beta' | Out-Null
+        $last = [IO.File]::ReadAllText($script:LastFile)
+        $last | Should -Match '(?m)^SESSION\s+session-beta '
+        (Get-Block $last) | Should -Be (Get-Block ([IO.File]::ReadAllText((Join-Path $script:SnapDir 'session-beta.txt'))))
+        [IO.File]::ReadAllText((Join-Path $script:SnapDir 'session-alpha.txt')) | Should -Match '(?m)^SESSION\s+session-alpha ' -Because 'the other session''s own snapshot still holds its own block'
+        $last | Should -Match 'session-status\.last\.txt is the latest run of any session'
+    }
+
+    It 'a caller that passes no id still gets the block, the shared file and an id of its own (earlier callers keep working)' {
+        $r1 = Invoke-StatusRun ''; $r2 = Invoke-StatusRun ''
+        $r1.Exit | Should -Be 0
+        $r1.Text | Should -Match '(?m)^GENERATED \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}'
+        $id1 = [regex]::Match($r1.Text, '(?m)^SESSION\s+(\S+) ').Groups[1].Value
+        $id2 = [regex]::Match($r2.Text, '(?m)^SESSION\s+(\S+) ').Groups[1].Value
+        $id1 | Should -Match '^[A-Za-z0-9_-]{12,64}$'
+        $id2 | Should -Not -Be $id1 -Because 'generated ids do not collide'
+        Test-Path -LiteralPath (Join-Path $script:SnapDir "$id1.txt") | Should -BeTrue
+        (Get-Block ([IO.File]::ReadAllText($script:LastFile))) | Should -Be (Get-Block $r2.Text)
+    }
+
+    It 'an interrupted write never leaves a half-written snapshot: <Case>' -TestCases @(
+        @{ Case = 'the snapshot is open in another program'; Kind = 'locked' }
+        @{ Case = 'an earlier run died and left a temp file'; Kind = 'leftover' }
+    ) {
+        param($Case, $Kind)
+        $file = Join-Path $script:SnapDir 'session-alpha.txt'
+        $old = [IO.File]::ReadAllText($file)
+        if ($Kind -eq 'locked') {
+            $hold = [IO.File]::Open($file, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+            try { $r = Invoke-StatusRun 'session-alpha' } finally { $hold.Dispose() }
+            $r.Exit | Should -Be 0 -Because 'the block on stdout does not depend on the file'
+            $r.Text | Should -Match '(?m)^MCP\s+'
+            $after = [IO.File]::ReadAllText($file)
+            ($after -eq $old -or (Get-Block $after) -eq (Get-Block $r.Text)) | Should -BeTrue -Because 'the file is the old block or the new one, never a mixture'
+        } else {
+            $stale = Join-Path $script:SnapDir 'session-alpha.txt.4242.deadbeef.tmp'
+            [IO.File]::WriteAllText($stale, 'GENERATED half a blo')
+            (Get-Item -LiteralPath $stale).LastWriteTimeUtc = [DateTime]::UtcNow.AddDays(-2)
+            $fresh = Join-Path $script:SnapDir 'session-gamma.txt.4243.cafe0001.tmp'
+            [IO.File]::WriteAllText($fresh, 'another session is writing right now')
+            $r = Invoke-StatusRun 'session-alpha'
+            (Get-Block ([IO.File]::ReadAllText($file))) | Should -Be (Get-Block $r.Text)
+            Test-Path -LiteralPath $stale | Should -BeFalse -Because 'a temp file older than a day belongs to a run that died'
+            Test-Path -LiteralPath $fresh | Should -BeTrue -Because 'a recent temp file may be another session''s write in progress'
+            Remove-Item -LiteralPath $fresh -Force
+        }
+    }
+
+    It 'a missing snapshot folder is created again, and a session without a snapshot simply has no file' {
+        Remove-Item -LiteralPath $script:SnapDir -Recurse -Force
+        Test-Path -LiteralPath (Join-Path $script:SnapDir 'session-never-ran.txt') | Should -BeFalse
+        $r = Invoke-StatusRun 'session-alpha'
+        $r.Exit | Should -Be 0
+        Test-Path -LiteralPath (Join-Path $script:SnapDir 'session-alpha.txt') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $script:SnapDir 'session-never-ran.txt') | Should -BeFalse
+    }
+
+    It 'removes snapshots older than seven days and never a recent one of another session' {
+        $old = Join-Path $script:SnapDir 'session-old.txt'; $recent = Join-Path $script:SnapDir 'session-recent.txt'
+        [IO.File]::WriteAllText($old, 'old block'); [IO.File]::WriteAllText($recent, 'recent block of another session')
+        (Get-Item -LiteralPath $old).LastWriteTimeUtc = [DateTime]::UtcNow.AddDays(-8)
+        (Get-Item -LiteralPath $recent).LastWriteTimeUtc = [DateTime]::UtcNow.AddHours(-2)
+        $keep = Join-Path $script:SnapDir 'notes-of-the-user.md'
+        [IO.File]::WriteAllText($keep, 'not a snapshot'); (Get-Item -LiteralPath $keep).LastWriteTimeUtc = [DateTime]::UtcNow.AddDays(-30)
+        Invoke-StatusRun 'session-alpha' | Out-Null
+        Test-Path -LiteralPath $old | Should -BeFalse
+        [IO.File]::ReadAllText($recent) | Should -Be 'recent block of another session'
+        Test-Path -LiteralPath $keep | Should -BeTrue -Because 'only its own .txt snapshots are cleaned'
+    }
+
+    It 'a session id that is not a plain name never becomes a path' {
+        $filesBefore = @(Get-ChildItem -LiteralPath $script:Root -Recurse -File | ForEach-Object { $_.FullName })
+        $r = Invoke-StatusRun '..\..\outside\evil id'
+        $r.Exit | Should -Be 0
+        $id = [regex]::Match($r.Text, '(?m)^SESSION\s+(\S+) ').Groups[1].Value
+        $id | Should -Match '^[A-Za-z0-9_-]{1,64}$'
+        $new = @(Get-ChildItem -LiteralPath $script:Root -Recurse -File | ForEach-Object { $_.FullName } | Where-Object { $filesBefore -notcontains $_ })
+        $new | Should -Be @((Join-Path $script:SnapDir "$id.txt"))
+        Test-Path -LiteralPath (Join-Path (Split-Path $script:Root -Parent) 'outside') | Should -BeFalse
+    }
+
+    It 'the snapshot folder is ignored by Git, and the starting flow reads the session''s own file' {
+        $installer = [IO.File]::ReadAllText($script:Installer)
+        $installer | Should -Match '(?m)^\.github/agent-docs/session-status/\r?$' -Because 'the .gitignore template must list the snapshot folder'
+        $flow = [IO.File]::ReadAllText((Join-Path $script:AgentDocs 'starting-flow.md'))
+        $flow | Should -Match 'Get-SessionStatus\.ps1 -SessionId <id>'
+        $flow | Should -Match '\.github/agent-docs/session-status/<id>\.txt'
+        $flow | Should -Match 'session-status\.last\.txt[^\r\n]*latest run of any session'
+    }
+}

@@ -2946,6 +2946,10 @@ $pipelineCheckScript = @'
     -AllowActivityType   activity types the user confirmed against JSON produced by the Fabric editor.
     -InventoryPath       saved JSON lists with an id per entry: the items of the target workspace and
                          the connections. With -File, give both in one quoted value: "<items.json>,<connections.json>".
+                         An item reference must name an entry of the type its property takes (sqlEndpointId a
+                         SQLEndpoint, notebookId a Notebook, ...); the type is read from the entry's "type",
+                         never guessed. An entry without a type, a list that is missing or one page of
+                         several is UNCHECKED.
     -Format              Api (default: a definition for createItem or updateDefinition) or
                          Git (a file in a Git-connected folder, where the all-zero workspace id is expected).
     -AllowRecreateTables accept recreateTables = true on a SQL analytics endpoint refresh (destructive).
@@ -3146,22 +3150,58 @@ function Test-PdExpressionObjects {
 function Get-PdKeys { param($Object) if ($Object -is [System.Management.Automation.PSCustomObject]) { return @($Object.PSObject.Properties | ForEach-Object { $_.Name }) }; return @() }
 
 function Get-PdInventory {
+    # What the saved lists say about each id. An item entry carries "type"; a connection entry carries
+    # "connectivityType" or "connectionDetails". An entry with neither is known by its id only: its kind
+    # is never guessed.
     param([string[]]$Paths)
-    $set = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $inv = [pscustomobject]@{
+        Ids         = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+        Types       = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([StringComparer]::OrdinalIgnoreCase)
+        Connections = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+        Untyped     = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+        Partial     = $false
+    }
     foreach ($p in $Paths) {
         if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { throw "inventory file not found: $p" }
         $j = [IO.File]::ReadAllText((Resolve-Path -LiteralPath $p).Path) | ConvertFrom-Json
-        $list = $null
+        $list = $null; $holder = $null
         if ($j -is [System.Management.Automation.PSCustomObject]) {
-            if ($j.PSObject.Properties['text'] -and $j.text -is [System.Management.Automation.PSCustomObject] -and $j.text.PSObject.Properties['value']) { $list = $j.text.value }
-            elseif ($j.PSObject.Properties['value']) { $list = $j.value }
+            if ($j.PSObject.Properties['text'] -and $j.text -is [System.Management.Automation.PSCustomObject] -and $j.text.PSObject.Properties['value']) { $list = $j.text.value; $holder = $j.text }
+            elseif ($j.PSObject.Properties['value']) { $list = $j.value; $holder = $j }
         }
         else { $list = $j }
+        # A continuation token means the saved answer is one page of several.
+        if ($holder) { foreach ($k in 'continuationToken', 'continuationUri') { if ($holder.PSObject.Properties[$k] -and $holder.$k) { $inv.Partial = $true } } }
         $n = 0
-        foreach ($e in @($list)) { if ($e -is [System.Management.Automation.PSCustomObject] -and $e.PSObject.Properties['id'] -and $e.id) { [void]$set.Add([string]$e.id); $n++ } }
+        foreach ($e in @($list)) {
+            if (-not ($e -is [System.Management.Automation.PSCustomObject]) -or -not $e.PSObject.Properties['id'] -or -not $e.id) { continue }
+            $id = [string]$e.id
+            [void]$inv.Ids.Add($id); $n++
+            if ($e.PSObject.Properties['connectivityType'] -or $e.PSObject.Properties['connectionDetails']) { [void]$inv.Connections.Add($id) }
+            elseif ($e.PSObject.Properties['type'] -and $e.type -is [string] -and $e.type) { $inv.Types[$id] = $e.type }
+            else { [void]$inv.Untyped.Add($id) }
+        }
         if (-not $n) { throw "inventory file holds no entries with an id: $p" }
     }
-    return , $set
+    return $inv
+}
+
+# The item type each reference property takes (type names as the Fabric item list returns them).
+$script:PdItemTypes = @{
+    notebookId = 'Notebook'; pipelineId = 'DataPipeline'; dataflowId = 'Dataflow'; datasetId = 'SemanticModel'; sqlEndpointId = 'SQLEndpoint'
+    lakehouseId = 'Lakehouse'; copyJobId = 'CopyJob'; sparkJobDefinitionId = 'SparkJobDefinition'; environmentId = 'Environment'
+    libraryId = 'VariableLibrary'; functionSetId = 'UserDataFunction'
+}
+function Get-PdExpectedType {
+    # $null when the contract does not define one type for this property at this place.
+    param([string]$Key, [string]$Where, [hashtable]$ByWhere)
+    if ($script:PdItemTypes.ContainsKey($Key)) { return $script:PdItemTypes[$Key] }
+    if ($Key -ceq 'referenceName' -and $Where -match '(^|\.)pipeline\.referenceName$') { return 'DataPipeline' }
+    if ($Key -ceq 'artifactId' -and $Where -match '^(.*)\.typeProperties\.artifactId$') {
+        $typeAt = "$($Matches[1]).type"
+        if ($ByWhere.ContainsKey($typeAt) -and [string]$ByWhere[$typeAt].value -ceq 'Lakehouse') { return 'Lakehouse' }
+    }
+    return $null
 }
 
 # ---------------------------------------------------------------- read the inputs
@@ -3332,7 +3372,7 @@ foreach ($k in $declLib) {
 
 # ---------------------------------------------------------------- bindings: GUIDs and credentials
 $bindings = New-Object System.Collections.Generic.List[object]
-$uncheckedRefs = 0; $uncheckedForeign = 0; $noTarget = 0
+$uncheckedRefs = 0; $uncheckedForeign = 0; $noTarget = 0; $expressionRefs = 0
 $itemKeys = @('notebookId', 'pipelineId', 'dataflowId', 'datasetId', 'sqlEndpointId', 'artifactId', 'lakehouseId', 'copyJobId', 'sparkJobDefinitionId', 'itemId', 'environmentId', 'functionSetId', 'libraryId', 'referenceName')
 $wsKeys = @('workspaceId', 'groupId')
 $secretKey = '(?i)^(password|pwd|secret|clientsecret|accountkey|accesskey|sastoken|sasuri|apikey|api_key|connectionstring|serviceprincipalkey|accesstoken|token)$'
@@ -3353,6 +3393,7 @@ function Test-PdLeafSet {
                 Add-PdFinding block 'PD079' "${Owner}:$($l.where)" "'$idKey' must be a GUID or an expression; '$shown' is neither (a placeholder, a name or an empty value)"
                 continue
             }
+            if ($isIdProperty -and ($wsKeys -cnotcontains $idKey) -and $idText.StartsWith('@') -and -not $idText.StartsWith('@@')) { $script:expressionRefs++ }
         }
         if ($l.kind -ne 'string' -or -not $l.value) { continue }
         $key = ($l.where -split '\.')[-1] -replace '\[\d+\]$', ''
@@ -3366,10 +3407,18 @@ function Test-PdLeafSet {
             continue
         }
         $whole = $l.value -match "^$($script:PdGuid)$"
+        # A reference written as an Expression object ({ "value": "<guid>", "type": "Expression" }) is the
+        # reference of the property above it.
+        $refKey = $key; $refWhere = $l.where
+        if ($key -ceq 'value' -and $l.where -match '^(.*?([A-Za-z]+))\.value$') {
+            $ownerWhere = $Matches[1]; $ownerKey = $Matches[2]
+            if (($itemKeys -ccontains $ownerKey) -or $ownerWhere.EndsWith('externalReferences.connection', [StringComparison]::Ordinal)) { $refKey = $ownerKey; $refWhere = $ownerWhere }
+        }
+        $isConnRef = $refWhere -match '(^|\.)externalReferences\.connection$'
+        $refParent = if ($refWhere.Contains('.')) { $refWhere.Substring(0, $refWhere.LastIndexOf('.')) } else { '' }
         foreach ($m in [regex]::Matches($l.value, $script:PdGuid)) {
             $g = $m.Value.ToLowerInvariant()
-            $class = 'other'
-            $parent = if ($l.where.Contains('.')) { $l.where.Substring(0, $l.where.LastIndexOf('.')) } else { '' }
+            $class = 'other'; $foundType = $null; $expectedType = $null
             if ($g -eq $script:PdZero) {
                 $class = 'zero'
                 if (-not $Trusted -and $Format -eq 'Api') { Add-PdFinding block 'PD073' $at 'all-zero GUID: in the Git format it marks a logical-ID reference that Fabric resolves on Update from Git. Sent through the API it stays zero and the activity fails at run time' }
@@ -3388,25 +3437,48 @@ function Test-PdLeafSet {
                 else { $class = 'workspace-uncompared'; $script:noTarget++ }
             }
             elseif ($target -and $g -eq $target) { $class = 'target-workspace' }
-            elseif ($whole -and ($l.where -match '(^|\.)externalReferences\.connection$' -or $itemKeys -ccontains $key)) {
-                $isConn = $l.where -match '(^|\.)externalReferences\.connection$'
+            elseif ($whole -and ($isConnRef -or $itemKeys -ccontains $refKey)) {
+                $isConn = $isConnRef
                 $class = if ($isConn) { 'connection' } else { 'item' }
                 if (-not $Trusted -and $Format -eq 'Api') {
                     $sibling = $null
-                    foreach ($wk in $wsKeys) { $cand = $(if ($parent) { "$parent.$wk" } else { $wk }); if ($byWhere.ContainsKey($cand)) { $sibling = [string]$byWhere[$cand].value } }
+                    foreach ($wk in $wsKeys) { $cand = $(if ($refParent) { "$refParent.$wk" } else { $wk }); if ($byWhere.ContainsKey($cand)) { $sibling = [string]$byWhere[$cand].value } }
                     $siblingGuid = $sibling -and ($sibling -match "^$($script:PdGuid)$")
                     $foreign = (-not $isConn) -and $target -and $siblingGuid -and ($sibling.ToLowerInvariant() -ne $target)
                     if ($siblingGuid -and $sibling -eq $script:PdZero -and -not $isConn) { $class = 'logical-id' }   # the zero workspace id next to it is already blocked
                     elseif ($foreign) { $script:uncheckedForeign++ }
                     elseif (-not $inventory) { $script:uncheckedRefs++ }
-                    elseif (-not $inventory.Contains($g)) {
-                        if ($isConn) { Add-PdFinding block 'PD076' $at "connection $g is not among the connections supplied; a stale or foreign connection reference" }
-                        else { Add-PdFinding block 'PD075' $at "$key $g is not an item of the target workspace; a stale or foreign item reference" }
+                    elseif (-not $inventory.Ids.Contains($g)) {
+                        # Not found is a stale reference only when the list it should be in was supplied in full.
+                        $listed = if ($isConn) { $inventory.Connections.Count + $inventory.Untyped.Count } else { $inventory.Types.Count + $inventory.Untyped.Count }
+                        $label = if ($isConn) { 'connection' } else { $refKey }
+                        if ($inventory.Partial) { Add-PdFinding unchecked 'PD087' $at "$label $g was not found, but a saved list has more pages (a continuation token): the inventory is incomplete" }
+                        elseif (-not $listed) { Add-PdFinding unchecked 'PD087' $at "$label $g was not checked: the inventory holds no $(if ($isConn) { 'connection' } else { 'item' }) list" }
+                        elseif ($isConn) { Add-PdFinding block 'PD076' $at "connection $g is not among the connections supplied; a stale or foreign connection reference" }
+                        else { Add-PdFinding block 'PD075' $at "$refKey $g is not an item of the target workspace; a stale or foreign item reference" }
                     }
-                    else { $class += '-known' }
+                    else {
+                        # The id exists. It must also be the kind of object this property takes; the kind comes
+                        # from the inventory entry, never from the id.
+                        $listedConn = $inventory.Connections.Contains($g)
+                        if ($inventory.Types.ContainsKey($g)) { $foundType = $inventory.Types[$g] }
+                        if ($isConn) {
+                            if ($listedConn) { $class += '-known' }
+                            elseif ($foundType) { Add-PdFinding block 'PD084' $at "connection $g is a $foundType item, not a connection" }
+                            else { Add-PdFinding unchecked 'PD085' $at "connection $g is in the inventory, but its entry does not say that it is a connection (no connectivityType); its kind was not checked" }
+                        }
+                        else {
+                            $expectedType = Get-PdExpectedType -Key $refKey -Where $refWhere -ByWhere $byWhere
+                            if ($listedConn) { Add-PdFinding block 'PD084' $at "$refKey $g is a connection, not $(if ($expectedType) { "a $expectedType" } else { 'an item' })" }
+                            elseif (-not $foundType) { Add-PdFinding unchecked 'PD085' $at "$refKey $g is in the inventory, but its entry carries no item type; the type was not checked$(if ($expectedType) { " (this property takes a $expectedType)" })" }
+                            elseif (-not $expectedType) { Add-PdFinding unchecked 'PD086' $at "$refKey $g is a $foundType item of the target workspace; the contract does not define which item type this property takes here, so the type was not checked" }
+                            elseif ($foundType -ine $expectedType) { Add-PdFinding block 'PD084' $at "$refKey $g is a $foundType, not a ${expectedType}: the id exists in the target workspace but names another kind of item" }
+                            else { $class += '-known' }
+                        }
+                    }
                 }
             }
-            $bindings.Add([pscustomobject]@{ where = $at; guid = $g; class = $class; trusted = $Trusted })
+            $bindings.Add([pscustomobject]@{ where = $at; guid = $g; class = $class; trusted = $Trusted; itemType = $foundType; expectedType = $expectedType })
         }
     }
 }
@@ -3419,6 +3491,7 @@ Test-PdLeafSet -Leaves $topLeaves -Owner 'properties' -Trusted $false
 if ($Format -eq 'Api') {
     if ($script:noTarget) { Add-PdFinding unchecked 'PD002' 'properties' "$($script:noTarget) workspace reference(s) were not compared: no -TargetWorkspaceId" }
     if ($script:uncheckedRefs) { Add-PdFinding unchecked 'PD077' 'properties' "$($script:uncheckedRefs) item or connection reference(s) were not checked: no -InventoryPath" }
+    if ($script:expressionRefs) { Add-PdFinding info 'PD088' 'properties' "$($script:expressionRefs) item or connection reference(s) are expressions: their value exists only when the pipeline runs and was not compared with the inventory" }
     if ($script:uncheckedForeign) { Add-PdFinding unchecked 'PD078' 'properties' "$($script:uncheckedForeign) item reference(s) point into another workspace and could not be checked" }
     if ($source -and $target -and $source -ne $target -and -not $current) { Add-PdFinding block 'PD082' 'properties' 'a definition read from another workspace needs the target''s current definition (-CurrentPath) for comparison' }
 }
@@ -3454,6 +3527,7 @@ $out = [pscustomobject]@{
     format            = $Format
     targetWorkspaceId = $TargetWorkspaceId
     activities        = $acts.Count
+    inventory         = $(if ($inventory) { [pscustomobject]@{ typedItems = $inventory.Types.Count; untyped = $inventory.Untyped.Count; connections = $inventory.Connections.Count; partial = $inventory.Partial } } else { $null })
     counts            = [pscustomobject]@{ block = $blocks.Count; unchecked = $unchecked.Count; warn = @($script:PdFindings | Where-Object { $_.severity -eq 'warn' }).Count; info = @($script:PdFindings | Where-Object { $_.severity -eq 'info' }).Count }
     findings          = $script:PdFindings.ToArray()
     bindings          = $bindings.ToArray()
@@ -3463,6 +3537,8 @@ if ($AsJson) { ConvertTo-Json -InputObject $out -Depth 10 }
 else {
     Write-Output "PIPELINE CHECK  $Path"
     Write-Output ("  format: {0}   target workspace: {1}   activities: {2}" -f $Format, $(if ($TargetWorkspaceId) { $TargetWorkspaceId } else { '(not given)' }), $acts.Count)
+    if ($inventory) { Write-Output ("  inventory: {0} item(s) with a type, {1} without, {2} connection(s){3}" -f $inventory.Types.Count, $inventory.Untyped.Count, $inventory.Connections.Count, $(if ($inventory.Partial) { ' - incomplete: a saved list has more pages' })) }
+    else { Write-Output '  inventory: not given' }
     foreach ($f in $script:PdFindings) { Write-Output ("  [{0}] {1} {2} - {3}" -f $f.severity, $f.rule, $f.where, $f.message) }
     if ($plan) {
         Write-Output ("  change plan: {0} added, {1} removed, {2} changed, {3} unchanged; {4} binding change(s)" -f $plan.added.Count, $plan.removed.Count, $plan.changed.Count, $plan.unchanged, $plan.bindings.Count)
@@ -4133,9 +4209,10 @@ $pbivizAlmScript = @'
 # merges pull requests, creates tags, or commits to a target branch: those remain explicit,
 # approval-gated agent actions. Windows PowerShell 5.1 compatible.
 
-$script:PbivizHelperVersion   = '0.8.0'
+$script:PbivizHelperVersion   = '0.9.0'
 $script:PbivizGitFloor        = [version]'2.28.0'
 $script:PbivizWorktreePrefix  = 'pbiviz-release-'
+$script:PbivizProdBranch      = 'PBVIZ_Team_Prod'
 $script:PbivizBackupNamespace = 'refs/pbiviz-backup/'
 $script:PbivizUtf8            = New-Object System.Text.UTF8Encoding($false)
 $script:PbivizGitExe          = $null
@@ -5517,8 +5594,61 @@ function Get-PbivizWorktreeList {
     return @(($r.Out -split "`r?`n") | Where-Object { $_.StartsWith('worktree ') } | ForEach-Object { $_.Substring(9) })
 }
 
+# The current production revision, read where it is decided. With a remote that is the remote's
+# branch as the remote answers now (ls-remote: nothing is fetched, no ref is written). A repository
+# without any remote has only its local branch. Everything else is UNVERIFIED: no revision is named.
+function Get-PbivizProductionRevision {
+    param([string]$Root, [string]$Remote = 'origin', [string]$Branch = $script:PbivizProdBranch)
+    $res = [pscustomobject][ordered]@{ Status = 'UNVERIFIED'; Sha = $null; Source = $null; Reason = ''; Remote = $null; Branch = $Branch }
+    try {
+        if ($Remote -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') { $res.Reason = "invalid input: remote name '$Remote'"; return $res }
+        if (-not (Test-PbivizBranchName -Root $Root -Name $Branch)) { $res.Reason = "invalid input: branch name '$Branch'"; return $res }
+        $list = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('remote')
+        if ($list.ExitCode -ne 0) { $res.Reason = "cannot list the remotes: $(Get-PbivizGitError $list)"; return $res }
+        $names = @(($list.Out -split "`r?`n") | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        if ($names.Count -eq 0) {
+            $local = Resolve-PbivizCommit -Root $Root -Ref "refs/heads/$Branch"
+            if (-not $local) { $res.Reason = "this repository has no remote and no local branch '$Branch'"; return $res }
+            $res.Status = 'VERIFIED'; $res.Sha = $local; $res.Source = "local branch $Branch; this repository has no remote"
+            return $res
+        }
+        if ($names -cnotcontains $Remote) { $res.Reason = "remote '$Remote' is not configured (remotes: $($names -join ', ')); name the remote that holds $Branch"; return $res }
+        $res.Remote = $Remote
+        $ls = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('ls-remote', '--heads', $Remote, "refs/heads/$Branch") -TimeoutSeconds 90
+        if ($ls.ExitCode -ne 0) { $res.Reason = "cannot read remote '$Remote': $(if ($ls.TimedOut) { 'no answer within 90 seconds' } else { Get-PbivizGitError $ls })"; return $res }
+        $hits = @(($ls.Out -split "`r?`n") | Where-Object { $_ -match '^([0-9a-f]{40}([0-9a-f]{24})?)\s+(\S+)$' -and $Matches[3] -ceq "refs/heads/$Branch" } | ForEach-Object { ($_ -split '\s+')[0] })
+        if ($hits.Count -ne 1) { $res.Reason = if ($hits.Count -eq 0) { "remote '$Remote' has no branch '$Branch'" } else { "remote '$Remote' answered with $($hits.Count) refs for '$Branch'" }; return $res }
+        $res.Status = 'VERIFIED'; $res.Sha = $hits[0]; $res.Source = "remote $Remote, branch $Branch, read now"
+    } catch { $res.Status = 'UNVERIFIED'; $res.Sha = $null; $res.Reason = $_.Exception.Message }
+    return $res
+}
+
+# A promotion target must be exactly that revision. PASS carries one evidence line; anything else is
+# BLOCKED with the reason: stale (behind, or the revision is not in this clone), another commit, or
+# a production revision that could not be verified.
+function Test-PbivizProductionTarget {
+    param([string]$Root, [string]$TargetSha, [string]$Remote = 'origin', [string]$Branch = $script:PbivizProdBranch)
+    $res = [pscustomobject][ordered]@{ Status = 'BLOCKED'; Reason = ''; Evidence = ''; Production = $null }
+    $prod = Get-PbivizProductionRevision -Root $Root -Remote $Remote -Branch $Branch
+    $res.Production = $prod
+    if ($prod.Status -ne 'VERIFIED') { $res.Reason = "the current production revision could not be verified: $($prod.Reason)"; return $res }
+    if ($prod.Sha -eq $TargetSha) {
+        $res.Status = 'PASS'; $res.Evidence = "target $TargetSha is the current production revision ($($prod.Source))"
+        return $res
+    }
+    if (-not (Resolve-PbivizCommit -Root $Root -Ref $prod.Sha)) {
+        $res.Reason = "stale target: the current production revision $($prod.Sha) ($($prod.Source)) is not in this clone; fetch the production branch, then pin the target to it"
+    } elseif (Test-PbivizIsAncestor -Root $Root -Ancestor $TargetSha -Descendant $prod.Sha) {
+        $res.Reason = "stale target: $TargetSha is behind the current production revision $($prod.Sha) ($($prod.Source)); pin the target to it and cut the candidate again"
+    } else {
+        $res.Reason = "invalid target: $TargetSha is not the current production revision $($prod.Sha) ($($prod.Source))"
+    }
+    return $res
+}
+
 function New-PbivizPromotionCandidate {
-    param([string]$Root, [string]$Visual, [string]$SourceRef, [string]$TargetRef, [string[]]$Allowlist = @(), [string]$WorktreeDir = $null, [switch]$ArchiveOnly)
+    param([string]$Root, [string]$Visual, [string]$SourceRef, [string]$TargetRef, [string[]]$Allowlist = @(), [string]$WorktreeDir = $null, [switch]$ArchiveOnly,
+          [string]$Remote = 'origin', [string]$ProdBranch = $script:PbivizProdBranch)
     $res = [pscustomobject][ordered]@{ Status = 'BLOCKED'; Reason = ''; Worktree = $null; Branch = $null; Source = $null; Target = $null; Guid = $null; Version = $null; CandidateTree = $null; Restored = @(); Removed = @(); Evidence = (New-Object System.Collections.Generic.List[string]) }
     $files = @()
     try {
@@ -5527,6 +5657,11 @@ function New-PbivizPromotionCandidate {
         $tgt = Resolve-PbivizCommit -Root $Root -Ref $TargetRef
         if (-not $src -or -not $tgt) { $res.Reason = 'invalid input: source or target ref does not resolve to a commit'; return $res }
         $res.Source = $src; $res.Target = $tgt
+        # The version checks below compare against the target: they mean something only when the target
+        # is what production holds now.
+        $fresh = Test-PbivizProductionTarget -Root $Root -TargetSha $tgt -Remote $Remote -Branch $ProdBranch
+        if ($fresh.Status -ne 'PASS') { $res.Reason = $fresh.Reason; return $res }
+        $res.Evidence.Add($fresh.Evidence)
         $vi = Test-PbivizVisualInput -Root $Root -Name $Visual -Ref $src
         if ($vi.Status -ne 'PASS') { $res.Reason = $vi.Reason; return $res }
         $srcEntries = @(Get-PbivizTreeEntries -Root $Root -TreeIsh $src)
@@ -5608,6 +5743,7 @@ function New-PbivizPromotionCandidate {
             schemaVersion = 1; helperVersion = $script:PbivizHelperVersion; mode = if ($ArchiveOnly) { 'archive-only' } else { 'release' }
             visual = $Visual; guid = $id.Guid; version = $id.Version; src = $src; tgt = $tgt; branch = $branch
             candidateTree = $res.CandidateTree; allowlist = @($Allowlist); worktree = $WorktreeDir
+            prodRemote = $Remote; prodBranch = $ProdBranch; prodSource = [string]$fresh.Production.Source
             createdAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
         }
         Write-PbivizTextFile -Path $recordPath -Text (ConvertTo-PbivizJson $record)
@@ -7242,6 +7378,13 @@ function Test-PbivizPromotionGates {
         if ($g0 -and ($ArchiveOnly -ne ($rec.mode -eq 'archive-only'))) { $g0 = $false; $g0Detail = "candidate mode is $($rec.mode)" }
         $recAllow = @(@($rec.allowlist) | Where-Object { $_ } | ForEach-Object { ([string]$_).Replace('\', '/') } | Sort-Object)
         if ($g0 -and ((@($Allowlist | Where-Object { $_ } | ForEach-Object { $_.Replace('\', '/') } | Sort-Object) -join '|') -cne ($recAllow -join '|'))) { $g0 = $false; $g0Detail = 'allowlist differs from the one recorded for the candidate' }
+        # Production may have moved since the candidate was cut: read it again, here, before the verdict.
+        if ($g0) {
+            $prodRemote = if ($rec.PSObject.Properties['prodRemote'] -and $rec.prodRemote) { [string]$rec.prodRemote } else { 'origin' }
+            $prodBranch = if ($rec.PSObject.Properties['prodBranch'] -and $rec.prodBranch) { [string]$rec.prodBranch } else { $script:PbivizProdBranch }
+            $fresh = Test-PbivizProductionTarget -Root $Worktree -TargetSha ([string]$rec.tgt) -Remote $prodRemote -Branch $prodBranch
+            if ($fresh.Status -ne 'PASS') { $g0 = $false; $g0Detail = $fresh.Reason } else { $g0Detail = "inputs and candidate state valid; $($fresh.Evidence)" }
+        }
         & $add 'G0' $g0 $g0Detail
         # Without a record there is nothing to compare against; otherwise every gate is still
         # evaluated so the evidence shows all failures, not only the first one.
@@ -10017,7 +10160,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .github/agent-docs/Test-Pipe
 | `-CurrentPath` | the target pipeline's current definition, read from the **same** workspace. Activity blocks identical to it are trusted; everything else is checked |
 | `-TargetWorkspaceId` | the workspace the definition goes to |
 | `-SourceWorkspaceId` | the workspace the proposed definition was read from, when that is another one |
-| `-InventoryPath` | saved lists with an `id` per entry: the items of the target workspace and the connections (the answers of `workspaces/<id>/items` and `connections`). With `-File`, give both in **one** quoted value separated by a comma, as above; two separately quoted values do not reach the check |
+| `-InventoryPath` | saved lists with an `id` per entry: the items of the target workspace and the connections (the answers of `workspaces/<id>/items` and `connections`). Save them whole: the check reads each item's `type` and tells a connection by its `connectivityType`. With `-File`, give both in **one** quoted value separated by a comma, as above; two separately quoted values do not reach the check |
 | `-AllowedWorkspaceId` | a cross-workspace reference the user approved |
 | `-AllowActivityType` | an activity type the user confirmed against the editor's JSON |
 | `-AllowRecreateTables` | the user approved `recreateTables: true` |
@@ -10038,8 +10181,23 @@ activity, forms a cycle or uses an unknown condition; an undeclared parameter, v
 library variable; `activity('<name>')` for a missing activity; an expression object without a
 value; a Variable Library type a pipeline cannot use; a workspace id that is not the target; the
 source workspace's id anywhere; an all-zero GUID in the API format; an item or connection id
-that is not in the inventory; an id property (workspace, item or connection) that holds neither a
-GUID nor an expression, such as a placeholder left in a draft; a credential-like value.
+that is not in the inventory; an id that is in the inventory but names another kind of object
+(the lakehouse id as `sqlEndpointId`, an item where a connection belongs); an id property
+(workspace, item or connection) that holds neither a GUID nor an expression, such as a
+placeholder left in a draft; a credential-like value.
+
+Each reference property takes one item type, and the check reads the type from the inventory
+entry, never from the id: `notebookId` Notebook, `pipelineId` and `pipeline.referenceName`
+DataPipeline, `dataflowId` Dataflow, `datasetId` SemanticModel, `sqlEndpointId` SQLEndpoint,
+`lakehouseId` Lakehouse, `copyJobId` CopyJob, `sparkJobDefinitionId` SparkJobDefinition,
+`environmentId` Environment, `functionSetId` UserDataFunction, `libraryId` VariableLibrary,
+and `artifactId` Lakehouse under a `Lakehouse` linked service.
+
+It answers `UNCHECKED`, never `PASS`, when the type cannot be confirmed: the inventory entry
+has no `type`, the item or the connection list is missing, a saved list is one page of several
+(it still holds a continuation token), or the property is one whose item type the contract
+does not define (`itemId`, `artifactId` under another linked service). A reference written as
+an expression has no value offline; the check counts those and says so.
 
 A `PASS` is not proof that the pipeline runs. It says that nothing checkable offline is wrong.
 
@@ -10350,7 +10508,7 @@ Microsoft Learn on 2026-11-18.
 | Status | generally available | **preview** |
 | Does | finds Power BI reports and semantic models, reads their metadata, searches values, runs DAX the calling agent writes | runs a T-SQL statement against a Warehouse or SQL analytics endpoint |
 | Does not | answer in natural language by itself; create or change anything; cover dashboards, paginated reports, apps, ontologies or data agents | offer metadata, history or schema tools: it has one tool |
-| Tools | `DiscoverArtifacts`, `ResolveFabricItem`, `GetReportMetadata`, `GetSemanticModelSchema`, `ValueSearch`, `ExecuteQuery` (read `tools/list` at run time) | `executeSQL` |
+| Tools | `DiscoverArtifacts`, `ResolveFabricItem`, `GetReportMetadata`, `GetSemanticModelSchema`, `ValueSearch`, `ExecuteQuery` (read `tools/list` at run time) | `executeSQL` on Microsoft's page; both endpoints listed it as `execute_query` on 2026-11-20. Use the name in your tool list |
 | Writes | no (read-only) | **yes**, whatever the signed-in user may run, including DDL and DML |
 | Endpoint | `https://fabriciq.svc.cloud.microsoft/v1/mcp/fabriciq` (private links: `https://api.fabric.microsoft.com/v1/mcp/fabriciq`) | `https://api.fabric.microsoft.com/v1/mcp/dataPlane/sqlEndpoint` (global) or `.../v1/mcp/dataPlane/workspaces/<workspace-id>/items/<item-id>/sqlEndpoint` (one item) |
 | Sign-in | the user's Microsoft Entra account, delegated; no service principal; RLS and OLS apply | the user's Microsoft account; Fabric and SQL permissions apply |
@@ -11103,7 +11261,13 @@ visual. Two scopes per visual: SOURCE = everything under `<Visual>/` except `<Vi
 ARCHIVE = `<Visual>/releases/**` (Prod is authoritative; the Dev archive is never read).
 
 1. Pin SRC (Dev SHA) and TGT (Prod tip) as full SHAs and validate all inputs; the version must
-   exceed every archived version (validated and legacy) and Prod's `pbiviz.json`.
+   exceed every archived version (validated and legacy) and Prod's `pbiviz.json`. TGT is the
+   current production revision: `Get-PbivizProductionRevision` reads it from the remote as it
+   is now (`ls-remote`: nothing is fetched, no ref moves), or from the local branch when the
+   repository has no remote. The helper refuses every other target: a Prod that is behind
+   (`stale target`), a commit that is not the Prod tip, a revision it could not verify (remote
+   unreachable, branch missing). If the revision is not in the clone yet, bring it with the
+   one-branch fetch of the daily sync and pin TGT to `origin/PBVIZ_Team_Prod`.
 2. `New-PbivizPromotionCandidate`: temp worktree on `release/pbiviz/<visual>/<version>` from TGT;
    explicit `ls-tree -rz` file lists of the source scope restored from SRC; source files that
    exist only in Prod removed; every path checked for Windows representability; candidate
@@ -11116,7 +11280,8 @@ ARCHIVE = `<Visual>/releases/**` (Prod is authoritative; the Dev archive is neve
    release is BLOCKED before anything is written.
 4. `Test-PbivizPromotionGates` - every gate must PASS:
    - G0 inputs validated; the worktree was created by the helper; the allowlist is the one
-     recorded for the candidate.
+     recorded for the candidate; TGT is still the current production revision, read again at
+     the gate (a Prod that moved since the candidate was cut fails G0: cut a new candidate).
    - G1 the complete staged diff (`diff-index --cached -z --name-status --no-renames <TGT>`, no
      pathspec) stays inside the visual's source scope + allowlist + the two new release files;
      the source fingerprint equals SRC.
@@ -11275,14 +11440,30 @@ Show-Step 7 $totalSteps "Writing Agent Definitions"
 # not trust a stale install-time snapshot.
 $sessionStatusScript = @'
 # Get-SessionStatus.ps1 -- one-shot session health for the Fabric Workspace Master.
-# Run from the workspace root:  powershell -NoProfile -ExecutionPolicy Bypass -File .github/agent-docs/Get-SessionStatus.ps1
+# Run from the workspace root:  powershell -NoProfile -ExecutionPolicy Bypass -File .github/agent-docs/Get-SessionStatus.ps1 [-SessionId <id>]
 # Prints a compact status block and refreshes .github/agent-docs/tool-status.json in place.
+# -SessionId  a name the caller chooses for its chat session (letters, digits, - and _). The block is
+#             also saved to .github/agent-docs/session-status/<id>.txt, a file only that session writes.
+#             Without it the script makes an id up and prints it. session-status.last.txt holds the
+#             latest run of any session: a convenience view, never one session's own state.
+param([string]$SessionId)
 $ErrorActionPreference = 'SilentlyContinue'
 # Workspace root = two levels above this script (.github/agent-docs/), so the CWD does not matter.
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 if (-not (Test-Path -LiteralPath (Join-Path $root '.github\agents'))) { $root = (Get-Location).Path }
+# The id names a file: anything that is not a plain name is replaced by a digest of it, never used as a path.
+$sessionKey = [string]$SessionId
+if ($sessionKey -notmatch '^[A-Za-z0-9_-]{1,64}$') {
+    if ([string]::IsNullOrWhiteSpace($sessionKey)) {
+        $sessionKey = '{0}-{1}-{2}' -f (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss'), $PID, [guid]::NewGuid().ToString('N').Substring(0, 8)
+    } else {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { $sessionKey = 'id-' + (-join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($sessionKey)) | ForEach-Object { $_.ToString('x2') })).Substring(0, 24) } finally { $sha.Dispose() }
+    }
+}
 $out = New-Object System.Collections.Generic.List[string]
 $out.Add("GENERATED $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss')) (local) -- a block older than ~1 hour is stale: re-run the script in a NEW terminal")
+$out.Add("SESSION  $sessionKey | this run's own copy: .github/agent-docs/session-status/$sessionKey.txt | session-status.last.txt is the latest run of any session, not necessarily this one")
 $out.Add("ROOT     $root")
 
 function Get-RepoDate([string]$rel) {
@@ -11631,7 +11812,37 @@ if (Test-Path -LiteralPath $pbivizMapFile) {
 $out | ForEach-Object { Write-Output $_ }
 if ($out.Count -le 1) { Write-Output 'STATUS   script ran but collected nothing - check that .vscode/settings.json and .github/agent-docs exist under ROOT' }
 # Persist the block so the Master can read it even when the persistent shell swallows stdout.
-try { [IO.File]::WriteAllText((Join-Path $root '.github/agent-docs/session-status.last.txt'), (($out -join "`r`n") + "`r`n"), (New-Object System.Text.UTF8Encoding($false))) } catch { }
+# Each session has a file of its own; every file is replaced whole, so a reader never sees half a
+# block and two sessions never write into each other's.
+function Save-StatusBlock([string]$Path, [string]$Text) {
+    $tmp = "$Path.$PID.$([guid]::NewGuid().ToString('N').Substring(0, 8)).tmp"
+    try {
+        [IO.File]::WriteAllText($tmp, $Text, (New-Object System.Text.UTF8Encoding($false)))
+        for ($i = 0; $i -lt 5; $i++) {
+            try {
+                if ([IO.File]::Exists($Path)) { [IO.File]::Replace($tmp, $Path, [NullString]::Value) } else { [IO.File]::Move($tmp, $Path) }
+                return $true
+            } catch { Start-Sleep -Milliseconds 80 }
+        }
+    } catch { }
+    # The target could not be replaced (open in another program): it keeps its earlier, complete content.
+    try { if ([IO.File]::Exists($tmp)) { [IO.File]::Delete($tmp) } } catch { }
+    return $false
+}
+$blockText = ($out -join "`r`n") + "`r`n"
+$snapDir = Join-Path $root '.github\agent-docs\session-status'
+try {
+    [void][IO.Directory]::CreateDirectory($snapDir)
+    [void](Save-StatusBlock (Join-Path $snapDir "$sessionKey.txt") $blockText)
+    # Tidy this folder only: snapshots older than seven days and temp files of runs that died.
+    foreach ($f in [IO.Directory]::GetFiles($snapDir)) {
+        $name = [IO.Path]::GetFileName($f)
+        $days = ([DateTime]::UtcNow - [IO.File]::GetLastWriteTimeUtc($f)).TotalDays
+        if (($name -match '^[A-Za-z0-9_-]{1,64}\.txt$' -and $days -gt 7) -or ($name -like '*.tmp' -and $days -gt 1)) { try { [IO.File]::Delete($f) } catch { } }
+    }
+} catch { }
+# The latest run of any session, for callers that pass no id. Not the state of one session.
+[void](Save-StatusBlock (Join-Path $root '.github\agent-docs\session-status.last.txt') $blockText)
 '@
 Write-ManagedFile "$rootPath\.github\agent-docs\Get-SessionStatus.ps1" $sessionStatusScript
 
@@ -11702,13 +11913,17 @@ Keep the original message: you will act on it right after Phase 1.
 
 Run exactly this, from the workspace root, in ONE terminal call:
 
-  powershell -NoProfile -ExecutionPolicy Bypass -File .github/agent-docs/Get-SessionStatus.ps1
+  powershell -NoProfile -ExecutionPolicy Bypass -File .github/agent-docs/Get-SessionStatus.ps1 -SessionId <id>
 
-It prints GENERATED / ROOT / SKILLS / CONFIG / MCP / IDENTITY / TOOLS lines (plus a PBIVIZ
+`<id>` is a name you choose once for this chat session and keep: letters, digits, `-` and `_`, for
+example the time and four random characters (`s-0932-k4x7`). It gives this session a status
+file of its own, which a second chat or a maintenance run at the same time cannot overwrite.
+
+It prints GENERATED / SESSION / ROOT / SKILLS / CONFIG / MCP / IDENTITY / TOOLS lines (plus a PBIVIZ
 line when a custom visual folder is configured) and refreshes
 `.github/agent-docs/tool-status.json` live (so the tool inventory is never a stale
 install-time snapshot). It also writes the same block to
-`.github/agent-docs/session-status.last.txt`. Relay it to the user as a compact block, for example:
+`.github/agent-docs/session-status/<id>.txt`. Relay it to the user as a compact block, for example:
 
 "**Session ready.**
 - Skills: Microsoft 2026-09-01 | Kurt 2026-08-28 | custom tmdl 2026-07-16 | pipelines 2026-07-16
@@ -11725,7 +11940,10 @@ Rules:
   script always prints a block, so if nothing comes back the shell did not return
   it: run the same command once more in a NEW terminal (for this script that takes
   the place of the general `| Out-String` retry). Only if that
-  also prints nothing, read `.github/agent-docs/session-status.last.txt`.
+  also prints nothing, read `.github/agent-docs/session-status/<id>.txt`, the file of your own
+  session. If it does not exist, the script did not run: say so. Do not use
+  `.github/agent-docs/session-status.last.txt` in its place: it holds the latest run of any session
+  (its SESSION line says whose), so it may describe another chat.
 - **Staleness guard.** Every block starts with `GENERATED <timestamp>`. Before relaying
   a block you read from the fallback file (or recall from earlier in this chat), compare
   that timestamp with the current time: older than ~1 hour means it predates this
@@ -12625,7 +12843,7 @@ $agentKnowledge = @{
             '**Inspect first.** Read the current definition (getDefinition) and keep it unchanged in your task folder. It is the recovery point; nothing is sent before it exists.',
             '**Compare environments.** Note where the proposed definition comes from (this pipeline, a local file, Git, another workspace). A definition from another workspace or from Git is a source to adapt, never something to send.',
             '**Foreign workspace ids.** Run `powershell -NoProfile -ExecutionPolicy Bypass -File .github/agent-docs/Test-PipelineDefinition.ps1 -Path "<proposed>" -CurrentPath "<current>" -TargetWorkspaceId <id> -InventoryPath "<items.json>,<connections.json>"` (add `-SourceWorkspaceId` when the proposal came from another workspace). A workspace id that is not the target, or an all-zero GUID, blocks.',
-            '**Stale references.** Save the target workspace item list and the connection list to your task folder and pass them as `-InventoryPath`; an item or connection id that is not in them blocks.',
+            '**Stale references.** Save the target workspace item list and the connection list whole (every page, with each item''s `type`) to your task folder and pass them as `-InventoryPath`; an item or connection id that is not in them blocks, and so does an id that names another kind of item than its property takes (the lakehouse id as `sqlEndpointId`).',
             '**Schema and dependencies.** The same check validates activity types, required properties, dependsOn (missing names, cycles, conditions) and expressions (undeclared parameters, variables, library variables, activity names).',
             '**No round-trip.** Never send a getDefinition answer back as it is, and never to another workspace. Edit a copy of the target''s current definition; blocks you did not change are trusted by the check, everything else is checked.',
             '**Change plan and recovery.** Return the change plan the check prints (activities added, removed, changed; every binding that changes) and state the recovery: re-send the kept definition to the same pipeline and confirm it by read-back.',
@@ -13840,7 +14058,7 @@ Select it from the Copilot Chat agent dropdown to begin.
 The master agent uses reference docs in `.github/agent-docs/` for its startup
 and working flows. These files do NOT appear in the Copilot Chat dropdown:
 - `starting-flow.md`  -- Lean session startup: one status-script call, one compact status block, then work
-- `Get-SessionStatus.ps1`  -- The status script (skill freshness, identity, MCP installed/connected state, live tool re-check that refreshes `tool-status.json`; also writes `session-status.last.txt`)
+- `Get-SessionStatus.ps1`  -- The status script (skill freshness, identity, MCP installed/connected state, live tool re-check that refreshes `tool-status.json`; also writes the block to `session-status/<id>.txt`, one file per session, and to `session-status.last.txt`, the latest run of any session)
 - `working-flow-reference.md`  -- Team protocol (WORK ORDER / WORK RESULT), routing map, skills, working modes and rules
 - `tool-status.json`  -- Machine-specific tool inventory (gitignored). Agents read `<tool>.found` and prefer its recorded executable `path`
   before invoking any CLI/MCP and degrade gracefully when a tool is absent. Regenerated by the
@@ -14080,6 +14298,7 @@ Thumbs.db
 
 # Per-session status snapshot written by Get-SessionStatus.ps1
 .github/agent-docs/session-status.last.txt
+.github/agent-docs/session-status/
 
 # Machine-specific self-test / guardrail report (regenerated by the installer each run)
 .github/agent-docs/guardrail-status.json
@@ -14114,7 +14333,7 @@ if (-not (Test-Path $gitignorePath)) {
     Add-GitIgnoreRules -Path $gitignorePath -Heading 'Operating-system files' -Rules @('Thumbs.db', '.DS_Store')
     Add-PowerBiProjectIgnoreRules -Path $gitignorePath
     Add-GitIgnoreRules -Path $gitignorePath -Heading 'Machine-specific tool inventory' `
-        -Rules @('.github/agent-docs/tool-status.json', '.github/agent-docs/session-status.last.txt')
+        -Rules @('.github/agent-docs/tool-status.json', '.github/agent-docs/session-status.last.txt', '.github/agent-docs/session-status/')
     Add-GitIgnoreRules -Path $gitignorePath -Heading 'Machine-specific self-test / guardrail report' `
         -Rules @('.github/agent-docs/guardrail-status.json')
     Add-GitIgnoreRules -Path $gitignorePath -Heading 'Machine-specific integrity manifest' `

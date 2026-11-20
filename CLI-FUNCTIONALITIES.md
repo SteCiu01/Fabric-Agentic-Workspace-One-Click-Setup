@@ -1,48 +1,48 @@
 # CLI Functionalities — Deep Dive
 
-> **TL;DR** — The core workspace (Fabric VS Code extension + agents editing local
-> files) needs **no CLI**. Installing a CLI adds terminal and control-plane /
-> data-plane power on top. This workspace standardises on the **Fabric CLI
-> (`fab`)**; **Azure CLI (`az`)** is a documented **fallback** for the few things
-> `fab` does not cover (SQL/TDS queries and non-Fabric token audiences). On top of
-> those two, a handful of **opt-in specialist CLIs** (`pbir`, Tabular Editor CLI,
-> `pbi-tools`, `sqlcmd`, `gh`, `az devops`) give individual agents extra power for
-> reports, semantic models, SQL, and ALM. **Every CLI, `fab` and `az` included, is
-> installed only if you type `Y` or `YES` at setup**; any other answer, or none, skips it.
+This guide lists the command-line actions that are most useful in this workspace: each
+command, what it is for, and an example. It is for anyone who runs these commands in a
+terminal or wants to follow what the agents run.
 
-This document is a practical, opinionated catalogue of the CLI actions that are
-most useful in this workspace. It focuses on the commands a Fabric developer is
-most likely to reach for during local, live, or hybrid agent-assisted work:
-identity checks, item export/import, job runs, REST calls, OneLake/table
-operations, Git/ALM tasks, report and model automation, and the few fallback
-cases where `az` or `sqlcmd` are still the better tool.
+- **No CLI is required.** The Fabric VS Code extension and the agents editing local files
+  work without one. A CLI adds terminal access to the Fabric control plane and data plane.
+- **The Fabric CLI (`fab`) is the default.** The Azure CLI (`az`) and `sqlcmd` are fallbacks
+  for what `fab` does not cover: T-SQL queries, tokens for non-Fabric audiences, a REST
+  endpoint `fab api` does not reach, and Azure resource actions such as pausing a capacity.
+- **Specialist CLIs are opt-in.** `pbir`, Tabular Editor CLI, `pbi-tools`, `sqlcmd`, `gh`
+  and `az devops` give individual agents extra reach for reports, semantic models, SQL and ALM.
+- **Every CLI, `fab` and `az` included, is installed only if you type `Y` or `YES` at
+  setup.** Any other answer, or none, skips it. A **No** is not remembered: a tool that is
+  still missing is offered again on the next run. What the installer checks and asks:
+  [README, Step 2](README.md#step-2-of-9--checking-prerequisites).
 
-It is not intended to be a permanent exhaustive reference for every Fabric,
-Power BI, Azure, or SQL command. Command groups and flags evolve, especially
-around newer Fabric APIs and the newer/preview specialist CLIs. Treat the
-examples here as the high-value working set, then confirm exact syntax with
-`fab --help`, `fab <group> --help`, each specialist tool's own `--help`/`-?`,
-the Azure CLI help, or the official references linked below.
+The tables are a working set, not a full reference for every Fabric, Power BI, Azure or SQL
+command. Command groups and flags change, most often in the newer and preview tools. Confirm
+exact syntax with `fab --help`, `fab <group> --help`, a specialist tool's own `--help` or
+`-?`, the Azure CLI help, or the official references below.
 
 ### How this document is organized
 
-- **Part I — Fabric platform CLIs (`fab` + `az` fallback).** The original, workload-first
-  deep dive (sections 0–21): every way of working may touch these two CLIs.
-- **Part II — Specialist CLIs (one chapter each).** Opt-in tools owned by individual
-  agents (sections 22–27). Each is detected, explained, and installed Y/N at setup, and
-  gated at runtime by `.github/agent-docs/tool-status.json` (`<key>.found`). None is
-  required for the core local-editing workflow.
+- **Part I — Fabric platform CLIs (`fab` + `az` fallback)**, sections 0–21 and a quick
+  reference: commands grouped by workload.
+- **Part II — Specialist CLIs**, sections 22–29: one chapter per tool, each owned by
+  individual agents. Sections 28 and 29 cover the custom visual toolchain, which the
+  installer detects but never installs, and the `Pbiviz-Alm.ps1` script it ships.
 
-Install / detection:
+Before an agent calls a tool it reads `.github/agent-docs/tool-status.json`
+(`<key>.found`) and falls back when the tool is absent. The agents take the decision rule
+(`fab` first, when to fall back) from `.github/skills/fabric-cli-policy/SKILL.md`; this guide
+is the human-readable companion to that skill. Which team uses which tool, and what happens
+without it: [README 2.4](README.md#24-optional-clis-and-mcp-servers--what-each-unlocks).
 
-- **`fab`** (recommended): `pip install ms-fabric-cli` (Python 3.10–3.14). Repo: https://github.com/microsoft/fabric-cli
-- **`az`** (fallback): https://aka.ms/installazurecli
-- Both are **offered** at setup (`Install ... now? (Y/N)`) and installed only on an explicit
-  Yes. Python is offered separately, only when you accepted `fab` and no supported Python exists.
-- **Specialist CLIs**: the installer detects each, prints its provider + purpose, and
-  asks Y/N before a best-effort install (see the README **Prerequisites** table and each
-  Part II chapter). Provider links are listed per chapter below.
-- A **No** is never remembered: a tool that is still missing is offered again on the next run.
+Install:
+
+- **`fab`**: `pip install ms-fabric-cli` (Python 3.10–3.14). Repo: https://github.com/microsoft/fabric-cli
+- **`az`**: https://aka.ms/installazurecli
+- Setup asks `Install ... now? (Y/N)` for each of the two. Python is offered separately,
+  only when you accepted `fab` and no supported Python exists.
+- **Specialist CLIs**: the installer prints each tool's provider and purpose, then asks Y/N
+  before a best-effort install. Provider links are in each Part II chapter.
 
 Official references:
 
@@ -54,12 +54,9 @@ Official references:
 - Azure CLI reference: https://learn.microsoft.com/en-us/cli/azure/
 - Tabular Editor CLI: https://docs.tabulareditor.com
 - pbi-tools: https://pbi.tools
-- `pbir` CLI: data-goblin `power-bi-agentic-development` (`reports/skills/pbir-cli`)
+- `pbir` CLI: data-goblin `power-bi-agentic-development` (`plugins/reports/skills/pbir-cli`)
 - GitHub CLI (`gh`): https://cli.github.com/manual/
 - Azure DevOps CLI: https://learn.microsoft.com/en-us/azure/devops/cli/
-
-The agents read `.github/skills/fabric-cli-policy/SKILL.md` for the decision rule
-before any CLI/REST task. This file is the human-readable companion to that skill.
 
 ---
 
@@ -106,10 +103,8 @@ before any CLI/REST task. This file is the human-readable companion to that skil
 
 # Part I — Fabric platform CLIs (`fab` + `az` fallback)
 
-The sections below are the original, **workload-first** deep dive. `fab` is the
-default for control-plane and data-plane work; `az` (and `sqlcmd`) appear only in
-the documented fallback cases. Every way of working — local, live, or hybrid — may
-touch these two CLIs.
+Commands are grouped by workload. `fab` is the default for control-plane and data-plane
+work; `az` and `sqlcmd` appear only in the fallback cases (sections 0, 7, 8, 9 and 19).
 
 ## 0. Authentication & identity
 
@@ -122,15 +117,15 @@ touch these two CLIs.
 | **Fallback** — Azure login | `az login` |
 | **Fallback** — check Azure identity | `az account show --output table` |
 
-> `fab` and `az` keep separate token caches. For Fabric work, `fab auth login` is
-> enough — you do not also need `az login` unless you hit a fallback case.
+> `fab` and `az` keep separate token caches. For Fabric work `fab auth login` is
+> enough; run `az login` only for a fallback case.
 
 ---
 
 ## 1. Power BI / semantic model authoring
 
-Most semantic-model *authoring* happens by editing local **TMDL** files (the agents
-+ TMDL extension). The CLI shines for **moving** models in and out of the service.
+Semantic models are authored by editing local TMDL files. The CLI moves models in and
+out of the service and triggers refreshes.
 
 | What | Example |
 |------|---------|
@@ -142,15 +137,15 @@ Most semantic-model *authoring* happens by editing local **TMDL** files (the age
 | Check refresh history | `fab api workspaces/<wsId>/semanticModels/<id>/refreshes -q "value[0]"` |
 | Bind to a gateway / data source | `fab api ... --method post --input gateway-binding.json` |
 
-> For DAX/TMDL *editing* depth, the agents use the `fabric-tmdl` skill and the
-> data-goblin `semantic-models` plugin — no CLI needed.
+> For DAX and TMDL editing the agents use the `fabric-tmdl` skill and the data-goblin
+> `semantic-models` plugin; no CLI is needed.
 
 ---
 
 ## 2. Report development
 
-Report authoring is **PBIR** file editing (data-goblin `reports` skill). The CLI
-handles deployment and lifecycle.
+Reports are authored as local PBIR files (data-goblin `reports` skills; `pbir` in
+[section 22](#22-pbir--power-bi-report-cli)). `fab` handles deployment and lifecycle.
 
 | What | Example |
 |------|---------|
@@ -179,7 +174,7 @@ handles deployment and lifecycle.
 
 ## 4. Dataflows & pipelines (orchestration)
 
-Pipeline JSON authoring is local (the `fabric-pipelines` skill). The CLI triggers
+Pipeline JSON is authored locally (the `fabric-pipelines` skill). The CLI triggers
 and monitors runs.
 
 | What | Example |
@@ -227,14 +222,14 @@ and monitors runs.
 | Admin: list tenant settings | `fab api admin/tenantsettings -q "tenantSettings[].settingName"` |
 | Get activity / audit events | `fab api admin/activityEvents --method get` |
 
-> Admin endpoints require the appropriate Fabric/Power BI admin role.
+> Admin endpoints need a Fabric or Power BI admin role.
 
 ---
 
 ## 7. Raw REST API access
 
-When a specific endpoint is not surfaced by a higher-level `fab` command, call it
-directly. `fab api` handles auth automatically and supports JMESPath filtering.
+When no higher-level `fab` command covers an endpoint, call it with `fab api`. It handles
+authentication and filters the response with JMESPath (`-q`).
 
 | What | Example |
 |------|---------|
@@ -249,8 +244,8 @@ directly. `fab api` handles auth automatically and supports JMESPath filtering.
 
 ## 8. SQL / TDS query (az / sqlcmd fallback)
 
-`fab` does not run T-SQL queries against the SQL endpoint. Use `sqlcmd` with an
-AAD/Entra token (`-G`), or your preferred SQL client.
+`fab` does not run T-SQL against a SQL endpoint. Use `sqlcmd` with Microsoft Entra
+authentication (`-G`), or another SQL client.
 
 | What | Example |
 |------|---------|
@@ -258,9 +253,9 @@ AAD/Entra token (`-G`), or your preferred SQL client.
 | Run a SQL script file | `sqlcmd -G -S <endpoint> -d <db> -i script.sql` |
 | Python (pyodbc) with Entra token | `conn = pyodbc.connect(connstr, attrs_before={1256: token})` |
 
-**Permission class first, then the route.** A SQL tool being installed is a way to run a
-statement, never permission to run it. The agents class every statement before choosing a tool
-(full rules: `.github/skills/fabric-cli-policy/SKILL.md`):
+**Permission class first, then the route.** An installed SQL tool is a way to run a
+statement, never permission to run it. The agents class every statement before they choose a
+tool (full rules: `.github/skills/fabric-cli-policy/SKILL.md`):
 
 | Class | What | Needs |
 |---|---|---|
@@ -271,16 +266,21 @@ statement, never permission to run it. The agents class every statement before c
 | `S4` | Administration (permissions, roles, security policies) | the administration team and its own approval; never a side effect of SQL work |
 
 A statement that cannot be classed is treated as `S3`. Route for a Warehouse or SQL analytics
-endpoint: **`sqlcmd -G`** → the **Fabric Data Warehouse MCP server** (`executeSQL`; preview,
-write-capable, used by the Warehouse SQL agent only, and only when *you* added it to
-`.vscode/mcp.json` and it is callable in the chat) → documented alternates (a pipeline Script
-activity, a notebook, the portal SQL editor) → otherwise the script is returned unrun.
+endpoint, in this order:
+
+1. **`sqlcmd -G`**.
+2. The **Fabric Data Warehouse MCP server**: preview, write-capable, used by the Warehouse SQL
+   agent (033) only, and only when *you* added it to `.vscode/mcp.json` and it is callable in
+   the chat. It has one SQL tool. Microsoft's page names it `executeSQL`; the endpoints listed
+   it as `execute_query` on 2026-11-20, so the agent uses the name in its own tool list.
+3. Documented alternates: a pipeline Script activity, a notebook, the portal SQL editor.
+4. Otherwise the script is returned unrun.
 
 ---
 
 ## 9. Tokens for non-Fabric audiences (az fallback)
 
-`fab` issues tokens for the Fabric audience. For **other** Azure audiences, use `az`.
+`fab` issues tokens for the Fabric audience. For other Azure audiences, use `az`.
 
 | What | Example |
 |------|---------|
@@ -293,8 +293,8 @@ activity, a notebook, the portal SQL editor) → otherwise the script is returne
 
 ## 10. Interactive shell & navigation
 
-`fab` works both as one-shot commands (`fab <command>`) and as an interactive
-shell where you navigate workspaces/items like a filesystem.
+`fab` runs one-shot commands (`fab <command>`) or an interactive shell in which you
+navigate workspaces and items like a file system.
 
 | What | Example |
 |------|---------|
@@ -339,7 +339,7 @@ shell where you navigate workspaces/items like a filesystem.
 | Start mirroring | `fab api workspaces/<wsId>/mirroredDatabases/<id>/startMirroring --method post` |
 | Get mirroring status | `fab api workspaces/<wsId>/mirroredDatabases/<id>/getMirroringStatus --method post` |
 
-> Running T-SQL **queries** against these endpoints is a fallback case — see
+> T-SQL queries against these endpoints are a fallback case: see
 > [section 8](#8-sql--tds-query-az--sqlcmd-fallback).
 
 ---
@@ -430,8 +430,8 @@ shell where you navigate workspaces/items like a filesystem.
 
 ## 19. Capacity management
 
-Listing/assigning Fabric capacities is `fab`. **Pausing/resuming or scaling** the
-underlying Azure capacity resource is an Azure control-plane action → use `az`.
+Use `fab` to list and assign Fabric capacities. Pausing, resuming and scaling act on the
+Azure capacity resource: use `az`.
 
 | What | Example |
 |------|---------|
@@ -465,13 +465,13 @@ underlying Azure capacity resource is an Azure control-plane action → use `az`
 | Filter any response with JMESPath | `fab api workspaces -q "value[?type=='Lakehouse'].displayName"` |
 | Capture a value into a variable (PowerShell) | `$ws = fab api workspaces -q "value[0].id"` |
 | Loop over items in a script | `fab api workspaces -q "value[].id" \| ForEach-Object { fab api "workspaces/$_" }` |
-| Suppress prompts in automation | use explicit IDs/paths and `--input <file>` instead of interactive prompts |
-
-> Command names and flags evolve — always confirm with `fab <group> --help`.
+| Avoid prompts in automation | explicit IDs or paths and `--input <file>` |
 
 ---
 
 ## Quick reference: `az rest` → `fab api`
+
+The same calls with `az rest` and with `fab`. `fab api` needs no `--resource` argument.
 
 | Task | az (old) | fab (preferred) |
 |------|----------|-----------------|
@@ -481,31 +481,32 @@ underlying Azure capacity resource is an Azure control-plane action → use `az`
 | Run a notebook job | n/a (raw REST polling) | `fab job run <ws>/<notebook>.Notebook` |
 | Check job status | raw REST polling | `fab job run-status <ws>/<item> --id <jobId>` |
 
-> Command names and flags evolve. Run `fab --help`, `fab <group> --help`, or check
-> the data-goblin references under
-> `power-bi-agentic-development/plugins/fabric-cli/skills/fabric-cli/` for the
-> current syntax. When in doubt, the agents discover the exact commands dynamically.
+> Command names and flags change. For current syntax run `fab --help` or
+> `fab <group> --help`, or read the data-goblin references under
+> `power-bi-agentic-development/plugins/fabric-cli/skills/fabric-cli/`.
+> The agents check the same sources before they run a command.
 
 ---
 
 # Part II — Specialist CLIs (opt-in, agent-owned)
 
-The tools below sit **on top of** `fab`/`az`. Each is an opt-in specialist: the
-installer detects it, prints its provider and purpose, and asks **Y/N** before a
-best-effort install (see the README **Prerequisites** table). Only `Y` or `YES` installs;
-Enter, `N`, any other text or no answer at all skips the tool. Each is **owned by one
-team/worker agent** and gated at runtime by `.github/agent-docs/tool-status.json` — an
-agent reads `<key>.found` first, optionally does one live `--version`/`Get-Command`
-re-check, then falls back gracefully when the tool is absent. **None of these is
-required for the core local-editing workflow.**
+The tools below sit **on top of** `fab`/`az`. Each is opt-in: the installer detects it,
+prints its provider and purpose, and asks **Y/N** before a best-effort install (see
+[Step 2 of 9 — Checking Prerequisites](README.md#step-2-of-9--checking-prerequisites)).
+Only `Y` or `YES` installs; Enter, `N`, any other text or no answer at all skips the tool.
+
+Each tool is **owned by one team or worker agent** and gated at runtime by
+`.github/agent-docs/tool-status.json`: the agent reads `<key>.found`, optionally does one
+live `--version`/`Get-Command` re-check, then uses the documented fallback when the tool is
+absent. **None of these is required for the core local-editing workflow.**
 
 > Exceptions: the custom visual toolchain (§28) is **detected only** — the installer never
 > installs Node.js, npm or `pbiviz` — and §29 is a script the installer ships, not a CLI.
 
-> The newer/niche tools (`pbir`, the Tabular Editor CLI, `pbi-tools`) move quickly and
-> some are in preview. The tables below are an accurate **working set** taken from each
-> provider's own docs — always confirm exact flags with the tool's `--help`/`-?` and the
-> linked provider reference before scripting against them.
+> `pbir`, the Tabular Editor CLI and `pbi-tools` change quickly and some are in preview.
+> The tables below are a **working set** taken from each provider's documentation: confirm
+> exact flags with the tool's `--help`/`-?` and the linked provider reference before you
+> script against them.
 
 ---
 
@@ -565,17 +566,17 @@ bridge that drives an open Power BI Desktop (reload the canvas, screenshot pages
 ## 23. Tabular Editor CLI — semantic-model validation & deployment
 
 **Purpose** — Headless semantic-model operations for CI/CD: Best Practice Analyzer
-(BPA), C# scripts/macros, schema validation, deploy via XMLA, and (new CLI) diffing,
-testing, refresh and VertiPaq analysis.
+(BPA), C# scripts/macros, schema validation and deploy via XMLA; the `te` CLI adds
+diffing, testing, refresh and VertiPaq analysis.
 
 | | |
 |---|---|
 | **Owned by** | **010 Semantic Model Team Lead**, via **016 Semantic Validation & Performance Agent** |
 | **tool-status.json keys** | Three products, three keys, never inferred from each other: `tabularEditor` = Tabular Editor 2 (`TabularEditor.exe`, `TabularEditor2.exe`; the only one the installer offers to install); `teCli` = the cross-platform `te` CLI (detected only); `tabularEditor3` = Tabular Editor 3 (`TabularEditor3.exe`, paid; detected only) |
 | **Provider** | Tabular Editor — https://docs.tabulareditor.com |
-| **Two command lines** | `TabularEditor.exe` (TE2 CLI) — stable, Windows-only, free, production-ready. `te` — the new cross-platform CLI, a preview with its own release train. |
+| **Two command lines** | `TabularEditor.exe` (TE2 CLI) — stable, Windows-only, free, production-ready. `te` — the cross-platform CLI, a preview with its own release train. |
 
-**`TabularEditor.exe` (TE2 — use for production pipelines today):**
+**`TabularEditor.exe` (TE2 — use for production pipelines):**
 
 | What | Example |
 |------|---------|
@@ -586,9 +587,9 @@ testing, refresh and VertiPaq analysis.
 | Emit XMLA/TMSL without deploying | `... -X out.xmla` |
 
 > `TabularEditor.exe` is a WinForms app — **always** wrap CLI runs in `start /wait` so the
-> console waits for the task to finish. Running it in CI does **not** need a TE3 licence.
+> console waits for the task to finish.
 
-**`te` (new CLI — cross-platform, preview, no `start /wait` needed):**
+**`te` (cross-platform, preview, no `start /wait` needed):**
 
 | What | Example |
 |------|---------|
@@ -598,21 +599,20 @@ testing, refresh and VertiPaq analysis.
 | Inspect / diff / dependencies | `te ls`, `te find`, `te diff` (exit `2` on difference), `te deps --unused` |
 | Refresh / test / VertiPaq | `te refresh --table ...` · `te test run --trx out.trx` · `te vertipaq` |
 
-- **Fallback when absent** — author/validate TMDL by hand via the `fabric-tmdl` (house style)
-  + data-goblin DAX/naming skills; BPA rules live in the data-goblin `bpa-rules` skill.
+- **Fallback when absent or not installable** — **016 Semantic Validation & Performance Agent**
+  authors and reviews TMDL/DAX by hand with the `fabric-tmdl` house style and the data-goblin
+  DAX/naming skills, and applies the BPA rules of the data-goblin `bpa-rules` skill. You lose only
+  the *automated* headless BPA/VertiPaq run, not the modelling capability.
 - **Caveats** — `te` is a preview: confirm its current status and licence terms in the provider
   documentation before relying on it. TE3 **desktop** needs a paid licence; running the TE2 CLI in
   CI does not. The installer never installs or updates `te` or TE3, and an agent uses either only
   when its own tool-status key reports it as found.
-- **Install strategy (Tabular Editor 2 only, after your Yes)** — setup tries an automated portable install first (works on open networks);
-  if that fails it prints the exact link (`releases/latest` → `TabularEditor.Portable.zip`, unzip to
-  `%LOCALAPPDATA%\Programs\TabularEditor`). **Corporate security can return that zip empty or block it
-  outright** (deep content inspection of executables); an IT/download approval may be required. Drop the
-  zip in Downloads and re-run to auto-pick it up, or ask **070 - Capability Maintenance Team Lead**.
-- **If it can't be installed** — the **016 Semantic Validation & Performance Agent** falls back to the
-  `fabric-tmdl` (house style) + data-goblin DAX/naming skills and the `bpa-rules` skill: it authors and
-  reviews TMDL/DAX and applies BPA rules by hand. You lose only the *automated* headless BPA/VertiPaq run,
-  not the modelling capability.
+- **Install strategy (Tabular Editor 2 only, after your Yes)** — setup first tries an automated
+  portable install (works on open networks). If that fails it prints the exact link
+  (`releases/latest` → `TabularEditor.Portable.zip`, unzip to `%LOCALAPPDATA%\Programs\TabularEditor`).
+  **Corporate security can return that zip empty or block it outright** (deep content inspection of
+  executables); you may need an IT download approval. Put the zip in Downloads and re-run setup to
+  pick it up, or ask **070 - Capability Maintenance Team Lead**.
 
 ---
 
@@ -637,26 +637,26 @@ back into a PBIX/PBIT, convert between serialization formats, and deploy.
 | Export table data to CSV | `pbi-tools export-data -pbixPath ".\Sales.pbix"` |
 | Deploy via a manifest profile | `pbi-tools deploy ".\Sales" <label> -environment Development` |
 
-- **Fallback when absent** — use the Fabric VS Code extension / `pbir` for PBIR reports;
-  manual PBIP serialization for models.
+- **Fallback when absent or not installable** — **055 Power BI ALM Agent** uses the Fabric VS Code
+  extension, `fab export`/`import` and `pbir` (§22) for PBIR reports, and manual PBIP/TMDL
+  serialization for models. You lose only classic-**PBIX** round-tripping into Git; native
+  PBIP/PBIR ALM is unaffected.
 - **Caveats** — Windows-centric (it talks to Power BI Desktop internals). `compile` to PBIX is
   supported only for "thin" report-only projects; use the **PBIT** format when the project
   contains a data model.
-- **Install strategy** — setup tries an automated portable install first (works on open networks);
-  if that fails it prints the exact link (`releases/latest` → `pbi-tools.<version>.zip` net472, unzip to
-  `%LOCALAPPDATA%\Programs\pbi-tools`). **Corporate security can return that zip empty or block it
-  outright** (deep content inspection of executables); an IT/download approval may be required. Drop the
-  zip in Downloads and re-run to auto-pick it up, or ask **070 - Capability Maintenance Team Lead**.
-- **If it can't be installed** — the **055 Power BI ALM Agent** falls back to the Fabric VS Code
-  extension / `fab export`/`import` and `pbir` (§22) for PBIR reports, and manual PBIP/TMDL serialization
-  for models. You lose only classic-**PBIX** round-tripping into Git; native PBIP/PBIR ALM is unaffected.
+- **Install strategy (after your Yes)** — as for Tabular Editor 2 (§23): an automated portable
+  install first; if that fails, setup prints the exact link (`releases/latest` →
+  `pbi-tools.<version>.zip` net472, unzip to `%LOCALAPPDATA%\Programs\pbi-tools`). The same
+  corporate-security limits apply: the zip can arrive empty or be blocked, and you may need an IT
+  download approval. Put the zip in Downloads and re-run setup to pick it up, or ask
+  **070 - Capability Maintenance Team Lead**.
 
 ---
 
 ## 25. `sqlcmd` — T-SQL over the Fabric SQL endpoint
 
 **Purpose** — Run T-SQL against a Fabric Warehouse / Lakehouse SQL analytics endpoint
-(or Azure SQL). This is the one thing `fab` does **not** do. See also §8.
+(or Azure SQL), which `fab` does **not** do. See also §8.
 
 | | |
 |---|---|
@@ -807,7 +807,8 @@ Git call goes through one function with literal pathspecs, UTF-8 output and no p
 | State and level of the folder | `Get-PbivizRepoState -Root <folder>` · `Get-PbivizStatusLine -Root <folder> -RelativePath <name>` |
 | Level 1 initialisation (installer) | `Initialize-PbivizRepository -Root <folder> -FolderWasEmpty` |
 | Level 2: adopt a remote, keeping both histories | `Connect-PbivizRemoteHistory -Root <folder> -Remote origin -Branch main -Fetch` |
-| Level 3: candidate for one visual | `New-PbivizPromotionCandidate -Root <folder> -Visual <Name> -SourceRef PBVIZ_Team_Dev -TargetRef PBVIZ_Team_Prod [-Allowlist <paths>]` |
+| Level 3: the current production revision | `Get-PbivizProductionRevision -Root <folder> [-Remote origin] [-Branch PBVIZ_Team_Prod]` |
+| Level 3: candidate for one visual | `New-PbivizPromotionCandidate -Root <folder> -Visual <Name> -SourceRef PBVIZ_Team_Dev -TargetRef PBVIZ_Team_Prod [-Allowlist <paths>] [-Remote <name>] [-ProdBranch <branch>]` |
 | Level 3: gates G0-G6 | `Test-PbivizPromotionGates -Worktree <candidate> -Visual <Name> -TargetRef PBVIZ_Team_Prod [-Allowlist <the candidate's paths>]` |
 | Release build with build evidence | Level 1/2: `Invoke-PbivizBuild -Root <folder> -Visual <Name>` (clean checkout whose HEAD is the source commit) · Level 3: `Invoke-PbivizBuild -Worktree <candidate> -Visual <Name>` · optional `-TimeoutSeconds` (default 900) |
 | Release pair (`.pbiviz` + `.release.json`) | Level 1/2: `Add-PbivizRelease -Root <folder> -Visual <Name> -SourceSha <HEAD>` · Level 3: `Add-PbivizRelease -Worktree <candidate> -Visual <Name> -SourceSha <candidate source>` · optional `-Tests @{ lint='PASS'; unit='PASS'; host='NOT RUN'; certification='NOT RUN' }`, `-Review @{ reviewer=...; verdict='APPROVE'; sourceSha=<source commit> }`, `-PackagePath <path>`, `-ExternalPackageApproval 'APPROVED:EXTERNAL-PACKAGE:<Name>:<sha256>'`; `-ToolsVersion` / `-NodeVersion` only cross-check the build evidence |
@@ -851,17 +852,20 @@ $a = Connect-PbivizRemoteHistory -Root $root -Remote origin -Branch main -Fetch
 $a.Status, $a.Case, $a.Reason, $a.BackupRef, ($a.ConflictPaths -join ', '), ($a.Collisions -join ', ')
 ```
 
-`Case` is one of: `empty-remote` (nothing changed; push `main` only with `APPROVED:PUSH:main`),
-`up-to-date`, `fast-forward` (related history), `unrelated-merge` (an independent remote merged
-with both root commits kept), `tracking-checkout` (an empty local repository takes the remote
-branch), `conflict` (the merge was aborted and HEAD, index, tracked files and untracked/ignored
-files are exactly as before - the paths are listed; resolving them in local files needs
-`APPROVED:MERGE-LOCAL:<paths>`), `needs-checkpoint` (commit local files first),
-`needs-merge-decision` (diverged history: a merge needs approval) or `blocked` (for example a local
-untracked or ignored file at a path the remote tracks - move it aside, nothing was changed).
-Before any branch moves a backup ref `refs/pbiviz-backup/connect-<utc>` is written; afterwards the
-helper asserts that the old local tip is an ancestor of the new one and that no other ref changed.
-Tags are never fetched. Daily sync is the same call (one-branch fetch, fast-forward only).
+| `Case` | Meaning |
+|---|---|
+| `empty-remote` | Nothing changed. Push `main` only with `APPROVED:PUSH:main`. |
+| `up-to-date` · `fast-forward` | Related history. |
+| `unrelated-merge` | An independent remote was merged; both root commits are kept. |
+| `tracking-checkout` | An empty local repository takes the remote branch. |
+| `conflict` | The merge was aborted; HEAD, index, tracked files and untracked/ignored files are exactly as before, and the paths are listed. Resolving them in local files needs `APPROVED:MERGE-LOCAL:<paths>`. |
+| `needs-checkpoint` | Commit local files first. |
+| `needs-merge-decision` | Diverged history: a merge needs approval. |
+| `blocked` | For example a local untracked or ignored file at a path the remote tracks. Move it aside; nothing was changed. |
+
+Before any branch moves, the helper writes a backup ref `refs/pbiviz-backup/connect-<utc>`;
+afterwards it asserts that the old local tip is an ancestor of the new one and that no other ref
+changed. Tags are never fetched. Daily sync is the same call (one-branch fetch, fast-forward only).
 
 **Level 3 - DEV / (TEST) / PROD** (after `APPROVED:BRANCHES:<repo>`, clean and up-to-date `main`):
 `PBVIZ_Team_Dev` at `origin/main`, `PBVIZ_Team_Prod` at the commit the user confirms (or empty),
@@ -925,8 +929,7 @@ Expected outcomes:
   `PackageSource = build output`. With the complete recorded evidence above, `Validated = True` and
   `ReleaseClass = OFFICIAL RELEASE`; with anything missing (for example no review),
   `Validated = False`, `ReleaseClass = DEVELOPMENT/TEST CANDIDATE` and `ValidationGaps` lists it.
-  `Validated = True` therefore rests on the helper's own build evidence plus the attestations it
-  was given; report the lint, unit and review results as attested by 083 and 084.
+  Report the lint, unit and review results as attested by 083 and 084 (29.1).
 - Then commit exactly the two staged files (the helper never commits), and check the release
   commit: `Test-PbivizReleaseIntegrity -Root $root -Visual 'Bar' -Version <v> -Commit HEAD`. Report
   an official release only for `Status = PASS`, `Verification = COMPLETE`,
@@ -942,6 +945,18 @@ $g = Test-PbivizPromotionGates -Worktree $c.Worktree -Visual 'Bar' -TargetRef PB
 $g.Status; $g.Gates | Format-Table Gate, Pass, Detail
 ```
 
+- `-TargetRef` must name the current production revision. The helper reads it from the remote's
+  `PBVIZ_Team_Prod` as the remote answers now (`git ls-remote`: nothing is fetched, no ref is
+  written), or from the local branch when the repository has no remote. Any other target is
+  BLOCKED with nothing written: `stale target` (the local branch is behind, or the revision is
+  not in the clone yet), `invalid target` (another commit) or a revision that could not be
+  verified (remote unreachable, branch missing on it, remote not configured). For a stale target,
+  fetch that one branch
+  (`git -C $root fetch --no-tags origin '+refs/heads/PBVIZ_Team_Prod:refs/remotes/origin/PBVIZ_Team_Prod'`)
+  and pass `-TargetRef origin/PBVIZ_Team_Prod` to both calls. `-Remote <name>` (default `origin`)
+  and `-ProdBranch <branch>` name another remote or branch; both are stored in the candidate record.
+- G0 reads the production revision again: a Prod that moved after the candidate was cut fails G0.
+  Cut a new candidate.
 - `$tests` / `$review` are the same evidence as in 29.2, for `$c.Source`. Only `validated: true`
   is accepted: an incomplete release is BLOCKED before anything is written.
 - Every gate must PASS. Then commit on the release branch (trailer
@@ -980,18 +995,21 @@ manifest still yields the same fingerprint and shared blobs.
 
 - **Toolchain preflight** - before the CLI starts, `Invoke-PbivizBuild` refuses (BLOCKED, nothing
   run or written) every case in which `pbiviz package` would itself download or change
-  dependencies. `powerbi-visuals-tools` (verified with 7.2.1) runs `npm list powerbi-visuals-api` on every package and
-  installs that package over the network, rewriting `package.json`, `package-lock.json` and
-  `node_modules`, when `node_modules/powerbi-visuals-api` is missing, `pbiviz.json` has no
-  `apiVersion` (then `@latest`) or the installed major.minor differs from `apiVersion` (then
-  `~<apiVersion>`). The preflight blocks those three cases and, when the visual has a
-  `package-lock.json` (version 2 or 3), also a lockfile whose root entry disagrees with
-  `package.json` on `powerbi-visuals-tools` / `powerbi-visuals-api` - a different range, a
-  declaration on only one side, or no root entry at all - or that locks other versions than the
-  installed ones. A visual without a lockfile, or with a version-1 lockfile, is built without that
-  cross-check, and the build evidence says so. The fix is the user's
-  `APPROVED:INSTALL:<Name>` and `npm ci`, or a source commit that corrects `apiVersion` - never a
-  helper workaround. Another patch of the same API major.minor is accepted, as the SDK accepts it.
+  dependencies. `powerbi-visuals-tools` (verified with 7.2.1) runs `npm list powerbi-visuals-api`
+  on every package and, in the first three cases below, installs that package over the network,
+  rewriting `package.json`, `package-lock.json` and `node_modules`. The preflight blocks:
+  - `node_modules/powerbi-visuals-api` is missing;
+  - `pbiviz.json` has no `apiVersion` (the SDK would take `@latest`);
+  - the installed major.minor differs from `apiVersion` (the SDK would take `~<apiVersion>`);
+    another patch of the same API major.minor is accepted, as the SDK accepts it;
+  - when the visual has a `package-lock.json` (version 2 or 3): a lockfile whose root entry
+    disagrees with `package.json` on `powerbi-visuals-tools` / `powerbi-visuals-api` (a different
+    range, a declaration on only one side, or no root entry at all), or that locks other versions
+    than the installed ones.
+
+  A visual without a lockfile, or with a version-1 lockfile, is built without that cross-check,
+  and the build evidence says so. The fix is the user's `APPROVED:INSTALL:<Name>` and `npm ci`,
+  or a source commit that corrects `apiVersion` - never a helper workaround.
 - **Isolation of the CLI** - the SDK verifies a dev-server certificate under
   `os.homedir()\<certificateFolder>` on every package (through Windows PowerShell) and, when that
   fails, deletes the certificate files and creates a new certificate with
@@ -1006,17 +1024,23 @@ manifest still yields the same fingerprint and shared blobs.
   | `npm_config_cache` · `npm_config_offline` · `npm_config_update_notifier` | a disposable cache (npm logs included) · `true` · `false`; `npm_config_userconfig` keeps the caller's user npmrc |
   | `TEMP` / `TMP` | a folder inside the disposable home |
 
-  The guard folder, its marker, `owner.lock`, the npm cache and TEMP sit beside `profile\`, and each
-  SDK certificate setting (`certificateFolder`, `certificate`, `privateKey`, `pfx`, `passphrase`
-  in the toolchain's `config.json`) must be a single safe file name, distinct from the others,
-  whose resolved path lies directly in the disposable certificate folder - otherwise BLOCKED. The
-  build is also BLOCKED before the CLI starts when `Cert:\CurrentUser\My` cannot be read (an empty
-  store is fine), because a certificate the SDK might add could not be detected. The
-  build is FAILED with no evidence when the guard was called, the SDK rejected or regenerated the
-  certificate, the placeholder changed, a new certificate appeared in `Cert:\CurrentUser\My` or the
-  store could not be read after the run (the store is only read; the helper never deletes a
-  certificate), or the SDK tried to install a dependency. The caller's environment is restored and
-  the home removed in every case.
+  The guard folder, its marker, `owner.lock`, the npm cache and TEMP sit beside `profile\`. The
+  helper only reads `Cert:\CurrentUser\My`; it never deletes a certificate. The caller's
+  environment is restored and the home removed in every case.
+
+  BLOCKED before the CLI starts:
+  - an SDK certificate setting (`certificateFolder`, `certificate`, `privateKey`, `pfx`,
+    `passphrase` in the toolchain's `config.json`) is not a single safe file name, distinct from
+    the others, whose resolved path lies directly in the disposable certificate folder;
+  - `Cert:\CurrentUser\My` cannot be read (an empty store is fine), because a certificate the SDK
+    might add could not be detected.
+
+  FAILED with no evidence:
+  - the guard was called, the SDK rejected or regenerated the certificate, or the placeholder
+    changed;
+  - a new certificate appeared in `Cert:\CurrentUser\My`, or the store could not be read after
+    the run;
+  - the SDK tried to install a dependency.
 - **What isolation does not cover** - it contains the SDK's known side effects; it is not an
   operating-system sandbox. The CLI, ESLint, webpack and every package in `node_modules` run with
   the user's rights and can read or write anything the user can. The SDK's certificate check starts
@@ -1036,14 +1060,15 @@ manifest still yields the same fingerprint and shared blobs.
   owned through `owner.lock`, which the running build holds open: the next build removes only homes
   whose lock is free (a finished or killed build) and lockless homes older than 24 hours, never a
   live build's home and never through a link. A linked `pbiviz-build-home` folder is refused.
-  Recovery after a crash needs nothing: the next build sweeps the left-over home.
+  After a crash you do nothing: the next build removes the left-over home.
 - **Build supervision** - `pbiviz package` runs under process-tree supervision (Windows job
   object): the CLI starts suspended inside the job, stdin is `NUL`, stdout/stderr are drained into
   bounded buffers (4 MB per stream; the excess is counted in the log, not kept). When the CLI exits
   or the timeout expires, every process of its tree still running - detached descendants
   included - is counted and terminated before the call returns, so nothing can write a package
-  afterwards (the console host Windows attaches to the CLI is not counted). A timeout, a descendant still running after the CLI exited, or output that could not
-  be collected is FAILED with no build evidence.
+  afterwards (the console host Windows attaches to the CLI is not counted). A timeout, a
+  descendant still running after the CLI exited, or output that could not be collected is FAILED
+  with no build evidence.
 - **Transactional archiving** - `Add-PbivizRelease` and `Add-PbivizLegacyArchive` write each new
   file to a temporary file and rename it into place (never over an existing file), and record
   every folder and file they create. If anything fails after the first write - package, manifest,
@@ -1053,39 +1078,40 @@ manifest still yields the same fingerprint and shared blobs.
   releases and user files are never touched. If a written file changed meanwhile it is left in
   place and the result is FAILED with `ROLLBACK INCOMPLETE` naming it. A release file that exists
   but is not tracked is reported (never deleted) for you to inspect.
-- **G4 (dependencies stay inside the visual)** - analyses the visual's own code, styles and JSON
-  configuration as the PBIVIZ toolchain (webpack 5, ts-loader, less-loader, css-loader) resolves
-  them: `import` / `export ... from`, side-effect imports, `import()` (template literals by their
-  static prefix), `require()`, `require.resolve()`, `require.context()`,
-  `import.meta.webpackContext()`, `new URL(<request>, import.meta.url)`, triple-slash references,
-  LESS/CSS `@import` and `url()`, and relative or absolute path strings in the visual's JSON files
-  (for example `extends`, `baseUrl` and `paths` in `tsconfig.json`, `file:` dependencies in
-  `package.json` and the lockfile, paths in `pbiviz.json`). A request
-  reaching a file outside the visual that is not allowlisted, a folder request (context or
-  template) outside the visual, npm workspaces at the repository root, or an absolute path BLOCK
-  the gate. It fails closed (`analysis incomplete`) on a computed request, a package the visual's
-  own `package.json` / `package-lock.json` does not declare or lock, inline loader syntax,
-  `#` subpath imports, an executable `pbiviz.mjs` / `tsconfig.mjs` / `capabilities.mjs`, a
-  `node_modules` folder at the repository root, unreadable or oversized files, junctions and
-  links. Limits: the contents of `node_modules` are not analysed; TypeScript automatic `@types`
-  inclusion from folders above the repository, pnpm/Yarn layouts, lockfile version 1 and R scripts
-  are not resolved; text inside JSX that looks like a comment can hide a computed import from the
-  lexer (static relative requests are still caught by a raw scan). G4 is a static classification,
-  not a proof that the bundle contains nothing from outside the visual.
-
-- **Cleanup** — only helper-created candidates (record, folder and `release/pbiviz/*` branch
+- **G4 (dependencies stay inside the visual)** - a static analysis of the visual's own code,
+  styles and JSON configuration as the PBIVIZ toolchain (webpack 5, ts-loader, less-loader,
+  css-loader) resolves them. It is a classification, not a proof that the bundle contains nothing
+  from outside the visual.
+  - **Reads**: `import` / `export ... from`, side-effect imports, `import()` (template literals
+    by their static prefix), `require()`, `require.resolve()`, `require.context()`,
+    `import.meta.webpackContext()`, `new URL(<request>, import.meta.url)`, triple-slash
+    references, LESS/CSS `@import` and `url()`, and relative or absolute path strings in the
+    visual's JSON files (for example `extends`, `baseUrl` and `paths` in `tsconfig.json`, `file:`
+    dependencies in `package.json` and the lockfile, paths in `pbiviz.json`).
+  - **Blocks**: a request reaching a file outside the visual that is not allowlisted, a folder
+    request (context or template) outside the visual, npm workspaces at the repository root, or
+    an absolute path.
+  - **Fails closed (`analysis incomplete`)**: a computed request, a package the visual's own
+    `package.json` / `package-lock.json` does not declare or lock, inline loader syntax,
+    `#` subpath imports, an executable `pbiviz.mjs` / `tsconfig.mjs` / `capabilities.mjs`, a
+    `node_modules` folder at the repository root, unreadable or oversized files, junctions and
+    links.
+  - **Limits**: the contents of `node_modules` are not analysed; TypeScript automatic `@types`
+    inclusion from folders above the repository, pnpm/Yarn layouts, lockfile version 1 and R
+    scripts are not resolved; text inside JSX that looks like a comment can hide a computed
+    import from the lexer (static relative requests are still caught by a raw scan).
+- **Cleanup** - only helper-created candidates (record, folder and `release/pbiviz/*` branch
   must match) are removed; unexpected staged, unstaged or untracked data and operations in
   progress are refused, with or without approval. The release branch is always kept.
-
-- **Never (helper or agent)** — force (`switch -C`, `checkout -B`, `branch -f`,
+- **Never (helper or agent)** - force (`switch -C`, `checkout -B`, `branch -f`,
   `push --force`), `reset --hard`, `clean -f`, admin/policy bypass, writing to Prod after a
   merge, or editing a file under any `releases/` folder. The one forced operation in the
   helper is discarding an uncommitted, helper-created candidate worktree, and only with
   `APPROVED:DISCARD-CANDIDATE:<branch>`.
-- **Approval-gated (agent only)** — push, pull request and merge are separate agent actions,
-  each gated by an explicit approval token (`APPROVED:PUSH`, `APPROVED:PR`, `APPROVED:MERGE`
-  with every required review and check satisfied); the helper performs none of them.
-- **Results** — every function returns a status (`PASS`, `BLOCKED`, `NEEDS INPUT`,
+- **Approval-gated (agent only)** - push, pull request and merge are separate agent actions,
+  each with its own token (`APPROVED:PUSH`, `APPROVED:PR`, `APPROVED:MERGE` with every required
+  review and check satisfied; 29.3). The helper performs none of them.
+- **Results** - every function returns a status (`PASS`, `BLOCKED`, `NEEDS INPUT`,
   `NEEDS CHECKPOINT`, `CONFLICT`, `FAILED`; integrity: also `PARTIAL`; provenance: `DERIVED` /
   `NOT DERIVABLE`) with a reason and evidence; agents report it verbatim.
 
@@ -1130,9 +1156,10 @@ Then push the integration branch and use it for pull request 1 (`APPROVED:PUSH`,
 the manifest's. **Stop and report** - do not resolve by hand - when a path outside the visual (and its
 allowlisted shared files) differs from a clean merge, when an unmerged path remains, or when a
 release pair of another version would change: release pairs that exist only on Test stay as they
-are (the archive is append-only). Never merge Test into the release branch or into Prod. This
-procedure is plain Git (no helper function); it is covered by an automated regression test and was
-rehearsed on local branches, not yet against a provider's pull-request UI.
+are (the archive is append-only). Never merge Test into the release branch or into Prod.
+
+This procedure is plain Git (no helper function). It is covered by an automated regression test and
+was rehearsed on local branches only, not against a provider's pull-request UI.
 
 ---
 

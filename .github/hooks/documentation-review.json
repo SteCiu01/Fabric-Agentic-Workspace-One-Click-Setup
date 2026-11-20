@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "type": "command",
+        "powershell": "powershell -NoProfile -ExecutionPolicy Bypass -File .github/hooks/Doc-Review.ps1 -HookEvent UserPromptSubmit",
+        "bash": "true",
+        "timeout": 30
+      }
+    ],
+    "SubagentStart": [
+      {
+        "type": "command",
+        "powershell": "powershell -NoProfile -ExecutionPolicy Bypass -File .github/hooks/Doc-Review.ps1 -HookEvent SubagentStart",
+        "bash": "true",
+        "timeout": 30
+      }
+    ],
+    "SubagentStop": [
+      {
+        "type": "command",
+        "powershell": "powershell -NoProfile -ExecutionPolicy Bypass -File .github/hooks/Doc-Review.ps1 -HookEvent SubagentStop",
+        "bash": "true",
+        "timeout": 30
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "powershell": "powershell -NoProfile -ExecutionPolicy Bypass -File .github/hooks/Doc-Review.ps1 -HookEvent Stop",
+        "bash": "true",
+        "timeout": 30
+      }
+    ]
+  }
+}
