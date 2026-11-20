@@ -332,6 +332,19 @@ Describe 'Final step: a commit only when Git accepts the workspace folder (Canar
         Test-GitWorkTreeUsable -Path $d | Should -BeFalse
     }
 
+    It 'real Git: a repository Git has initialised is usable, every time (Canary finding)' -Skip:(-not (Get-Command git -CommandType Application -ErrorAction SilentlyContinue)) {
+        $d = Join-Path $script:GitDir 'real repository'
+        New-Item -ItemType Directory -Path $d | Out-Null
+        & git init -q $d 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $d '.git'))) { Set-ItResult -Skipped -Because 'Git could not create a repository under TEMP on this machine'; return }
+        foreach ($i in 1..5) { Test-GitWorkTreeUsable -Path $d | Should -BeTrue -Because 'the exit code must be read after Git has finished, not from a pipeline cut short' }
+    }
+
+    It 'reads all of Git''s answer before it reads the exit code' {
+        $fn = [regex]::Match($script:Src9, '(?s)function Test-GitWorkTreeUsable \{.*?\n\}').Value
+        $fn | Should -Not -Match 'Select-Object -First' -Because 'a pipeline stopped early leaves $LASTEXITCODE at -1 for a native command'
+    }
+
     It 'the final step asks before it stages, and reports the skipped commit as a warning' {
         $script:Step9 | Should -Not -BeNullOrEmpty
         $guard = $script:Step9.IndexOf('$gitUsable = Test-GitWorkTreeUsable -Path $rootPath')

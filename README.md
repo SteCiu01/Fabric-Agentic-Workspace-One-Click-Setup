@@ -126,7 +126,7 @@ Setup-FabricAgenticWorkspace.bat    ← double-click this
 Setup-FabricAgenticWorkspace.ps1    ← the engine (called by the .bat)
 ```
 
-The `.bat` runs the `.ps1` with a process-scoped `-ExecutionPolicy Bypass`, so the usual local script-policy block does not apply. Application allowlisting can still stop it.
+The `.bat` runs the `.ps1` with a process-scoped `-ExecutionPolicy Bypass`, so the usual local script-policy block does not apply. Application allowlisting can still stop it. If setup does not complete — including when PowerShell cannot be started at all — the window says so (`Setup did NOT complete: exit code <n>`) and the launcher returns that exit code; a window that shows only the banner means nothing was installed.
 
 ## 1.4 The installer, step by step (9 steps)
 

@@ -162,3 +162,99 @@ Describe 'Documentation matches what the installer ships and asks' {
         }
     }
 }
+
+Describe 'Launchers report a run that failed or never started' {
+
+    BeforeAll {
+        $script:SetupBatPath = Join-Path (Split-Path $script:InstallerPath -Parent) 'Setup-FabricAgenticWorkspace.bat'
+        $script:SetupBat = Get-Content -LiteralPath $script:SetupBatPath -Raw
+        $script:TestsBat = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Run-Tests.bat') -Raw
+        # The space in the folder name is deliberate: launchers must work from paths with spaces.
+        $script:LauncherDir = Join-Path ([IO.Path]::GetTempPath()) ('fabric launcher ' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        New-Item -ItemType Directory -Path $script:LauncherDir | Out-Null
+        Copy-Item -LiteralPath $script:SetupBatPath -Destination $script:LauncherDir
+        # Runs the copied launcher next to a stand-in script; the real installer is not involved.
+        function Invoke-LauncherWithStandIn([string]$ScriptText) {
+            [IO.File]::WriteAllText((Join-Path $script:LauncherDir 'Setup-FabricAgenticWorkspace.ps1'), $ScriptText)
+            $bat = Join-Path $script:LauncherDir 'Setup-FabricAgenticWorkspace.bat'
+            $out = (& cmd /c "`"$bat`" < NUL" 2>&1 | Out-String)
+            return [pscustomobject]@{ Exit = $LASTEXITCODE; Text = $out }
+        }
+    }
+
+    AfterAll {
+        if ($script:LauncherDir -and (Test-Path -LiteralPath $script:LauncherDir)) { Remove-Item -LiteralPath $script:LauncherDir -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'the setup launcher keeps its documented PowerShell line and reads the exit code straight after it' {
+        $script:SetupBat | Should -Match '(?m)^powershell\.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Setup-FabricAgenticWorkspace\.ps1"\r?\nset "SETUP_EXIT=%ERRORLEVEL%"\r?$'
+        @([regex]::Matches($script:SetupBat, '(?im)^\s*powershell')).Count | Should -Be 1 -Because 'the launcher starts PowerShell once, with the documented line only'
+    }
+
+    It 'the setup launcher says when setup did not complete and returns the exit code' {
+        $script:SetupBat | Should -Match '(?m)^if not "%SETUP_EXIT%"=="0" echo  Setup did NOT complete: exit code %SETUP_EXIT%\.'
+        $script:SetupBat | Should -Match 'Windows PowerShell could not be started from this window'
+        $script:SetupBat.TrimEnd() | Should -Match 'exit /b %SETUP_EXIT%$'
+    }
+
+    It 'the test launcher exits 0 only when every test passed, and says which it was' {
+        $script:TestsBat | Should -Match ([regex]::Escape('-PassThru; if ($r -and $r.Result -eq ''Passed'' -and $r.FailedCount -eq 0) { exit 0 } else { exit 1 }'))
+        $script:TestsBat | Should -Match '(?m)^set "TESTS_EXIT=%ERRORLEVEL%"\r?$'
+        $script:TestsBat | Should -Match '(?m)^if "%TESTS_EXIT%"=="0" echo RESULT: PASSED - no test failed\. Skipped and not-run tests are counted in the summary above\.\r?$'
+        $script:TestsBat | Should -Not -Match 'ALL TESTS PASSED' -Because 'a run with skipped tests did not pass all tests'
+        $script:TestsBat | Should -Match '(?m)^if not "%TESTS_EXIT%"=="0" echo RESULT: FAILED'
+        $script:TestsBat | Should -Not -Match '(?im)^echo Done' -Because 'an unconditional "Done" reads as success'
+        $script:TestsBat.TrimEnd() | Should -Match 'exit /b %TESTS_EXIT%$'
+    }
+
+    It 'a setup script that ends with an error is reported, with its exit code (stand-in script)' {
+        $r = Invoke-LauncherWithStandIn 'Write-Host "stand-in setup"; exit 3'
+        $r.Exit | Should -Be 3 -Because $r.Text
+        $r.Text | Should -Match 'Setup did NOT complete: exit code 3\.'
+    }
+
+    It 'a setup script that ends normally is not reported as failed (stand-in script)' {
+        $r = Invoke-LauncherWithStandIn 'Write-Host "stand-in setup"'
+        $r.Exit | Should -Be 0 -Because $r.Text
+        $r.Text | Should -Match 'stand-in setup'
+        $r.Text | Should -Not -Match 'did NOT complete'
+    }
+
+    It 'the test launcher returns 0 for passed and skipped tests and 1 once a test fails (stand-in tests)' {
+        $dir = Join-Path $script:LauncherDir 'tests stand-in'
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Run-Tests.bat') -Destination $dir
+        $bat = Join-Path $dir 'Run-Tests.bat'
+        [IO.File]::WriteAllText((Join-Path $dir 'A.Tests.ps1'), "Describe 'stand-in' { It 'passes' { 1 | Should -Be 1 }; It 'is skipped' -Skip { 1 | Should -Be 2 } }")
+        $passText = (& cmd /c "`"$bat`" < NUL" 2>&1 | Out-String)
+        $passExit = $LASTEXITCODE
+        $passExit | Should -Be 0 -Because $passText
+        $passText | Should -Match 'RESULT: PASSED - no test failed'
+        $passText | Should -Match 'Skipped:\s*1' -Because 'the skipped test stays visible in the summary'
+        [IO.File]::WriteAllText((Join-Path $dir 'B.Tests.ps1'), "Describe 'stand-in failure' { It 'fails' { 1 | Should -Be 2 } }")
+        $failText = (& cmd /c "`"$bat`" < NUL" 2>&1 | Out-String)
+        $failExit = $LASTEXITCODE
+        $failExit | Should -Be 1 -Because $failText
+        $failText | Should -Match 'RESULT: FAILED'
+        $failText | Should -Not -Match 'RESULT: PASSED'
+    }
+}
+
+Describe 'Installer text survives Windows PowerShell 5.1 (Canary finding)' {
+
+    # Windows PowerShell 5.1 reads a script without a byte order mark in the ANSI code page, so any
+    # character outside ASCII reaches the generated agent files as two or three garbled characters.
+    It 'the installer and its launcher hold ASCII characters only' {
+        $dir = Split-Path $script:InstallerPath -Parent
+        foreach ($name in 'Setup-FabricAgenticWorkspace.ps1', 'Setup-FabricAgenticWorkspace.bat') {
+            $bytes = [IO.File]::ReadAllBytes((Join-Path $dir $name))
+            $found = @()
+            $line = 1
+            foreach ($b in $bytes) {
+                if ($b -eq 10) { $line++ }
+                elseif ($b -gt 127 -and $found -notcontains $line) { $found += $line }
+            }
+            ($found -join ', ') | Should -BeNullOrEmpty -Because "$name has non-ASCII bytes on these lines"
+        }
+    }
+}

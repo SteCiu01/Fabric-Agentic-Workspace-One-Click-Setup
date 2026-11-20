@@ -22,7 +22,7 @@ BeforeAll {
         $a | Should -Not -BeNullOrEmpty -Because "the installer must define `$$name"
         Set-Variable -Scope Script -Name $name -Value (Invoke-Expression $a.Right.Extent.Text)
     }
-    foreach ($fnName in 'Update-VendorClone', 'Test-VendorCloneIdentity', 'Get-VendorCloneHead', 'Restore-VendorClone', 'Get-MissingSkillPins', 'Set-SkillCatalogState',
+    foreach ($fnName in 'Get-GitProbe', 'Format-GitProbe', 'Update-VendorClone', 'Test-VendorCloneIdentity', 'Get-VendorCloneHead', 'Restore-VendorClone', 'Get-MissingSkillPins', 'Set-SkillCatalogState',
                         'Invoke-VendorRefreshWithHold', 'Get-SkillContainerDirs', 'Get-UpstreamSkillIndex', 'Resolve-SkillPin', 'Resolve-KnowledgeRef', 'Get-UnresolvedSkillPins', 'Invoke-SkillCatalogHold') {
         $fn = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $fnName }, $true) | Select-Object -First 1
         $fn | Should -Not -BeNullOrEmpty -Because "$fnName must exist in the installer"
@@ -466,7 +466,7 @@ Invoke-VendorRefreshWithHold $Root 'skills-for-fabric' | ConvertTo-Json -Depth 4
             if (-not $f -or -not $f.Body.EndBlock) { return $null }
             return ((@($f.Body.EndBlock.Statements | ForEach-Object { $_.Extent.Text }) -join "`n") -replace '\s+', ' ').Trim()
         }
-        foreach ($fnName in 'ConvertFrom-JsonLenient', 'Find-JsonObjectEnd', 'Find-LineCommentStart', 'Add-JsonMemberBeforeClose', 'Update-UserSettingsInPlace', 'Update-VendorClone',
+        foreach ($fnName in 'ConvertFrom-JsonLenient', 'Find-JsonObjectEnd', 'Find-LineCommentStart', 'Add-JsonMemberBeforeClose', 'Update-UserSettingsInPlace', 'Get-GitProbe', 'Format-GitProbe', 'Update-VendorClone',
                             'Test-VendorCloneIdentity', 'Get-VendorCloneHead', 'Restore-VendorClone', 'Get-MissingSkillPins', 'Set-SkillCatalogState', 'Invoke-VendorRefreshWithHold') {
             $mine = & $statementsOf $helperAst $fnName
             $mine | Should -Not -BeNullOrEmpty -Because "$fnName must be shipped in the helper"

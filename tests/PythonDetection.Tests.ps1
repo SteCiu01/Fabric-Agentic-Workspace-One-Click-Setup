@@ -257,7 +257,7 @@ Describe 'Optional tools are offered again on every run (an earlier No is not re
 
     BeforeAll {
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:Installer, [ref]$null, [ref]$null)
-        foreach ($name in 'Test-ExplicitYes', 'Read-ExplicitYes', 'Set-ToolStatus', 'Invoke-OptionalToolPrompt') {
+        foreach ($name in 'Test-ExplicitYes', 'Read-ExplicitYes', 'Set-ToolStatus', 'Invoke-OptionalToolPrompt', 'Add-SetupWarning') {
             $fn = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true) | Select-Object -First 1
             $fn | Should -Not -BeNullOrEmpty -Because "$name must exist in the installer"
             Invoke-Expression $fn.Extent.Text

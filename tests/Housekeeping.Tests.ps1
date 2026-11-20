@@ -175,6 +175,16 @@ Describe 'Task folders (HK-01, HK-03, HK-06)' {
         [long]$marker.closedUtcTicks | Should -BeGreaterThan 0
     }
 
+    It 'a wildcard with a three-letter extension does not reach longer extensions (deliverables stay)' {
+        $task = New-AgentTaskFolder -WorkspaceRoot $script:TaskRoot -Project 'Finance Model' -Topic 'extensions'
+        foreach ($f in 'temp.xls', 'report.xlsx', 'run.ps1', 'helper.ps1xml', 'notes [draft].txt', 'notes d.txt') { Set-HkFile (Join-Path $task $f) }
+        $r = Close-AgentTaskFolder -Path $task -Remove @('*.xls', '*.ps1', 'notes [draft].txt')
+        (@($r.Removed) | Sort-Object) | Should -Be @('notes [draft].txt', 'run.ps1', 'temp.xls')
+        Test-Path -LiteralPath (Join-Path $task 'report.xlsx') | Should -BeTrue -Because '.NET GetFiles("*.xls") also returns .xlsx files'
+        Test-Path -LiteralPath (Join-Path $task 'helper.ps1xml') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $task 'notes d.txt') | Should -BeTrue -Because 'square brackets in a file name are literal, not a character range'
+    }
+
     It 'refuses to close a folder that is not one of its task folders' {
         $plain = Join-Path $script:TaskRoot 'not a task'
         Set-HkFile (Join-Path $plain 'file.txt')
@@ -442,6 +452,7 @@ Describe 'Restore and purge (recovery is restore-from-quarantine)' {
     It 'a fully cleaned task folder leaves with its marker' {
         @($script:RExec.moved | Where-Object { $_.class -eq 'Safe' }).Count | Should -Be 7
         @($script:RExec.moved | Where-Object { $_.class -eq 'Marker' }).Count | Should -Be 1
+        [long]@($script:RExec.moved | Where-Object { $_.class -eq 'Marker' })[0].bytes | Should -BeGreaterThan 0 -Because 'the execute log records the real size of the marker it moved (Canary finding)'
         Test-Path -LiteralPath $script:R.T5 | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $script:R.T1 '.task.json') | Should -BeTrue -Because 'a task folder that still holds files keeps its marker'
     }
@@ -733,6 +744,19 @@ Describe 'Command line, as the agents run it (Windows PowerShell 5.1)' {
         $back = Invoke-HkCli -Restore -PlanId $id
         $back.Text | Should -Match 'Restored: 8 file\(s\)'
         Test-Path -LiteralPath (Join-Path $script:C.T1 'a.ps1') | Should -BeTrue
+    }
+
+    It 'explains every protected file, and says that a flagged protected file stays (Canary finding)' {
+        # A file with a tell-tale name inside an open task: reported for rotation, but never a candidate.
+        Set-HkFile (Join-Path $script:C.T3 'api-token-notes.txt') 'no secret value here'
+        $p = Invoke-HkCli -Preview
+        $p.Text | Should -Match 'api-token-notes\.txt\s+\(file-name\)\s+- protected: stays where it is'
+        $p.Text | Should -Match 'token-dump\.out\.txt\s+\(file-name, jwt\)\s*\r?\n' -Because 'a file a token can move carries no such note'
+        $total = [int][regex]::Match($p.Text, '(?m)^\s+Protected\s+(\d+) file\(s\)').Groups[1].Value
+        $byReason = 0
+        foreach ($m in [regex]::Matches($p.Text, '(?m)^\s{6}(\d+) x ')) { $byReason += [int]$m.Groups[1].Value }
+        $total | Should -BeGreaterThan 0
+        $byReason | Should -Be $total -Because 'the reasons listed under Protected must add up to the Protected total'
     }
 
     It 'has no command that deletes recursively or by wildcard across folders' {

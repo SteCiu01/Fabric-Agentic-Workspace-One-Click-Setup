@@ -54,13 +54,80 @@ function Get-Sha256Hex ([string]$LiteralPath) {
     }
 }
 
+# Things this run could not do. They do not stop the setup, but the final message lists them
+# instead of reporting a clean result.
+$script:SetupWarnings = New-Object System.Collections.Generic.List[string]
+function Add-SetupWarning ([string]$Text) {
+    if ($null -eq $script:SetupWarnings) { $script:SetupWarnings = New-Object System.Collections.Generic.List[string] }
+    if ($Text -and -not $script:SetupWarnings.Contains($Text)) { $script:SetupWarnings.Add($Text) }
+}
+
+# What Git can say about one folder, without changing anything. State is one of:
+#   missing        the folder does not exist
+#   no-repository  the folder has no .git of its own (Git is not asked), or Git says so
+#   not-installed  no git command
+#   cannot-start   git did not start (exception, or a Windows status code instead of an exit code)
+#   refused        Git declined to open the repository (ownership or safe.directory check)
+#   enclosed       Git answered for another top-level folder
+#   error          any other Git error
+#   ok             Git reads the folder as the root of its own repository
+# Detail is Git's own first error line, so a refusal is never reported as a missing repository.
+function Get-GitProbe ([string]$Path) {
+    $r = [ordered]@{ State = 'error'; Detail = ''; ExitCode = $null; TopLevel = $null }
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Container)) { $r.State = 'missing'; $r.Detail = 'the folder does not exist'; return [pscustomobject]$r }
+    if (-not (Test-Path -LiteralPath (Join-Path $Path '.git'))) { $r.State = 'no-repository'; $r.Detail = 'the folder has no .git of its own'; return [pscustomobject]$r }
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { $r.State = 'not-installed'; $r.Detail = 'git is not on PATH'; return [pscustomobject]$r }
+    $ErrorActionPreference = 'Continue'
+    $lines = @()
+    try {
+        $global:LASTEXITCODE = 0
+        $lines = @(& git -C $Path rev-parse --show-toplevel 2>&1)
+        $r.ExitCode = $LASTEXITCODE
+    } catch {
+        $r.State = 'cannot-start'; $r.Detail = [string]$_.Exception.Message; return [pscustomobject]$r
+    }
+    $out = @($lines | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
+    $err = @($lines | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { ([string]$_.Exception.Message).Trim() } | Where-Object { $_ -and $_ -ne 'System.Management.Automation.RemoteException' })
+    $r.Detail = [string](@(@($err | Where-Object { $_ -match '^(fatal|error):' }) + $err) | Select-Object -First 1)
+    if ($r.ExitCode -eq 0 -and $out.Count -gt 0) {
+        $r.TopLevel = $out[0]
+        $top = try { [IO.Path]::GetFullPath($out[0].Replace('/', '\')).TrimEnd('\', '/') } catch { '' }
+        $r.State = if ($top -and $top.Equals([IO.Path]::GetFullPath($Path).TrimEnd('\', '/'), [StringComparison]::OrdinalIgnoreCase)) { 'ok' } else { 'enclosed' }
+        return [pscustomobject]$r
+    }
+    $errText = $err -join ' '
+    if ($errText -match 'dubious ownership|safe\.directory') { $r.State = 'refused' }
+    elseif ($r.ExitCode -lt 0 -or $r.ExitCode -gt 255) { $r.State = 'cannot-start' }
+    elseif ($errText -match 'not a git repository') { $r.State = 'no-repository' }
+    if (-not $r.Detail) { $r.Detail = "git exit code $($r.ExitCode)" }
+    return [pscustomobject]$r
+}
+
+# One plain sentence for a Get-GitProbe result.
+function Format-GitProbe ($Probe) {
+    switch ([string]$Probe.State) {
+        'ok'            { return 'Git reads the repository' }
+        'missing'       { return 'the folder does not exist' }
+        'no-repository' { return 'the folder is not a Git repository of its own' }
+        'not-installed' { return 'Git is not installed or not on PATH' }
+        'cannot-start'  { return "Git is installed but could not be started ($($Probe.Detail))" }
+        'refused'       { return "Git refused to open the repository ($($Probe.Detail))" }
+        'enclosed'      { return "Git answered for another repository ($($Probe.TopLevel))" }
+        default         { return "Git could not read the repository ($($Probe.Detail))" }
+    }
+}
+
 # Force-refresh a vendor clone to its upstream state. The installer treats the
 # vendor repositories (skills-for-fabric, power-bi-agentic-development) as
 # authoritative-FROM-UPSTREAM: every run mirrors live upstream and any local
 # edit is deliberately discarded so the references never drift. To stay
 # recoverable, a dirty working tree (including untracked files) is stashed onto
 # a timestamped stash BEFORE the hard reset, so nothing is ever silently lost.
+# The outcome is left in $script:VendorRefreshStatus: refreshed, current, missing,
+# not-a-clone, blocked, wrong-origin, fetch-failed, stash-failed, reset-failed or error.
 function Update-VendorClone ([string]$Repo, [string]$Label, [string]$ExpectedRemote = $null) {
+    $script:VendorRefreshStatus = 'missing'
+    $script:VendorRefreshDetail = ''
     if (-not (Test-Path -LiteralPath $Repo)) { return }
     # git writes progress to stderr; under the script-wide EAP=Stop, `2>&1` turns
     # that into a terminating error and the reset below would never run.
@@ -69,17 +136,25 @@ function Update-VendorClone ([string]$Repo, [string]$Label, [string]$ExpectedRem
         # Identity guard: the folder must be the ROOT of its own repository. A vendor
         # folder that lost its .git (or a stray directory of the same name) would make
         # git discover the OUTER workspace repository and stash/reset THAT instead.
-        $top = (& git -C $Repo rev-parse --show-toplevel 2>$null | Select-Object -First 1)
-        $repoFull = [IO.Path]::GetFullPath($Repo).TrimEnd('\', '/')
-        $topFull = if ($top) { try { [IO.Path]::GetFullPath(([string]$top).Replace('/', '\')).TrimEnd('\', '/') } catch { '' } } else { '' }
-        if (-not $topFull -or -not $topFull.Equals($repoFull, [StringComparison]::OrdinalIgnoreCase)) {
+        # A repository Git refuses to open is a different case: it is the clone, so it is
+        # neither moved nor re-cloned; it is only not refreshed this time.
+        $probe = Get-GitProbe $Repo
+        if ($probe.State -in @('no-repository', 'enclosed')) {
+            $script:VendorRefreshStatus = 'not-a-clone'
             Write-Host "    ${Label}: folder is not the root of its own Git repository -- left untouched (move it aside to let the installer re-clone)." -ForegroundColor Yellow
+            return
+        }
+        if ($probe.State -ne 'ok') {
+            $script:VendorRefreshStatus = 'blocked'
+            $script:VendorRefreshDetail = Format-GitProbe $probe
+            Write-Host "    ${Label}: not refreshed -- $($script:VendorRefreshDetail). The folder and its skills are kept as they are; do not move or re-clone it." -ForegroundColor Yellow
             return
         }
         if ($ExpectedRemote) {
             $originUrl = (& git -C $Repo config --get remote.origin.url 2>$null | Select-Object -First 1)
             $norm = { param($u) $v = ([string]$u).Trim().Replace('\', '/').TrimEnd('/'); if ($v.EndsWith('.git', [StringComparison]::OrdinalIgnoreCase)) { $v = $v.Substring(0, $v.Length - 4) }; $v.ToLowerInvariant() }
             if (-not $originUrl -or ((& $norm $originUrl) -ne (& $norm $ExpectedRemote))) {
+                $script:VendorRefreshStatus = 'wrong-origin'
                 Write-Host "    ${Label}: origin is '$originUrl', expected '$ExpectedRemote' -- not the vendor repository; left untouched." -ForegroundColor Yellow
                 return
             }
@@ -98,6 +173,7 @@ function Update-VendorClone ([string]$Repo, [string]$Label, [string]$ExpectedRem
         } catch { }
         & git -C $Repo fetch --prune origin 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) {
+            $script:VendorRefreshStatus = 'fetch-failed'
             Write-Host "    ${Label}: fetch failed (offline or blocked) -- keeping the current clone." -ForegroundColor Yellow
             return
         }
@@ -110,6 +186,7 @@ function Update-VendorClone ([string]$Repo, [string]$Label, [string]$ExpectedRem
             $stashExit = $LASTEXITCODE
             # Never hard-reset over edits we failed to preserve.
             if ($stashExit -ne 0 -or @(& git -C $Repo status --porcelain 2>$null).Count -gt 0) {
+                $script:VendorRefreshStatus = 'stash-failed'
                 Write-Host "    ${Label}: local edits could not be stashed (git stash exit $stashExit) -- clone left untouched. Commit or discard them, then re-run." -ForegroundColor Yellow
                 return
             }
@@ -132,13 +209,16 @@ function Update-VendorClone ([string]$Repo, [string]$Label, [string]$ExpectedRem
         $headSha   = (& git -C $Repo rev-parse --verify -q HEAD 2>$null)
         if ($resetExit -eq 0 -and $targetSha -and $headSha -and $headSha -eq $targetSha) {
             $after = $headSha.Substring(0, 7)
-            if ($before -ne $after) { Write-Host "    $Label refreshed: $before -> $after" -ForegroundColor Green }
-            else { Write-Host "    $Label already at upstream ($after)." -ForegroundColor DarkGray }
+            if ($before -ne $after) { $script:VendorRefreshStatus = 'refreshed'; Write-Host "    $Label refreshed: $before -> $after" -ForegroundColor Green }
+            else { $script:VendorRefreshStatus = 'current'; Write-Host "    $Label already at upstream ($after)." -ForegroundColor DarkGray }
         } else {
+            $script:VendorRefreshStatus = 'reset-failed'
             Write-Host "    ${Label}: could not reset to upstream (git reset exit $resetExit) -- clone left as-is." -ForegroundColor Yellow
             if ($stashName) { Write-Host "    ${Label}: your local edits are safe in stash '$stashName' (git -C <repo> stash list / stash pop)." -ForegroundColor Yellow }
         }
     } catch {
+        $script:VendorRefreshStatus = 'error'
+        $script:VendorRefreshDetail = [string]$_.Exception.Message
         Write-Host "    ${Label}: refresh error -- $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
@@ -229,7 +309,27 @@ function Invoke-VendorRefreshWithHold ([string]$Root, [string]$Catalog) {
     $info = $vendorCatalogs[$Catalog]
     $repo = Join-Path $Root $Catalog
     if (-not $info) { $r.detail = 'not a vendor catalog of this kit'; return [pscustomobject]$r }
-    if (-not (Test-VendorCloneIdentity $repo $info.remote)) { $r.detail = 'folder is missing or is not the vendor repository - left untouched'; return [pscustomobject]$r }
+    if (-not (Test-VendorCloneIdentity $repo $info.remote)) {
+        # The clone is there but Git cannot read it: record that, keep the last known commits.
+        $probe = Get-GitProbe $repo
+        if ($probe.State -in @('refused', 'cannot-start', 'not-installed', 'error')) {
+            $r.status = 'blocked'
+            $r.detail = "$(Format-GitProbe $probe) - the skills on disk are kept as they are"
+            $previous = $null
+            $statePath = Join-Path $Root '.github\agent-docs\skill-catalog-state.json'
+            if (Test-Path -LiteralPath $statePath) { try { $previous = ([IO.File]::ReadAllText($statePath) | ConvertFrom-Json).catalogs.$Catalog } catch { $previous = $null } }
+            $entry = [ordered]@{ state = 'blocked'; commit = $null; upstreamCommit = $null; approvedCommit = $info.approved; checkedBy = 'maintenance'; reason = (Format-GitProbe $probe) }
+            if ($previous -and ($previous.state -in @('upstream', 'held', 'incompatible', 'blocked'))) {
+                $entry.commit = $previous.commit; $entry.upstreamCommit = $previous.upstreamCommit
+                $confirmed = if ($previous.state -eq 'blocked') { $previous.lastConfirmedState } else { $previous.state }
+                if ($confirmed) { $entry['lastConfirmedState'] = $confirmed }
+            }
+            $r.commit = $entry.commit
+            Set-SkillCatalogState $Root $Catalog $entry
+            return [pscustomobject]$r
+        }
+        $r.detail = 'folder is missing or is not the vendor repository - left untouched'; return [pscustomobject]$r
+    }
     $before = Get-VendorCloneHead $repo $info.remote
     # The refresh reports through the host; keep only what the caller must know (stash, offline, untouched).
     $log = @(Update-VendorClone $repo $Catalog -ExpectedRemote $info.remote 6>&1 | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
@@ -357,7 +457,7 @@ $agentManifestJson = @'
     {"id":"azure-devops-agent","displayName":"Azure DevOps Agent","filename":"52-azure-devops.agent.md","level":"worker","department":"alm-devops","parent":"alm-devops-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-source-control-safety","fabric-cli-policy"],"artifactTypes":["Azure Repos PRs","pipelines","boards","project configuration"],"focus":"Use Git and approved az devops/repos/pipelines/boards commands for Azure DevOps work, respecting repository topology and auth policy."},
     {"id":"fabric-git-integration-agent","displayName":"Fabric Git Integration Agent","filename":"53-fabric-git-integration.agent.md","level":"worker","department":"alm-devops","parent":"alm-devops-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-source-control-safety","fabric-working-modes"],"conditionalSkills":["Microsoft Fabric Git integration guidance"],"artifactTypes":["workspace-branch mappings","Fabric Git status"],"defaultRisk":"high","focus":"Inspect and operate Fabric Git status, commit, update, mapping, and conflict workflows without inferring permission to overwrite either side."},
     {"id":"deployment-release-agent","displayName":"Deployment & Release Agent","filename":"54-deployment-release.agent.md","level":"worker","department":"alm-devops","parent":"alm-devops-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute"],"primarySkills":["fabric-source-control-safety","fabric-working-modes"],"artifactTypes":["release plans","deployment pipeline evidence","release notes"],"defaultRisk":"high","focus":"Sequence DEV to TEST to PROD, PRs, deployment pipelines, parameters, release checks, rollback, and notes without assuming branch names."},
-    {"id":"power-bi-alm-agent","displayName":"Power BI ALM Agent","filename":"55-power-bi-alm.agent.md","level":"worker","department":"alm-devops","parent":"alm-devops-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":["fabric-cli-policy","fabric-source-control-safety"],"conditionalSkills":["Kurt pbi-tools and PBIP skills"],"artifactTypes":["PBIX extraction","PBIP builds","deployment packages"],"focus":"Use pbi-tools for PBIX/PBIP extraction, build, CI/CD, deployment, and ALM validation—not routine PBIR visual editing."},
+    {"id":"power-bi-alm-agent","displayName":"Power BI ALM Agent","filename":"55-power-bi-alm.agent.md","level":"worker","department":"alm-devops","parent":"alm-devops-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":["fabric-cli-policy","fabric-source-control-safety"],"conditionalSkills":["Kurt pbi-tools and PBIP skills"],"artifactTypes":["PBIX extraction","PBIP builds","deployment packages"],"focus":"Use pbi-tools for PBIX/PBIP extraction, build, CI/CD, deployment, and ALM validation - not routine PBIR visual editing."},
 
     {"id":"applications-integration-team-lead","displayName":"Applications & Integration Team Lead","filename":"60-applications-integration-team-lead.agent.md","level":"team-lead","department":"applications-integration","parent":"fabric-workspace-master","allowedChildren":["Python & Fabric SDK Agent","REST, Authentication & XMLA Agent","SQL, ODBC & Data Access Agent"],"visibility":"visible","userInvocable":true,"tools":["agent","read","search","execute","edit"],"primarySkills":["fabric-working-modes","fabric-cli-policy"],"conditionalSkills":["Microsoft SDK, REST, SQL consumption, and authentication skills"],"artifactTypes":["applications","SDK utilities","REST integrations","data-access code"],"focus":"Coordinate custom applications, SDK, REST/XMLA, authentication, ODBC, and data access without leaking secrets."},
     {"id":"python-fabric-sdk-agent","displayName":"Python & Fabric SDK Agent","filename":"61-python-fabric-sdk.agent.md","level":"worker","department":"applications-integration","parent":"applications-integration-team-lead","allowedChildren":[],"visibility":"hidden","userInvocable":false,"tools":["read","search","execute","edit"],"primarySkills":[],"conditionalSkills":["Microsoft Fabric SDK and Python skills"],"artifactTypes":["Python applications","SDK utilities"],"focus":"Build Python applications, SDK clients, Azure Identity integrations, APIs, processing, and local utilities with safe dependency handling."},
@@ -972,14 +1072,21 @@ function Ensure-Python {
 # stop us trying another route. On total failure it reports the captured cause
 # (exit code + output) so the user knows WHY, and always returns control to the
 # caller -- a failed optional install never aborts the setup.
+# Success needs both: the attempt exited 0 AND the tool works ($Verify, or $CheckCmd on PATH
+# when no check is given). A command on PATH that does not start is not an install.
 function Try-InstallOptionalTool {
     param(
         [string]$Name,        # friendly name, e.g. "Fabric CLI (fab)"
         [string]$CheckCmd,    # command to detect presence, e.g. "fab"
         [array]$Attempts,     # ordered list of @{ Exe=..; Args=@(..) } strategies
-        [string]$ManualUrl    # fallback manual install URL
+        [string]$ManualUrl,   # fallback manual install URL
+        [scriptblock]$Verify = $null  # returns $true only when the tool really runs
     )
     Write-Host "    Installing $Name..." -ForegroundColor White
+    $isUsable = {
+        if ($Verify) { try { return [bool](& $Verify) } catch { return $false } }
+        return [bool](Get-Command $CheckCmd -ErrorAction SilentlyContinue)
+    }
 
     $anyRan = $false
     foreach ($attempt in $Attempts) {
@@ -989,8 +1096,14 @@ function Try-InstallOptionalTool {
         $anyRan = $true
         Write-Host "    Trying: $exe $($eArgs -join ' ') ..." -ForegroundColor White
         $output = ''
-        try { $output = & $exe @eArgs 2>&1 | Out-String } catch { $output = $_.Exception.Message }
-        $code = $LASTEXITCODE
+        $global:LASTEXITCODE = 0
+        $code = $null
+        $prevEap = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $output = & $exe @eArgs 2>&1 | Out-String
+            $code = $LASTEXITCODE
+        } catch { $output = $_.Exception.Message; $code = -1 } finally { $ErrorActionPreference = $prevEap }
 
         # Refresh PATH so a freshly-installed command is visible this session.
         $env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
@@ -1008,11 +1121,17 @@ function Try-InstallOptionalTool {
             } catch { }
         }
 
-        if (Get-Command $CheckCmd -ErrorAction SilentlyContinue) {
-            Write-Host "    $Name installed successfully (via $exe)." -ForegroundColor Green
+        if ($code -eq 0 -and (& $isUsable)) {
+            if ($output -match '(?im)^\s*Successfully installed') { Write-Host "    $Name installed and verified (via $exe)." -ForegroundColor Green }
+            elseif ($output -match '(?im)^\s*Requirement already satisfied') { Write-Host "    $Name was already installed; nothing changed, and it works (checked via $exe)." -ForegroundColor Green }
+            else { Write-Host "    $Name installed and verified (via $exe)." -ForegroundColor Green }
             return $true
         }
-        Write-Host "    That method did not succeed (exit code: $code)." -ForegroundColor Yellow
+        if ($code -eq 0) {
+            Write-Host "    The install command finished (exit code 0), but $Name does not work yet: '$CheckCmd' did not pass its check." -ForegroundColor Yellow
+        } else {
+            Write-Host "    That method did not succeed (exit code: $code)." -ForegroundColor Yellow
+        }
         $reason = ($output -split "`n" | Where-Object { $_ -match '\S' } | Select-Object -Last 3) -join "`n      "
         if ($reason) { Write-Host "      $reason" -ForegroundColor DarkGray }
         Write-Host "    Trying next method if available..." -ForegroundColor DarkGray
@@ -1025,9 +1144,10 @@ function Try-InstallOptionalTool {
         if (Test-Path $root) {
             $hit = Get-ChildItem $root -Recurse -Filter "$CheckCmd.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($hit) {
-                Add-DirToPath $hit.DirectoryName
-                if (Get-Command $CheckCmd -ErrorAction SilentlyContinue) {
-                    Write-Host "    $Name installed successfully (found in $($hit.DirectoryName))." -ForegroundColor Green
+                Add-DirToPath $hit.DirectoryName -SessionOnly
+                if (& $isUsable) {
+                    Add-DirToPath $hit.DirectoryName
+                    Write-Host "    $Name found in $($hit.DirectoryName) and verified." -ForegroundColor Green
                     return $true
                 }
             }
@@ -1129,6 +1249,32 @@ function Get-ToolVersion {
     return $null
 }
 
+# Runs '<Exe> --version' and keeps stdout and stderr: a CLI that is on PATH but broken explains
+# itself on stderr (Python traceback, Windows start-up failure). Never throws.
+#   ExitCode  the process exit code (-1 when it could not be started at all)
+#   Lines     all non-empty output lines, stdout and stderr in order
+#   Problem   the most telling line for a failure: the last error-looking line, else the last line
+function Get-CliVersionProbe {
+    param([string]$Exe, [string[]]$VersionArgs = @('--version'))
+    $r = [ordered]@{ ExitCode = $null; Lines = @(); Problem = '' }
+    if (-not $Exe) { $r.ExitCode = -1; $r.Problem = 'no command'; return [pscustomobject]$r }
+    $prevEap = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $global:LASTEXITCODE = 0
+        $r.Lines = @(& $Exe @VersionArgs 2>&1 | ForEach-Object {
+            if ($_ -is [System.Management.Automation.ErrorRecord]) { ([string]$_.Exception.Message).Trim() } else { ([string]$_).Trim() }
+        } | Where-Object { $_ -and $_ -ne 'System.Management.Automation.RemoteException' })
+        $r.ExitCode = $LASTEXITCODE
+    } catch {
+        $r.ExitCode = -1; $r.Lines = @([string]$_.Exception.Message)
+    } finally { $ErrorActionPreference = $prevEap }
+    $bad = @($r.Lines | Where-Object { $_ -match '(?i)error|not found|denied|failed|cannot|could not|traceback' })
+    $r.Problem = if ($bad.Count -gt 0) { [string]$bad[-1] } elseif ($r.Lines.Count -gt 0) { [string]$r.Lines[-1] } else { '' }
+    if (-not $r.Problem -and $r.ExitCode -ne 0) { $r.Problem = "exit code $($r.ExitCode)" }
+    return [pscustomobject]$r
+}
+
 # Resolve the first alias that exists, on PATH or in optional on-disk roots.
 # Returns @{ command = <alias>; path = <full path or $null> } or $null.
 function Resolve-ToolCommand {
@@ -1223,6 +1369,7 @@ function Invoke-OptionalToolPrompt {
         Write-Host "         Or finish it later in VS Code: select '070 - Capability Maintenance" -ForegroundColor DarkGray
         Write-Host "         Team Lead', name this failed tool, and approve its recovery plan." -ForegroundColor DarkGray
         Set-ToolStatus -Key $Key -Found $false -Reason 'install attempted; not detected' -Category $Category -InstallMode 'ask' -AliasesChecked $Aliases
+        Add-SetupWarning "${Name}: you agreed to install it, but the install did not complete."
     }
 }
 
@@ -2561,9 +2708,39 @@ function Test-GitWorkTreeUsable {
     if (-not $Path -or -not (Test-Path -LiteralPath (Join-Path $Path '.git'))) { return $false }
     $ErrorActionPreference = 'Continue'
     try {
-        $answer = (& git -C $Path rev-parse --is-inside-work-tree 2>$null | Select-Object -First 1)
-        return ($LASTEXITCODE -eq 0 -and ([string]$answer).Trim() -eq 'true')
+        # All of Git's output is read: a pipeline stopped after its first line leaves $LASTEXITCODE at -1.
+        $answer = @(& git -C $Path rev-parse --is-inside-work-tree 2>$null)
+        $code = $LASTEXITCODE
+        return ($code -eq 0 -and $answer.Count -gt 0 -and ([string]$answer[0]).Trim() -eq 'true')
     } catch { return $false }
+}
+
+# The git block of the PBIVIZ mapping file. When this run read the repository, the block is
+# rebuilt from what Git reported. When a .git is there but Git could not read it, nothing is
+# known about its branch or commits: the block last recorded is kept as it is, and lastCheck
+# says that this run could not confirm it. Unknown values are $null, never 0.
+function Get-PbivizMapGitBlock {
+    param($Existing, $HeadState, [string]$InitStatus, [string]$BaselineCommit, [string]$CheckedAt)
+    $previousBaseline = if ($Existing -and $Existing.baselineCommit) { [string]$Existing.baselineCommit } else { $null }
+    $baseline = if ($BaselineCommit) { $BaselineCommit } else { $previousBaseline }
+    if ($HeadState -and $HeadState.isRepoRoot) {
+        return [ordered]@{ initStatus = $InitStatus; branch = $HeadState.branch; commits = $HeadState.commitCount; baselineCommit = $baseline; checkedAt = $CheckedAt }
+    }
+    $unreadable = $HeadState -and ($HeadState.gitIsDir -or $HeadState.gitIsFile -or $InitStatus -match 'could not be started')
+    if (-not $unreadable) {
+        return [ordered]@{ initStatus = $InitStatus; branch = $null; commits = $(if ($HeadState) { $HeadState.commitCount } else { $null }); baselineCommit = $baseline; checkedAt = $CheckedAt }
+    }
+    $reason = if ($HeadState.gitProblem) { [string]$HeadState.gitProblem } elseif ($InitStatus) { $InitStatus } else { 'Git could not read the repository' }
+    $block = [ordered]@{}
+    if ($Existing) {
+        $props = if ($Existing -is [System.Collections.IDictionary]) { @($Existing.Keys | ForEach-Object { @{ Name = $_; Value = $Existing[$_] } }) } else { @($Existing.PSObject.Properties | ForEach-Object { @{ Name = $_.Name; Value = $_.Value } }) }
+        foreach ($p in $props) { if ($p.Name -ne 'lastCheck') { $block[$p.Name] = $p.Value } }
+    } else {
+        $block['initStatus'] = $null; $block['branch'] = $null; $block['commits'] = $null; $block['checkedAt'] = $null
+    }
+    $block['baselineCommit'] = $baseline
+    $block['lastCheck'] = [ordered]@{ checkedAt = $CheckedAt; result = 'not confirmed - Git could not read the repository; the values above are from the last successful check'; reason = $reason }
+    return $block
 }
 
 # -- Helpers: optional PBIVIZ (custom visual) development folder ----------
@@ -2768,7 +2945,7 @@ $pipelineCheckScript = @'
     -AllowedWorkspaceId  deliberate cross-workspace references the user approved.
     -AllowActivityType   activity types the user confirmed against JSON produced by the Fabric editor.
     -InventoryPath       saved JSON lists with an id per entry: the items of the target workspace and
-                         the connections.
+                         the connections. With -File, give both in one quoted value: "<items.json>,<connections.json>".
     -Format              Api (default: a definition for createItem or updateDefinition) or
                          Git (a file in a Git-connected folder, where the all-zero workspace id is expected).
     -AllowRecreateTables accept recreateTables = true on a SQL analytics endpoint refresh (destructive).
@@ -2780,7 +2957,7 @@ $pipelineCheckScript = @'
                         exit 2   the input could not be read
     A PASS is not proof that the pipeline runs or is bound correctly: only a read-back and a run show that.
 #>
-[CmdletBinding()]
+[CmdletBinding(PositionalBinding = $false)]
 param(
     [Parameter(Mandatory = $true)][string]$Path,
     [string]$CurrentPath,
@@ -2796,6 +2973,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 trap { Write-Output ('PIPELINE CHECK  stopped on an internal error (line {0}): {1}' -f $_.InvocationInfo.ScriptLineNumber, $_.Exception.Message); exit 2 }
+# Run with -File, a list arrives as one string ("a.json,b.json"): split it, unless it names one existing file.
+$InventoryPath = @($InventoryPath | ForEach-Object { $pdListItem = [string]$_; if ($pdListItem -match '[,;]' -and -not (Test-Path -LiteralPath $pdListItem)) { $pdListItem -split '\s*[,;]\s*' } else { $pdListItem } } | Where-Object { $_ })
+$AllowedWorkspaceId = @($AllowedWorkspaceId | ForEach-Object { [string]$_ -split '\s*[,;]\s*' } | Where-Object { $_ })
+$AllowActivityType = @($AllowActivityType | ForEach-Object { [string]$_ -split '\s*[,;]\s*' } | Where-Object { $_ })
 $script:PdZero = '00000000-0000-0000-0000-000000000000'
 $script:PdGuid = '[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}'
 $script:PdNested = '^typeProperties\.(activities|ifTrueActivities|ifFalseActivities|defaultActivities|cases\[\d+\]\.activities)$'
@@ -3007,7 +3188,7 @@ $props = $proposed.properties
 $curActs = @{}
 if ($current) { foreach ($a in @(Get-PdActivities -List $current.properties.activities)) { $curActs[$a.where] = $a } }
 $script:PdFindings.Clear()   # findings about the current definition are not findings about the change
-if (-not $props.PSObject.Properties['activities']) { Add-PdFinding block 'PD001' 'properties' 'the definition has no "activities" list' }
+if (-not $props.PSObject.Properties['activities'] -or $null -eq $props.activities) { Add-PdFinding block 'PD001' 'properties' 'the definition has no "activities" list' }
 $acts = @(Get-PdActivities -List $props.activities)
 foreach ($a in $acts) { if ($curActs.ContainsKey($a.where) -and $curActs[$a.where].signature -ceq $a.signature) { $a.trusted = $true } }
 
@@ -3161,8 +3342,23 @@ function Test-PdLeafSet {
     $byWhere = @{}
     foreach ($l in $Leaves) { $byWhere[$l.where] = $l }
     foreach ($l in $Leaves) {
+        # An id property must hold a GUID or an expression: a placeholder or a name would pass every GUID rule below.
+        if ($l.kind -eq 'string' -and -not $Trusted) {
+            $idKey = ($l.where -split '\.')[-1] -replace '\[\d+\]$', ''
+            if ($idKey -ceq 'value' -and $l.where -match '(?:^|\.)([A-Za-z]+)\.value$') { $idKey = $Matches[1] }
+            $isIdProperty = ($l.where -match '(^|\.)externalReferences\.connection$') -or ($wsKeys -ccontains $idKey) -or ($itemKeys -ccontains $idKey -and $idKey -cne 'referenceName')
+            $idText = [string]$l.value
+            if ($isIdProperty -and -not $idText.StartsWith('@') -and $idText -notmatch "^$($script:PdGuid)$") {
+                $shown = if ($idText.Length -gt 60) { $idText.Substring(0, 60) + '...' } else { $idText }
+                Add-PdFinding block 'PD079' "${Owner}:$($l.where)" "'$idKey' must be a GUID or an expression; '$shown' is neither (a placeholder, a name or an empty value)"
+                continue
+            }
+        }
         if ($l.kind -ne 'string' -or -not $l.value) { continue }
         $key = ($l.where -split '\.')[-1] -replace '\[\d+\]$', ''
+        # An Expression object ({ "value": ..., "type": "Expression" }) carries the value of the property above it.
+        $wsKey = $key
+        if ($key -ceq 'value' -and $l.where -match '(?:^|\.)([A-Za-z]+)\.value$' -and $wsKeys -ccontains $Matches[1]) { $wsKey = $Matches[1] }
         $at = "${Owner}:$($l.where)"
         $literal = -not $l.value.StartsWith('@')
         if ($literal -and ($key -match $secretKey -or ($key -ieq 'Authorization' -and $l.value -match '^(?i)(Bearer|Basic)\s+\S'))) {
@@ -3182,7 +3378,8 @@ function Test-PdLeafSet {
                 $class = 'source-workspace'
                 if (-not $Trusted) { Add-PdFinding block 'PD071' $at 'the GUID of the workspace this definition was read from is still in it; the target workspace must be referenced instead' }
             }
-            elseif ($whole -and $wsKeys -ccontains $key) {
+            # A workspace reference is compared whether it is the whole value or sits inside an expression.
+            elseif ($wsKeys -ccontains $wsKey) {
                 if ($target -and $g -eq $target) { $class = 'target-workspace' }
                 elseif ($allowedWs -contains $g) { $class = 'allowed-workspace' }
                 elseif ($Trusted) { $class = 'workspace-unchanged' }
@@ -3532,7 +3729,9 @@ function Close-AgentTaskFolder {
         $di = New-Object IO.DirectoryInfo $dirLong
         if (-not $di.Exists -or (($di.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { $refused += "${entry}: folder not found"; continue }
         # A wildcard matches files of that one folder only; folders and links are never removed.
-        $files = @($di.GetFiles($seg[-1]) | Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 -and -not ($_.Name -eq '.task.json' -and -not $dirRel) })
+        # -like re-checks the name: .NET also returns 'a.xlsx' for '*.xls' (three-letter extensions).
+        $likePattern = $seg[-1] -replace '([\[\]`])', '`$1'
+        $files = @($di.GetFiles($seg[-1]) | Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 -and $_.Name -like $likePattern -and -not ($_.Name -eq '.task.json' -and -not $dirRel) })
         if ($files.Count -eq 0) { $refused += "${entry}: no such file"; continue }
         foreach ($f in $files) { try { [IO.File]::Delete($f.FullName); $removed += $(if ($dirRel) { "$dirRel\$($f.Name)" } else { $f.Name }) } catch { $refused += "$($f.Name): $($_.Exception.Message)" } }
     }
@@ -3572,10 +3771,11 @@ function Get-AgentWorkspacePreview {
         if ($item.IsDir -and -not $item.Link) { continue }
         $state = Get-AwsEntryState $root $item $ctx
         $totals[$state.class][0]++; $totals[$state.class][1] += $item.Bytes
-        if ($state.class -eq 'Protected' -and $state.secret.Count -eq 0) {
+        if ($state.class -eq 'Protected') {
             if (-not $protected.ContainsKey($state.reason)) { $protected[$state.reason] = @(0, [long]0) }
             $protected[$state.reason][0]++; $protected[$state.reason][1] += $item.Bytes
-            continue
+            # A protected file is listed as an entry only when it may hold a secret (reported, never moved).
+            if ($state.secret.Count -eq 0) { continue }
         }
         $id++
         $entries.Add([pscustomobject][ordered]@{ id = $id; path = $item.Rel; class = $state.class; reason = $state.reason; bytes = $item.Bytes; modifiedUtcTicks = $item.Ticks; secret = @($state.secret) })
@@ -3672,8 +3872,9 @@ function Invoke-AgentWorkspaceCleanup {
             if ($left.Count -ne 1 -or $left[0].Name -ne '.task.json' -or $left[0] -isnot [IO.FileInfo]) { continue }
             $dst = Join-AwsPath $root "$quarantineRel/$t/.task.json"
             [void][IO.Directory]::CreateDirectory($dst.Substring(0, $dst.LastIndexOf('\')))
+            $markerBytes = [long]$left[0].Length
             [IO.File]::Move($left[0].FullName, $dst)
-            $moved.Add([ordered]@{ id = 0; path = "$t/.task.json"; class = 'Marker'; bytes = [long]0 })
+            $moved.Add([ordered]@{ id = 0; path = "$t/.task.json"; class = 'Marker'; bytes = $markerBytes })
             [IO.Directory]::Delete((Join-AwsPath $root $t))
         } catch { }
     }
@@ -3753,7 +3954,7 @@ if ($NewTask) {
     $flagged = @($p.Plan.entries | Where-Object { @($_.secret).Count -gt 0 })
     if ($flagged.Count -gt 0) {
         'Possible secrets (path and pattern class; values are never shown). An ignored file is not a protected file: rotate the credential.'
-        foreach ($x in ($flagged | Select-Object -First 40)) { "  [$($x.id)] $($x.path)  ($(@($x.secret) -join ', '))" }
+        foreach ($x in ($flagged | Select-Object -First 40)) { "  [$($x.id)] $($x.path)  ($(@($x.secret) -join ', '))$(if ($x.class -eq 'Protected') { '  - protected: stays where it is, no token moves it' })" }
         if ($flagged.Count -gt 40) { "  ... and $($flagged.Count - 40) more in the report" }
     }
     $folders = @($p.Plan.entries | Where-Object { $_.class -eq 'Ambiguous' } | Group-Object { (@($_.path -split '/') | Select-Object -First 3) -join '/' } | Sort-Object { ($_.Group | Measure-Object bytes -Sum).Sum } -Descending | Select-Object -First 8)
@@ -4839,7 +5040,7 @@ function Get-PbivizRepoState {
         gitVersion = $null; gitVersionOk = $false; branch = $null; detached = $false; unborn = $false
         headSha = $null; commitCount = 0; dirty = @(); untracked = 0; upstream = $null; ahead = 0; behind = 0
         remotes = @(); localBranches = @(); remoteBranches = @(); shallow = $false
-        derivedLevel = 0; levelText = 'not a repository'; identityPresent = $false; error = $null
+        derivedLevel = 0; levelText = 'not a repository'; identityPresent = $false; error = $null; gitProblem = $null
     }
     try {
         $gv = Get-PbivizGitVersion
@@ -4864,7 +5065,14 @@ function Get-PbivizRepoState {
         }
         $s.identityPresent = [bool](Test-PbivizIdentity -Root $Root)
         $s.isRepoRoot = $s.gitIsDir -and (Test-PbivizIsRepoRoot $Root)
-        if (-not $s.isRepoRoot) { return [pscustomobject]$s }
+        if (-not $s.isRepoRoot) {
+            # A .git that Git will not read is not the same as no repository: keep Git's own words.
+            if ($s.gitIsDir -or $s.gitIsFile) {
+                $why = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('rev-parse', '--show-toplevel')
+                $s.gitProblem = if ($why.ExitCode -ne 0) { Get-PbivizGitError $why } else { "Git reports another top-level folder: $($why.Out.Trim())" }
+            }
+            return [pscustomobject]$s
+        }
         $sym = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('symbolic-ref', '-q', '--short', 'HEAD')
         if ($sym.ExitCode -eq 0) { $s.branch = $sym.Out.Trim() } else { $s.detached = $true }
         $head = Invoke-PbivizGit -WorkingDirectory $Root -Arguments @('rev-parse', '-q', '--verify', 'HEAD')
@@ -4910,6 +5118,10 @@ function Get-PbivizStatusLine {
     if (-not (Test-Path -LiteralPath $Root -PathType Container)) { return "$RelativePath | folder missing - re-run the installer to recreate it, choose another name or disable it" }
     $s = Get-PbivizRepoState -Root $Root
     if (-not $s.isRepoRoot) {
+        if ($s.gitIsDir -or $s.gitIsFile) {
+            $why = if ($s.gitProblem) { $s.gitProblem } elseif ($InitStatus) { $InitStatus } else { 'unknown reason' }
+            return "$RelativePath | a .git is present but Git could not read it ($why) - its history was not changed; check this folder with 'git status'"
+        }
         $why = if ($InitStatus) { $InitStatus } else { 'no repository' }
         return "$RelativePath | local Git NOT initialized - PBIVIZ work is not versioned ($why)"
     }
@@ -4947,8 +5159,19 @@ function Initialize-PbivizRepository {
     try {
         if (-not (Test-PbivizGitVersion -VersionText $GitVersionText)) {
             $v = Get-PbivizGitVersion -VersionText $GitVersionText
-            $res.Status = 'SKIPPED'; $res.InitStatus = if ($v) { "skipped: git $v < $($script:PbivizGitFloor)" } else { 'skipped: git not found' }
-            $res.Messages.Add("Git $($script:PbivizGitFloor) or newer is needed for PBIVIZ versioning; upgrade Git (https://git-scm.com) and re-run the installer.")
+            $res.Status = 'SKIPPED'
+            if ($v) {
+                $res.InitStatus = "skipped: git $v < $($script:PbivizGitFloor)"
+                $res.Messages.Add("Git $($script:PbivizGitFloor) or newer is needed for PBIVIZ versioning; upgrade Git (https://git-scm.com) and re-run the installer.")
+            } elseif (-not $GitVersionText -and (Get-PbivizGitExe)) {
+                # Git is there but did not start: nothing was examined, so nothing may be concluded.
+                $start = Invoke-PbivizGit -WorkingDirectory ([IO.Path]::GetTempPath()) -Arguments @('--version')
+                $res.InitStatus = "skipped: git could not be started ($(Get-PbivizGitError $start))"
+                $res.Messages.Add('Git is installed but did not start from this process, so the folder was not examined and nothing in it was changed. An existing repository there is untouched.')
+            } else {
+                $res.InitStatus = 'skipped: git not found'
+                $res.Messages.Add("Git $($script:PbivizGitFloor) or newer is needed for PBIVIZ versioning; install Git (https://git-scm.com) and re-run the installer.")
+            }
             return $res
         }
         $state = Get-PbivizRepoState -Root $Root -OuterRoot $OuterRoot
@@ -4959,7 +5182,7 @@ function Initialize-PbivizRepository {
             $res.Messages.Add("existing repository reused: branch $($state.branch), $what, $(if ($state.dirty.Count -or $state.untracked) { 'uncommitted changes' } else { 'clean' })")
             return $res
         }
-        if ($state.gitIsDir) { $res.Status = 'STOPPED'; $res.InitStatus = 'stopped: .git folder is not a usable repository root'; return $res }
+        if ($state.gitIsDir) { $res.Status = 'STOPPED'; $res.InitStatus = "stopped: .git folder is not a usable repository root$(if ($state.gitProblem) { " ($($state.gitProblem))" }) - nothing was changed"; return $res }
         if ($state.gitIsFile) { $res.Status = 'STOPPED'; $res.InitStatus = 'stopped: unexpected .git file (worktree or submodule pointer)'; return $res }
         if ($state.outerTracked) { $res.Status = 'STOPPED'; $res.InitStatus = 'stopped: the outer workspace repository tracks files in this folder'; return $res }
         if (@($state.nestedRepos).Count -gt 0) { $res.Status = 'STOPPED'; $res.InitStatus = "stopped: nested repositories found ($(@($state.nestedRepos) -join ', '))"; return $res }
@@ -7712,7 +7935,26 @@ Sync-ToolPaths
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     $missing += "git (https://git-scm.com)"
 } else {
-    Write-Host "  git: found" -ForegroundColor Green
+    # On PATH is not the same as working: start it once and keep its own words if it fails.
+    $gitStartProbe = Get-CliVersionProbe -Exe 'git'
+    $gitVersionLine = @($gitStartProbe.Lines | Where-Object { $_ -match '^git version' }) | Select-Object -First 1
+    if ($gitStartProbe.ExitCode -eq 0 -and $gitVersionLine) {
+        Write-Host "  git: found ($gitVersionLine)" -ForegroundColor Green
+        # The workspace folder itself: a refusal here means every Git step below is skipped.
+        if ($rootPath -and (Test-Path -LiteralPath (Join-Path $rootPath '.git'))) {
+            $rootGitProbe = Get-GitProbe $rootPath
+            if ($rootGitProbe.State -in @('refused', 'cannot-start', 'error')) {
+                Write-Host "  git: this workspace repository cannot be used -- $(Format-GitProbe $rootGitProbe)." -ForegroundColor Yellow
+                Write-Host "         Setup continues. Skill refreshes, PBIVIZ versioning and the final commit will be skipped and listed at the end." -ForegroundColor DarkGray
+                $warnings += "Git cannot use this workspace repository: $(Format-GitProbe $rootGitProbe)"
+            }
+        }
+    } else {
+        Write-Host "  git: found, but 'git --version' did not run ($($gitStartProbe.Problem))." -ForegroundColor Yellow
+        Write-Host "         Setup continues. Steps that need Git will be skipped and listed at the end." -ForegroundColor DarkGray
+        $warnings += "git is installed but did not start ($($gitStartProbe.Problem))"
+        Add-SetupWarning "git is installed but did not start ($($gitStartProbe.Problem))."
+    }
 }
 
 # VS Code
@@ -7787,7 +8029,14 @@ if ($tmdlExtFound) {
 # the core workflow (Fabric extension + agents editing local files) needs no CLI.
 # Recommended is not consent: nothing is installed unless the answer is an explicit Yes.
 if (-not (Test-CliResilient -Name 'fab' -VersionPattern '(?im)^\s*fab version')) {
-    Write-Host "  Fabric CLI (fab): not found (recommended, optional)" -ForegroundColor Yellow
+    $fabOnPath = Get-Command fab -ErrorAction SilentlyContinue
+    if ($fabOnPath) {
+        $fabStartProbe = Get-CliVersionProbe -Exe $fabOnPath.Source
+        Write-Host "  Fabric CLI (fab): '$($fabOnPath.Source)' is on PATH but is not a working Microsoft Fabric CLI (recommended, optional)" -ForegroundColor Yellow
+        Write-Host "         'fab --version' gave exit code $($fabStartProbe.ExitCode): $($fabStartProbe.Problem)" -ForegroundColor DarkGray
+    } else {
+        Write-Host "  Fabric CLI (fab): not found (recommended, optional)" -ForegroundColor Yellow
+    }
     Write-Host "         Primary CLI for Fabric API, jobs, export/import, OneLake and table ops." -ForegroundColor DarkGray
     Write-Host "         Needs Python $(Get-FabPythonRangeLabel). Reference: https://github.com/microsoft/fabric-cli" -ForegroundColor DarkGray
     Write-Host "         How: pip install ms-fabric-cli with your Python. If no supported Python exists you are asked separately before one is installed." -ForegroundColor DarkGray
@@ -7800,10 +8049,11 @@ if (-not (Test-CliResilient -Name 'fab' -VersionPattern '(?im)^\s*fab version'))
             #      already on PATH for a winget/python.org per-user Python (the common case)
             #   2. --user fallback -> for system Pythons where the prefix isn't writable
             # Listing both also gives a free retry if the first attempt dies mid-download.
-            Try-InstallOptionalTool -Name "Fabric CLI (fab)" -CheckCmd "fab" -Attempts @(
+            $fabInstalled = Try-InstallOptionalTool -Name "Fabric CLI (fab)" -CheckCmd "fab" -Attempts @(
                 @{ Exe = $realPy; Args = @("-m", "pip", "install", "--upgrade", "--retries", "5", "--timeout", "60", "ms-fabric-cli") }
                 @{ Exe = $realPy; Args = @("-m", "pip", "install", "--user", "--upgrade", "--retries", "5", "--timeout", "60", "ms-fabric-cli") }
-            ) -ManualUrl "https://github.com/microsoft/fabric-cli (pip install ms-fabric-cli)" | Out-Null
+            ) -ManualUrl "https://github.com/microsoft/fabric-cli (pip install ms-fabric-cli)" -Verify { Test-CliResilient -Name 'fab' -Retries 2 -VersionPattern '(?im)^\s*fab version' }
+            if (-not $fabInstalled) { Add-SetupWarning 'Fabric CLI (fab): you agreed to install it, but it does not work yet (see Step 2).' }
         } else {
             Write-Host "         No supported Python is available, so the Fabric CLI was not installed." -ForegroundColor DarkGray
             Write-Host "         No problem -- the workspace works fine without it. Open the workspace and ask the" -ForegroundColor DarkGray
@@ -7907,11 +8157,15 @@ Write-Host "  Building tool inventory for the agents (tool-status.json)..." -For
 
 # -- Core tools (offered above; installed only on an explicit Yes) -- record their final detected state.
 $fabHit = Resolve-ToolCommand -Aliases @('fab')
-$fabVersion = if ($fabHit) { Get-ToolVersion -Exe $(if ($fabHit.path) { $fabHit.path } else { 'fab' }) } else { $null }
-if ($fabHit -and $fabVersion -match '(?im)^\s*fab version') {
+$fabProbe = if ($fabHit) { Get-CliVersionProbe -Exe $(if ($fabHit.path) { $fabHit.path } else { 'fab' }) } else { $null }
+$fabVersion = if ($fabProbe) { @($fabProbe.Lines | Where-Object { $_ -match '(?i)^\s*fab version' }) | Select-Object -First 1 } else { $null }
+if ($fabHit -and $fabProbe.ExitCode -eq 0 -and $fabVersion) {
     Set-ToolStatus -Key 'fab' -Found $true -Command $fabHit.command -Path $fabHit.path -Version $fabVersion -Category 'core-cli' -InstallMode 'ask'
-} elseif ($fabHit) {
+} elseif ($fabHit -and (($fabProbe.Lines -join "`n") -match '(?im)^\s*(Fabric|Paramiko|Invoke)\s+\d')) {
+    # pyinvoke ships its own 'fab' (Fabric/Paramiko/Invoke banner): a different product.
     Set-ToolStatus -Key 'fab' -Found $false -Category 'core-cli' -InstallMode 'ask' -Reason "a different 'fab' command is on PATH ($($fabHit.path)); Microsoft Fabric CLI (ms-fabric-cli) not detected"
+} elseif ($fabHit) {
+    Set-ToolStatus -Key 'fab' -Found $false -Category 'core-cli' -InstallMode 'ask' -Reason "on PATH ($($fabHit.path)) but 'fab --version' did not work (exit code $($fabProbe.ExitCode)): $($fabProbe.Problem)"
 } else {
     Set-ToolStatus -Key 'fab' -Found $false -Category 'core-cli' -InstallMode 'ask' -Reason 'not installed'
 }
@@ -8143,6 +8397,7 @@ if ($adoFound) {
             Set-ToolStatus -Key 'azureDevOpsCliExtension' -Found $true -Command 'az devops' -Category 'az-extension' -InstallMode 'ask'
         } else {
             Write-Host "  Azure DevOps CLI extension: install did not complete." -ForegroundColor Yellow
+            Add-SetupWarning 'Azure DevOps CLI extension: you agreed to install it, but the install did not complete.'
             Write-Host "         Or finish it later in VS Code: select '070 - Capability Maintenance" -ForegroundColor DarkGray
             Write-Host "         Team Lead', name Azure DevOps CLI, and approve its recovery plan." -ForegroundColor DarkGray
             Set-ToolStatus -Key 'azureDevOpsCliExtension' -Found $false -Command 'az devops' -Category 'az-extension' -InstallMode 'ask' -Reason 'install attempted; not detected'
@@ -8215,9 +8470,10 @@ if ($missing.Count -gt 0) {
 if ($warnings.Count -gt 0) {
     Write-Host ""
     $warnings | ForEach-Object { Write-Host "  WARNING: $_" -ForegroundColor Yellow }
+    Write-Host "`n  Required prerequisites are present; $($warnings.Count) warning(s) above." -ForegroundColor Yellow
+} else {
+    Write-Host "`n  All prerequisites OK." -ForegroundColor Green
 }
-
-Write-Host "`n  All prerequisites OK." -ForegroundColor Green
 Read-Host "`n  Press Enter to continue..."
 }
 
@@ -8461,6 +8717,9 @@ if (-not $EmitAgentsTo) {
 
 Push-Location $rootPath
 try {
+    # The freshness date shown at session start comes from these files' write time when Git
+    # cannot be asked, so it is only moved forward after a clone or refresh that really happened.
+    $vendorSynced = @{}
     # -- microsoft/skills-for-fabric ----------------------------------
     if (-not (Test-Path "$rootPath\skills-for-fabric")) {
         Write-Host "  Cloning microsoft/skills-for-fabric..." -ForegroundColor White
@@ -8468,19 +8727,23 @@ try {
             & git clone https://github.com/microsoft/skills-for-fabric.git skills-for-fabric 2>$null | Out-Null
         } catch { }
         if (Test-Path "$rootPath\skills-for-fabric\skills") {
+            $vendorSynced['skills-for-fabric'] = $true
             Write-Host "  skills-for-fabric cloned." -ForegroundColor Green
         } else {
             Write-Host "  Warning: could not clone skills-for-fabric. Clone manually later." -ForegroundColor Yellow
+            Add-SetupWarning 'skills-for-fabric: could not be cloned.'
         }
     } else {
         Write-Host "  skills-for-fabric/ already exists  -- force-refreshing to upstream..." -ForegroundColor Green
         $vendorBefore['skills-for-fabric'] = Get-VendorCloneHead "$rootPath\skills-for-fabric" $vendorCatalogs['skills-for-fabric'].remote
         Update-VendorClone "$rootPath\skills-for-fabric" 'skills-for-fabric' -ExpectedRemote $vendorCatalogs['skills-for-fabric'].remote
+        if ($script:VendorRefreshStatus -in @('refreshed', 'current')) { $vendorSynced['skills-for-fabric'] = $true }
+        elseif ($script:VendorRefreshStatus -ne 'blocked') { Add-SetupWarning "skills-for-fabric: not refreshed ($($script:VendorRefreshStatus)$(if ($script:VendorRefreshDetail) { ": $($script:VendorRefreshDetail)" }))." }
     }
     # Touch files so LastWriteTime reflects sync time, not upstream commit time.
     # A freshly-cloned file may still be locked by antivirus/indexer; this touch is
     # purely cosmetic (freshness display), so ignore any transient per-file lock.
-    if (Test-Path "$rootPath\skills-for-fabric\skills") {
+    if ($vendorSynced['skills-for-fabric'] -and (Test-Path "$rootPath\skills-for-fabric\skills")) {
         Get-ChildItem "$rootPath\skills-for-fabric\skills" -Recurse -File -ErrorAction SilentlyContinue |
             ForEach-Object { try { $_.LastWriteTime = Get-Date } catch { } }
     }
@@ -8492,19 +8755,23 @@ try {
             & git clone https://github.com/data-goblin/power-bi-agentic-development.git power-bi-agentic-development 2>$null | Out-Null
         } catch { }
         if (Test-Path "$rootPath\power-bi-agentic-development\plugins") {
+            $vendorSynced['power-bi-agentic-development'] = $true
             Write-Host "  power-bi-agentic-development cloned." -ForegroundColor Green
         } else {
             Write-Host "  Warning: could not clone power-bi-agentic-development. Clone manually later." -ForegroundColor Yellow
+            Add-SetupWarning 'power-bi-agentic-development: could not be cloned.'
         }
     } else {
         Write-Host "  power-bi-agentic-development/ already exists  -- force-refreshing to upstream..." -ForegroundColor Green
         $vendorBefore['power-bi-agentic-development'] = Get-VendorCloneHead "$rootPath\power-bi-agentic-development" $vendorCatalogs['power-bi-agentic-development'].remote
         Update-VendorClone "$rootPath\power-bi-agentic-development" 'power-bi-agentic-development' -ExpectedRemote $vendorCatalogs['power-bi-agentic-development'].remote
+        if ($script:VendorRefreshStatus -in @('refreshed', 'current')) { $vendorSynced['power-bi-agentic-development'] = $true }
+        elseif ($script:VendorRefreshStatus -ne 'blocked') { Add-SetupWarning "power-bi-agentic-development: not refreshed ($($script:VendorRefreshStatus)$(if ($script:VendorRefreshDetail) { ": $($script:VendorRefreshDetail)" }))." }
     }
     # Touch files so LastWriteTime reflects sync time, not upstream commit time.
     # A freshly-cloned file may still be locked by antivirus/indexer; this touch is
     # purely cosmetic (freshness display), so ignore any transient per-file lock.
-    if (Test-Path "$rootPath\power-bi-agentic-development\plugins") {
+    if ($vendorSynced['power-bi-agentic-development'] -and (Test-Path "$rootPath\power-bi-agentic-development\plugins")) {
         Get-ChildItem "$rootPath\power-bi-agentic-development\plugins" -Recurse -File -ErrorAction SilentlyContinue |
             ForEach-Object { try { $_.LastWriteTime = Get-Date } catch { } }
     }
@@ -9741,7 +10008,7 @@ never changes a definition.
 ```
 powershell -NoProfile -ExecutionPolicy Bypass -File .github/agent-docs/Test-PipelineDefinition.ps1 `
     -Path "<proposed pipeline-content.json>" -CurrentPath "<the target's current definition>" `
-    -TargetWorkspaceId <workspace-guid> -InventoryPath "<items.json>","<connections.json>"
+    -TargetWorkspaceId <workspace-guid> -InventoryPath "<items.json>,<connections.json>"
 ```
 
 | Argument | Meaning |
@@ -9750,7 +10017,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .github/agent-docs/Test-Pipe
 | `-CurrentPath` | the target pipeline's current definition, read from the **same** workspace. Activity blocks identical to it are trusted; everything else is checked |
 | `-TargetWorkspaceId` | the workspace the definition goes to |
 | `-SourceWorkspaceId` | the workspace the proposed definition was read from, when that is another one |
-| `-InventoryPath` | saved lists with an `id` per entry: the items of the target workspace and the connections (the answers of `workspaces/<id>/items` and `connections`) |
+| `-InventoryPath` | saved lists with an `id` per entry: the items of the target workspace and the connections (the answers of `workspaces/<id>/items` and `connections`). With `-File`, give both in **one** quoted value separated by a comma, as above; two separately quoted values do not reach the check |
 | `-AllowedWorkspaceId` | a cross-workspace reference the user approved |
 | `-AllowActivityType` | an activity type the user confirmed against the editor's JSON |
 | `-AllowRecreateTables` | the user approved `recreateTables: true` |
@@ -9771,7 +10038,8 @@ activity, forms a cycle or uses an unknown condition; an undeclared parameter, v
 library variable; `activity('<name>')` for a missing activity; an expression object without a
 value; a Variable Library type a pipeline cannot use; a workspace id that is not the target; the
 source workspace's id anywhere; an all-zero GUID in the API format; an item or connection id
-that is not in the inventory; a credential-like value.
+that is not in the inventory; an id property (workspace, item or connection) that holds neither a
+GUID nor an expression, such as a placeholder left in a draft; a credential-like value.
 
 A `PASS` is not proof that the pipeline runs. It says that nothing checkable offline is wrong.
 
@@ -11050,11 +11318,17 @@ $pipe = Get-FileDate '.github/skills/fabric-pipelines/SKILL.md'
 $out.Add("SKILLS   Microsoft skills-for-fabric: $ms | Kurt power-bi-agentic-development: $kurt | custom tmdl: $tmdl | custom pipelines: $pipe")
 # A catalog held at its last compatible commit is not stale: refreshing it changes nothing.
 $heldCatalogs = @()
+$blockedCatalogs = @()
 $catalogStatePath = Join-Path $root '.github/agent-docs/skill-catalog-state.json'
 if (Test-Path -LiteralPath $catalogStatePath) {
     try {
         $catalogState = Get-Content -LiteralPath $catalogStatePath -Raw | ConvertFrom-Json
-        if ($catalogState.catalogs) { foreach ($c in $catalogState.catalogs.PSObject.Properties) { if ($c.Value.state -eq 'held') { $heldCatalogs += $c.Name } } }
+        if ($catalogState.catalogs) {
+            foreach ($c in $catalogState.catalogs.PSObject.Properties) {
+                if ($c.Value.state -eq 'held') { $heldCatalogs += $c.Name }
+                elseif ($c.Value.state -eq 'blocked') { $blockedCatalogs += "$($c.Name) ($($c.Value.reason))" }
+            }
+        }
     } catch { }
 }
 $stale = @()
@@ -11064,6 +11338,7 @@ foreach ($pair in @(@('Microsoft', $ms, 'skills-for-fabric'), @('Kurt', $kurt, '
 }
 if ($stale.Count -gt 0) { $out.Add("         Upstream older than 30 days: $($stale -join ', ') -> say 'run maintenance' to refresh.") }
 if ($heldCatalogs.Count -gt 0) { $out.Add("         Kept at the last compatible version: $($heldCatalogs -join ', ') (upstream changed in a way this kit version does not support yet; nothing to do).") }
+if ($blockedCatalogs.Count -gt 0) { $out.Add("         Not refreshed, Git could not open the clone: $($blockedCatalogs -join '; '). The skills on disk are used as they are; once Git works, say 'run maintenance'.") }
 $missingPins = @()
 if (Get-Command Get-MissingSkillPins -ErrorAction SilentlyContinue) { $missingPins = @(Get-MissingSkillPins $root) }
 if ($missingPins.Count -gt 0) { $out.Add("         $($missingPins.Count) skill path(s) the agents reference are missing on disk -> re-run the installer to regenerate the references.") }
@@ -11364,6 +11639,7 @@ Write-ManagedFile "$rootPath\.github\agent-docs\Get-SessionStatus.ps1" $sessionS
 # and the session status script run exactly the refresh, hold and settings code the installer runs.
 $skillCompatFunctions = @(
     'ConvertFrom-JsonLenient', 'Find-JsonObjectEnd', 'Find-LineCommentStart', 'Add-JsonMemberBeforeClose', 'Update-UserSettingsInPlace',
+    'Get-GitProbe', 'Format-GitProbe',
     'Update-VendorClone', 'Test-VendorCloneIdentity', 'Get-VendorCloneHead', 'Restore-VendorClone',
     'Get-MissingSkillPins', 'Set-SkillCatalogState', 'Invoke-VendorRefreshWithHold'
 )
@@ -11392,6 +11668,7 @@ if ($RefreshCatalogs) {
             'current'      { "${catalog}: current at $(& $short $r.commit)" }
             'held'         { "${catalog}: held at $(& $short $r.commit) - upstream $(& $short $r.upstream) no longer has $(@($r.missing).Count) skill path(s) the agents use. This is the correct outcome; nothing to do until the kit is updated." }
             'incompatible' { "${catalog}: at upstream $(& $short $r.commit) - $(@($r.missing).Count) skill path(s) the agents use are missing and no compatible commit could be restored. Re-run the installer to regenerate the agent references." }
+            'blocked'      { "${catalog}: not refreshed - $($r.detail). Last recorded commit: $(& $short $r.commit). Do not move or re-clone the folder; refresh again once Git can open it." }
             default        { "${catalog}: skipped - $($r.detail)" }
         }
         foreach ($note in @($r.notes)) { $lines += "  note: $note" }
@@ -11442,9 +11719,12 @@ install-time snapshot). It also writes the same block to
 - PBIVIZ: 0 - PBIVIZ Developing Environment | 2 visual(s) | git: main, 5 commit(s), clean | Level 1 (only when configured)"
 
 Rules:
-- The status script resolves the workspace root from its own location, so run it
-  exactly as written from any CWD. If it prints nothing, the persistent shell is
-  usually wedged: run the same command once more in a NEW terminal. Only if that
+- The status script resolves the workspace root from its own location, not from the
+  terminal's folder. If the terminal is not in this workspace's root (a window with
+  several folders), give the script's full path instead of the relative one. The
+  script always prints a block, so if nothing comes back the shell did not return
+  it: run the same command once more in a NEW terminal (for this script that takes
+  the place of the general `| Out-String` retry). Only if that
   also prints nothing, read `.github/agent-docs/session-status.last.txt`.
 - **Staleness guard.** Every block starts with `GENERATED <timestamp>`. Before relaying
   a block you read from the fallback file (or recall from earlier in this chat), compare
@@ -12026,7 +12306,7 @@ $agentKnowledge = @{
             'Consolidate: what changed, where, validation evidence, risks, open decisions. Keep a short session ledger of approvals granted and results so follow-ups reuse them.'
         )
         validate = @('Every Lead result contains validation evidence; never report success from a result that lacks it.', 'One writer per artifact across all dispatched leads.')
-        tools = @('agent (dispatch) is your primary tool; read/search only to classify; execute only for the status script.')
+        tools = @('agent (dispatch) is your primary tool; read/search only to classify; execute only for the status script and for opening and closing the task folder (Agent-Workspace.ps1 -NewTask / -CloseTask).')
         avoid = @('Editing or running anything that changes a Fabric/Power BI artifact yourself.', 'Menus, dropdown-switch instructions, or re-running startup mid-session.', 'Dispatching the Architect for single-team, single-artifact work.')
     }
     'fabric-solution-architect' = @{
@@ -12344,13 +12624,13 @@ $agentKnowledge = @{
             '**Target.** Steps 1 to 14 are the safeguards for a change to a pipeline that exists in a workspace; follow them in order. Confirm the exact workspace (id and name) and pipeline (id and name) from your WORK ORDER against the live item list. Ambiguous or missing -> NEEDS INPUT.',
             '**Inspect first.** Read the current definition (getDefinition) and keep it unchanged in your task folder. It is the recovery point; nothing is sent before it exists.',
             '**Compare environments.** Note where the proposed definition comes from (this pipeline, a local file, Git, another workspace). A definition from another workspace or from Git is a source to adapt, never something to send.',
-            '**Foreign workspace ids.** Run `powershell -NoProfile -ExecutionPolicy Bypass -File .github/agent-docs/Test-PipelineDefinition.ps1 -Path "<proposed>" -CurrentPath "<current>" -TargetWorkspaceId <id> -InventoryPath "<items.json>","<connections.json>"` (add `-SourceWorkspaceId` when the proposal came from another workspace). A workspace id that is not the target, or an all-zero GUID, blocks.',
+            '**Foreign workspace ids.** Run `powershell -NoProfile -ExecutionPolicy Bypass -File .github/agent-docs/Test-PipelineDefinition.ps1 -Path "<proposed>" -CurrentPath "<current>" -TargetWorkspaceId <id> -InventoryPath "<items.json>,<connections.json>"` (add `-SourceWorkspaceId` when the proposal came from another workspace). A workspace id that is not the target, or an all-zero GUID, blocks.',
             '**Stale references.** Save the target workspace item list and the connection list to your task folder and pass them as `-InventoryPath`; an item or connection id that is not in them blocks.',
             '**Schema and dependencies.** The same check validates activity types, required properties, dependsOn (missing names, cycles, conditions) and expressions (undeclared parameters, variables, library variables, activity names).',
             '**No round-trip.** Never send a getDefinition answer back as it is, and never to another workspace. Edit a copy of the target''s current definition; blocks you did not change are trusted by the check, everything else is checked.',
             '**Change plan and recovery.** Return the change plan the check prints (activities added, removed, changed; every binding that changes) and state the recovery: re-send the kept definition to the same pipeline and confirm it by read-back.',
             '**Approval.** A save to a workspace is an environment-changing action. Without the token in `approvals granted`, return NEEDS APPROVAL with the change plan and a proposed token `APPROVED:DEPLOY:<pipeline name>`. `recreateTables: true`, an unverified activity type and a cross-workspace reference each need the user''s explicit confirmation before the matching switch of the check is used.',
-            '**Scope.** Only `RESULT: PASS` allows the save. BLOCKED -> fix or ask; it is never saved. UNCHECKED -> never saved on your own decision: say what could not be checked and return NEEDS INPUT; only a later WORK ORDER that carries the user''s decision on exactly those points, together with the token, allows it. A check that could not be run at all counts as UNCHECKED for every point; without its change plan you return NEEDS INPUT, not NEEDS APPROVAL. Send only the approved change, as the `pipeline-content.json` part.',
+            '**Scope.** `RESULT: PASS` with the token allows the save. BLOCKED -> fix or ask; it is never saved. UNCHECKED -> never saved on your own decision: say what could not be checked and return NEEDS INPUT; only a later WORK ORDER that carries the user''s decision on exactly those points, together with the token, allows it. A check that could not be run at all counts as UNCHECKED for every point; without its change plan you return NEEDS INPUT, not NEEDS APPROVAL. Send only the approved change, as the `pipeline-content.json` part.',
             '**Read back.** Read the definition again after the save and compare it with what you sent; a difference is a failure to report, not to repair silently.',
             '**Validate bindings.** Run the check on the read-back definition with the same inventory.',
             '**Run.** Execute only a synthetic pipeline, or the real one when the WORK ORDER says the user authorised that run; otherwise report the run as NOT EXECUTED. A SQL analytics endpoint refresh is judged by its per-table output, not by the activity status alone.',
@@ -12588,8 +12868,8 @@ $agentKnowledge = @{
     }
     'upstream-repository-sync-agent' = @{
         skills = @(@{ ref = "$AD/working-flow-reference.md"; why = 'vendor repositories are read-only references' })
-        playbook = @('Refresh the two vendor catalogs (skills-for-fabric, power-bi-agentic-development) only through the shipped helper, in one call from the workspace root: `powershell -NoProfile -ExecutionPolicy Bypass -File .github/agent-docs/Skill-Compat.ps1 -RefreshCatalogs`. It applies the installer''s exact rule (repository identity check, fetch, stash local edits, reset to upstream) and then checks every skill path the generated agents rely on.', 'Report the `SKILLS REFRESH` block it prints: per catalog `refreshed`, `current`, `held`, `incompatible` or `skipped`, the commits, and every `note:` line (a named stash of local edits, a failed fetch, a clone left untouched). `held` means upstream dropped a skill path the agents use and the catalog stayed on its last compatible commit: that is the correct outcome, not a failure. `incompatible` means no known commit has every path: report it with the helper''s advice (re-run the installer) and change nothing. Do not retry, do not reset by hand, and never ask the user to map, rename or choose skills.', 'Then run `.github/agent-docs/Get-SessionStatus.ps1` so new skill folders are registered, and report the folders it lists.')
-        validate = @('Every catalog reports refreshed, current, held, incompatible or skipped with its reason; every note line reported; no vendor file edited by hand.')
+        playbook = @('Refresh the two vendor catalogs (skills-for-fabric, power-bi-agentic-development) only through the shipped helper, in one call from the workspace root: `powershell -NoProfile -ExecutionPolicy Bypass -File .github/agent-docs/Skill-Compat.ps1 -RefreshCatalogs`. It applies the installer''s exact rule (repository identity check, fetch, stash local edits, reset to upstream) and then checks every skill path the generated agents rely on.', 'Report the `SKILLS REFRESH` block it prints: per catalog `refreshed`, `current`, `held`, `incompatible`, `not refreshed` or `skipped`, the commits, and every `note:` line (a named stash of local edits, a failed fetch, a clone left untouched). `held` means upstream dropped a skill path the agents use and the catalog stayed on its last compatible commit: that is the correct outcome, not a failure. `incompatible` means no known commit has every path: report it with the helper''s advice (re-run the installer) and change nothing. `not refreshed` means Git could not open the clone (the line gives Git''s reason): the folder and its skills stay as they are; report the reason and do not move or re-clone the folder. Do not retry, do not reset by hand, and never ask the user to map, rename or choose skills.', 'Then run `.github/agent-docs/Get-SessionStatus.ps1` so new skill folders are registered, and report the folders it lists.')
+        validate = @('Every catalog reports refreshed, current, held, incompatible, not refreshed or skipped with its reason; every note line reported; no vendor file edited by hand.')
         tools = @('git through `.github/agent-docs/Skill-Compat.ps1`; execute only.')
         avoid = @('Raw `git pull`, `git reset` or `git checkout` on a vendor clone instead of the helper.', 'git push to a vendor repo; hand-editing vendor files; running this on the user''s own business repositories under source-control-repositories/ (those belong to 050).')
     }
@@ -13013,8 +13293,9 @@ function Get-UnresolvedSkillPins {
 # Compatibility preflight for refreshed vendor catalogs. Upstream HEAD is accepted when every
 # pinned reference still resolves; otherwise the whole catalog returns to the commit it was on
 # before this run, or to the approved commit of this kit release. Never per skill.
+# A clone Git cannot open is 'blocked': the last recorded commits are kept, with the reason.
 function Invoke-SkillCatalogHold {
-    param([string]$RootPath, [string[]]$Refs, [hashtable]$Before, $Catalogs)
+    param([string]$RootPath, [string[]]$Refs, [hashtable]$Before, $Catalogs, $Previous = $null)
     $result = [ordered]@{}
     foreach ($name in @($Catalogs.Keys)) {
         $repo = Join-Path $RootPath $name
@@ -13025,7 +13306,20 @@ function Invoke-SkillCatalogHold {
         if (-not (Test-Path -LiteralPath $repo)) { continue }
         $mine = @($Refs | Where-Object { $_.StartsWith("$name/", [StringComparison]::Ordinal) })
         $head = Get-VendorCloneHead $repo $remote
-        if (-not $head) { $entry.state = 'unmanaged'; continue }
+        if (-not $head) {
+            $probe = Get-GitProbe $repo
+            if ($probe.State -notin @('refused', 'cannot-start', 'not-installed', 'error')) { $entry.state = 'unmanaged'; continue }
+            $entry.state = 'blocked'
+            $entry['reason'] = Format-GitProbe $probe
+            $prev = if ($Previous -is [System.Collections.IDictionary]) { $Previous[$name] } elseif ($Previous -and $Previous.PSObject.Properties[$name]) { $Previous.$name } else { $null }
+            # Only what an earlier successful read confirmed is carried forward.
+            if ($prev -and ($prev.state -in @('upstream', 'held', 'incompatible', 'blocked'))) {
+                $entry.commit = $prev.commit; $entry.upstreamCommit = $prev.upstreamCommit
+                $confirmed = if ($prev.state -eq 'blocked') { $prev.lastConfirmedState } else { $prev.state }
+                if ($confirmed) { $entry['lastConfirmedState'] = $confirmed }
+            }
+            continue
+        }
         $entry.state = 'upstream'; $entry.commit = $head; $entry.upstreamCommit = $head
         if (@(Get-UnresolvedSkillPins $mine).Count -eq 0) { continue }
         $entry.state = 'incompatible'
@@ -13127,13 +13421,19 @@ $upstreamPinRefs = @($agentKnowledge.Values | ForEach-Object { @($_.skills) } | 
     Where-Object { $r = $_; @($vendorCatalogs.Keys | Where-Object { $r.StartsWith("$_/", [StringComparison]::Ordinal) }).Count -gt 0 } | Sort-Object -Unique)
 $skillCatalogState = [ordered]@{}
 if (-not $EmitAgentsTo) {
-    $skillCatalogState = Invoke-SkillCatalogHold -RootPath $rootPath -Refs $upstreamPinRefs -Before $vendorBefore -Catalogs $vendorCatalogs
+    $previousCatalogState = $null
+    $previousCatalogPath = "$rootPath\.github\agent-docs\skill-catalog-state.json"
+    if (Test-Path -LiteralPath $previousCatalogPath) { try { $previousCatalogState = ([IO.File]::ReadAllText($previousCatalogPath) | ConvertFrom-Json).catalogs } catch { $previousCatalogState = $null } }
+    $skillCatalogState = Invoke-SkillCatalogHold -RootPath $rootPath -Refs $upstreamPinRefs -Before $vendorBefore -Catalogs $vendorCatalogs -Previous $previousCatalogState
     foreach ($catalogName in @($skillCatalogState.Keys)) {
         $catalogEntry = $skillCatalogState[$catalogName]
         if ($catalogEntry.state -eq 'held') {
             Write-Host "  ${catalogName}: kept at the last compatible version ($(([string]$catalogEntry.commit).Substring(0, 7))). Upstream changed in a way this kit version does not support yet; nothing is needed from you." -ForegroundColor Yellow
         } elseif ($catalogEntry.state -eq 'incompatible') {
             Write-Host "  ${catalogName}: no compatible version could be restored. Some skill references stay unavailable until the kit is updated; the agents continue with their other skills." -ForegroundColor Yellow
+        } elseif ($catalogEntry.state -eq 'blocked') {
+            Write-Host "  ${catalogName}: compatibility not checked -- $($catalogEntry.reason). The skills on disk are used as they are; the last recorded commit is kept." -ForegroundColor Yellow
+            Add-SetupWarning "${catalogName}: skills catalog not checked or refreshed ($($catalogEntry.reason))."
         }
     }
 }
@@ -13273,11 +13573,11 @@ On the first message of a session, read ``.github/copilot-instructions.md``, the
 
 ## Your role: coordinator, not implementer
 
-You are the account manager for this workspace. The user is your client and the eight Team Leads are your departments. Every request the user gives you is a *project* you deliver **through the specialist teams**, never by doing the specialist work yourself. Your job is to understand the request, route it across the organisation, keep ownership clear, and consolidate one result back to the client. Treat "you fix it", "you do it", or "handle it" as "make the right team fix it and own the outcome" — the client is authorising the *result*, not asking you personally to touch the artifact.
+You are the account manager for this workspace. The user is your client and the eight Team Leads are your departments. Every request the user gives you is a *project* you deliver **through the specialist teams**, never by doing the specialist work yourself. Your job is to understand the request, route it across the organisation, keep ownership clear, and consolidate one result back to the client. Treat "you fix it", "you do it", or "handle it" as "make the right team fix it and own the outcome" - the client is authorising the *result*, not asking you personally to touch the artifact.
 
-You do **not** implement domain work yourself. You must delegate, and you must never directly author, edit, refactor, mutate, deploy, publish, run, or refresh any Fabric or Power BI artifact or its live state — this includes semantic models/TMDL/DAX, reports/PBIR, dataflows, pipelines, notebooks, lakehouse/warehouse/SQL objects, workspace/capacity/governance settings, Git/release actions, and application/REST/XMLA/CLI integrations. The specialist **worker** that owns that artifact type performs the change because it holds the right skills; its **Team Lead** reviews and validates it. This holds even when the user tells you to do it directly and even when you already know the fix: knowing the answer is not a reason to bypass the team. The only things you do hands-on are orchestration, reading/searching just enough to classify and route, running the mandatory startup checks, and consolidating evidence.
+You do **not** implement domain work yourself. You must delegate, and you must never directly author, edit, refactor, mutate, deploy, publish, run, or refresh any Fabric or Power BI artifact or its live state - this includes semantic models/TMDL/DAX, reports/PBIR, dataflows, pipelines, notebooks, lakehouse/warehouse/SQL objects, workspace/capacity/governance settings, Git/release actions, and application/REST/XMLA/CLI integrations. The specialist **worker** that owns that artifact type performs the change because it holds the right skills; its **Team Lead** reviews and validates it. This holds even when the user tells you to do it directly and even when you already know the fix: knowing the answer is not a reason to bypass the team. The only things you do hands-on are orchestration, reading/searching just enough to classify and route, running the mandatory startup checks, and consolidating evidence.
 
-For every request: (1) classify the intent and which artifact(s) and team(s) it touches; (2) route to the minimum relevant Team Lead(s) with the ``agent`` tool, stating the goal, scope, the owned artifact, any constraints, and the validation you expect back; (3) let each Team Lead assign the skilled worker to implement and then review/validate the change **as a team** before returning; (4) consolidate the returned evidence, risks, and remaining actions into one clear answer for the client. If a request would tempt you to open a terminal or edit a file to change a domain artifact, stop and delegate instead — even for a "quick" or "obvious" change.
+For every request: (1) classify the intent and which artifact(s) and team(s) it touches; (2) route to the minimum relevant Team Lead(s) with the ``agent`` tool, stating the goal, scope, the owned artifact, any constraints, and the validation you expect back; (3) let each Team Lead assign the skilled worker to implement and then review/validate the change **as a team** before returning; (4) consolidate the returned evidence, risks, and remaining actions into one clear answer for the client. If a request would tempt you to open a terminal or edit a file to change a domain artifact, stop and delegate instead - even for a "quick" or "obvious" change.
 
 Use Fabric Solution Architect only for genuine cross-domain design, dependency, sequencing, ownership, validation, or rollback decisions. Use Integration QA & Change Controller for cross-artifact risk or final acceptance. Keep exactly one writer per artifact, never let a change land without its owning team's review, and confirm destructive, irreversible, production, release, or environment-changing actions with the client before the team executes them.
 
@@ -13424,9 +13724,9 @@ Preserve the installer-first experience and its locked-down-laptop fallbacks. Wh
 
 When selected directly, first offer:
 
-1. **Light maintenance** — refresh the two vendor clones (via 071 and the helper above), re-register skill folders, then refresh the current tool inventory.
-2. **Deep maintenance** — light maintenance plus dynamic skill inventory/mapping, agent coverage review, installed-tool version review, and installer health checks.
-3. **Housekeeping** — a read-only preview of the agent working files (``0 - Team of Agents Local Files/`` and a legacy root ``scripts/`` folder) by 075, then, only with the approval token the preview prints, a cleanup by 074 that moves files to a quarantine and can be undone. Nothing outside those two places is ever inventoried or touched, and it is never part of light or deep maintenance.
+1. **Light maintenance** - refresh the two vendor clones (via 071 and the helper above), re-register skill folders, then refresh the current tool inventory.
+2. **Deep maintenance** - light maintenance plus dynamic skill inventory/mapping, agent coverage review, installed-tool version review, and installer health checks.
+3. **Housekeeping** - a read-only preview of the agent working files (``0 - Team of Agents Local Files/`` and a legacy root ``scripts/`` folder) by 075, then, only with the approval token the preview prints, a cleanup by 074 that moves files to a quarantine and can be undone. Nothing outside those two places is ever inventoried or touched, and it is never part of light or deep maintenance.
 
 For either level, report any repository the helper skipped or held, with its reason, and continue with the unaffected checks. A tool installation or update is never implied by either maintenance level: identify the exact proposed software change and obtain separate explicit approval before delegating it to Environment & Tooling Agent.
 "@
@@ -13866,7 +14166,7 @@ if (-not $EmitAgentsTo -and $pbivizMapReadable -and $pbivizDecision -ne 'not-ask
         Write-Host "  PBIVIZ repository: $pbivizRelativePath" -ForegroundColor Cyan
         $pbivizState = Get-PbivizRepoState -Root $pbivizRootPath -OuterRoot $rootPath
         $allowSynced = $false
-        if (-not $pbivizState.isRepoRoot -and $pbivizState.syncedPath -and $pbivizState.gitVersionOk) {
+        if (-not $pbivizState.isRepoRoot -and -not $pbivizState.gitIsDir -and -not $pbivizState.gitIsFile -and $pbivizState.syncedPath -and $pbivizState.gitVersionOk) {
             Write-Host "  WARNING: this folder is inside a OneDrive-synced location." -ForegroundColor Yellow
             Write-Host "  Sync clients rewrite and lock files inside .git and can corrupt the repository." -ForegroundColor Yellow
             Write-Host "  Recommended: choose a non-synced folder (re-run the installer and pick another workspace path)." -ForegroundColor Yellow
@@ -13890,12 +14190,10 @@ if (-not $EmitAgentsTo -and $pbivizMapReadable -and $pbivizDecision -ne 'not-ask
     $pbivizMap['updatedAt'] = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     if ($pbivizEnabled) {
         $headState = Get-PbivizRepoState -Root $pbivizRootPath
-        $pbivizMap['git'] = [ordered]@{
-            initStatus = $pbivizInitStatus
-            branch = $headState.branch
-            commits = $headState.commitCount
-            baselineCommit = if ($pbivizInit -and $pbivizInit.BaselineCommit) { $pbivizInit.BaselineCommit } elseif ($pbivizExistingMap -and $pbivizExistingMap.git) { $pbivizExistingMap.git.baselineCommit } else { $null }
-            checkedAt = $pbivizMap['updatedAt']
+        $pbivizMap['git'] = Get-PbivizMapGitBlock -Existing $(if ($pbivizExistingMap) { $pbivizExistingMap.git } else { $null }) -HeadState $headState -InitStatus $pbivizInitStatus `
+            -BaselineCommit $(if ($pbivizInit -and $pbivizInit.BaselineCommit) { $pbivizInit.BaselineCommit } else { $null }) -CheckedAt $pbivizMap['updatedAt']
+        if (-not $headState.isRepoRoot -and ($headState.gitIsDir -or $headState.gitIsFile -or $pbivizInitStatus -match 'could not be started')) {
+            Add-SetupWarning "PBIVIZ repository ${pbivizRelativePath}: not checked - $(if ($headState.gitProblem) { $headState.gitProblem } else { $pbivizInitStatus }). Its history was not changed; the last recorded state is kept in pbiviz-workspace.json."
         }
     }
     Write-ManagedFile -Path $pbivizMapPath -Content ($pbivizMap | ConvertTo-Json -Depth 10)
@@ -14147,9 +14445,10 @@ $guardrailJson = $guardrailStatus | ConvertTo-Json -Depth 6
 Write-ManagedFile "$rootPath\.github\agent-docs\guardrail-status.json" $guardrailJson
 Write-Host "  Written: .github/agent-docs/guardrail-status.json" -ForegroundColor Green
 if ($selfTestPassed) {
-    Write-Host "  Self-test PASSED: generated workspace matches the governance manifest." -ForegroundColor Green
+    Write-Host "  Self-test PASSED: generated workspace matches the governance manifest (generated files only; Git, tools and skill refreshes are reported separately)." -ForegroundColor Green
 } else {
     Write-Host "  Self-test reported issues (advisory) -- see guardrail-status.json." -ForegroundColor Yellow
+    if (-not $EmitAgentsTo) { Add-SetupWarning 'The post-generation self-test reported issues (see .github/agent-docs/guardrail-status.json).' }
 }
 
 # -- Integrity manifest (installed-manifest.json) ---------------------
@@ -14295,9 +14594,14 @@ try {
     }
     if (-not $gitUsable) {
         Write-Host "  Warning: Git did not accept this folder as a repository  -- no commit was made." -ForegroundColor Yellow
+        $rootGitProbe = Get-GitProbe $rootPath
+        $rootGitReason = if ($rootGitProbe.State -eq 'ok') { 'Git opened the repository but did not confirm a working tree' } else { Format-GitProbe $rootGitProbe }
+        Write-Host "           Git's answer: $rootGitReason." -ForegroundColor DarkGray
         Write-Host "           The workspace files are complete. Run 'git status' in the folder to see Git's reason." -ForegroundColor DarkGray
+        Add-SetupWarning "No setup commit was made: $rootGitReason."
     } elseif ([string]::IsNullOrWhiteSpace($gitUser) -or [string]::IsNullOrWhiteSpace($gitEmail)) {
         Write-Host "  Warning: git user.name/email not configured  -- skipping initial commit." -ForegroundColor Yellow
+        Add-SetupWarning 'No setup commit was made: git user.name / user.email are not configured.'
     } else {
         $commitPaths = @()
         if ($createdGitRepository) {
@@ -14352,6 +14656,7 @@ try {
                 Write-Host "  $commitKind created ($($headAfter.Substring(0,7)))." -ForegroundColor Green
             } else {
                 Write-Host "  Warning: files were staged, but Git could not create the commit." -ForegroundColor Yellow
+                Add-SetupWarning 'Files were staged, but Git could not create the setup commit.'
             }
         }
     }
@@ -14360,13 +14665,25 @@ try {
 }
 
 Write-Host ""
-Write-Host "=============================================" -ForegroundColor Green
-Write-Host "  Setup complete! v$productVersion" -ForegroundColor Green
-Write-Host "  Workspace: $rootPath" -ForegroundColor Green
-if ($pbivizEnabled -and $pbivizRelativePath) {
-    try { Write-Host "  PBIVIZ:    $(Get-PbivizStatusLine -Root $pbivizRootPath -RelativePath $pbivizRelativePath -InitStatus $pbivizInitStatus)" -ForegroundColor Green } catch { }
+# A clean result is only reported when nothing above was skipped or failed.
+$setupWarningCount = $script:SetupWarnings.Count
+$bannerColor = if ($setupWarningCount -eq 0) { 'Green' } else { 'Yellow' }
+Write-Host "=============================================" -ForegroundColor $bannerColor
+if ($setupWarningCount -eq 0) {
+    Write-Host "  Setup complete! v$productVersion" -ForegroundColor Green
+} else {
+    Write-Host "  Setup finished with $setupWarningCount warning(s). v$productVersion" -ForegroundColor Yellow
 }
-Write-Host "=============================================" -ForegroundColor Green
+Write-Host "  Workspace: $rootPath" -ForegroundColor $bannerColor
+if ($pbivizEnabled -and $pbivizRelativePath) {
+    try { Write-Host "  PBIVIZ:    $(Get-PbivizStatusLine -Root $pbivizRootPath -RelativePath $pbivizRelativePath -InitStatus $pbivizInitStatus)" -ForegroundColor $bannerColor } catch { }
+}
+if ($setupWarningCount -gt 0) {
+    Write-Host "  The workspace files are written and usable. Not done in this run:" -ForegroundColor Yellow
+    foreach ($setupWarning in $script:SetupWarnings) { Write-Host "    - $setupWarning" -ForegroundColor Yellow }
+    Write-Host "  Fix the causes above, then re-run the installer to complete these steps." -ForegroundColor Yellow
+}
+Write-Host "=============================================" -ForegroundColor $bannerColor
 Write-Host ""
 Write-Host "  VS Code will now open your workspace." -ForegroundColor White
 Write-Host "  Once open, pick 000 - Fabric Workspace Master from the Copilot" -ForegroundColor White

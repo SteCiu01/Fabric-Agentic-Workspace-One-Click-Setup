@@ -11,8 +11,13 @@ BeforeAll {
     . "$PSScriptRoot/Manifest.Helpers.ps1"
     $script:Installer = Get-InstallerPath
 
-    # Load only the function under test from the real installer source.
+    # Load only the function under test (and the Git probe it reports through) from the real installer source.
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:Installer, [ref]$null, [ref]$null)
+    foreach ($fnName in 'Get-GitProbe', 'Format-GitProbe') {
+        $probeFn = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $fnName }, $false) | Select-Object -First 1
+        $probeFn | Should -Not -BeNullOrEmpty -Because "$fnName must exist in the installer"
+        Invoke-Expression $probeFn.Extent.Text
+    }
     $fn = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Update-VendorClone' }, $true) | Select-Object -First 1
     $fn | Should -Not -BeNullOrEmpty -Because 'Update-VendorClone must exist in the installer'
     Invoke-Expression $fn.Extent.Text

@@ -591,7 +591,7 @@
                                                        },
                    "055-power-bi-alm.agent.md":  {
                                                      "name":  "055 - Power BI ALM Agent",
-                                                     "description":  "Use pbi-tools for PBIX/PBIP extraction, build, CI/CD, deployment, and ALM validationâ€”not routine PBIR visual editing.",
+                                                     "description":  "Use pbi-tools for PBIX/PBIP extraction, build, CI/CD, deployment, and ALM validation - not routine PBIR visual editing.",
                                                      "userInvocable":  "false",
                                                      "tools":  [
                                                                    "read",

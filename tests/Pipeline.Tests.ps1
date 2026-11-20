@@ -118,6 +118,50 @@ Describe 'Pipeline check: a correct definition' {
         (Invoke-PdCheck @{ Path = (Save-PdFile 'other.json' '{"name":"not a pipeline"}') }).Exit | Should -Be 2
         (Invoke-PdCheck @{ Path = (Join-Path $script:Fx 'valid-api.json'); TargetWorkspaceId = 'not-a-guid' }).Exit | Should -Be 2
     }
+
+    It 'blocks an activities list that is null (it would empty the deployed pipeline)' {
+        $r = Get-PdTargeted (Save-PdFile 'null-activities.json' '{"properties":{"activities":null}}')
+        $r.Result | Should -Be 'BLOCKED' -Because $r.Text
+        $r.Text | Should -Match 'PD001'
+    }
+
+    It 'takes both inventory lists as one comma-separated value, as the documented -File command passes them (Canary finding)' {
+        $twoInOne = "$($script:Inventory),$($script:Inventory)"
+        $r = Invoke-PdCheck @{ Path = (Join-Path $script:Fx 'valid-api.json'); TargetWorkspaceId = $script:Target; InventoryPath = $twoInOne }
+        $r.Result | Should -Be 'PASS' -Because $r.Text
+        $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $out = @(& $ps -NoProfile -ExecutionPolicy Bypass -File $script:Check -Path (Join-Path $script:Fx 'valid-api.json') -TargetWorkspaceId $script:Target -InventoryPath $twoInOne 2>&1 | ForEach-Object { "$_" })
+        $LASTEXITCODE | Should -Be 0 -Because ($out -join "`n")
+        ($out -join "`n") | Should -Match 'RESULT: PASS'
+    }
+
+    It 'binds no argument by position: a stray value is an error, never a workspace id or a path' {
+        { & $script:Check -Path (Join-Path $script:Fx 'valid-api.json') 'stray-value' } | Should -Throw '*positional parameter*'
+    }
+
+    It 'the skill and agent 036 show the inventory lists as one quoted value' {
+        $script:Skill | Should -Match ([regex]::Escape('-InventoryPath "<items.json>,<connections.json>"'))
+        $script:InstallerText | Should -Not -Match ([regex]::Escape('-InventoryPath "<items.json>","<connections.json>"'))
+    }
+
+    It 'blocks an id property that holds a placeholder or a name instead of a GUID or an expression: <Case> (Canary finding)' -TestCases @(
+        @{ Case = 'SQL endpoint id placeholder'; Change = { param($def) $def.properties.activities[2].typeProperties.sqlEndpointId = 'UNRESOLVED-sql-endpoint-id' } }
+        @{ Case = 'connection placeholder';      Change = { param($def) $def.properties.activities[2].externalReferences.connection = '<connection-id>' } }
+        @{ Case = 'notebook given by name';      Change = { param($def) $def.properties.activities[0].typeProperties.notebookId = 'Load orders notebook' } }
+        @{ Case = 'empty workspace id';          Change = { param($def) $def.properties.activities[0].typeProperties.workspaceId = '' } }
+    ) {
+        param($Case, $Change)
+        $r = Get-PdTargeted (New-PdVariant ('placeholder-' + [guid]::NewGuid().ToString('N').Substring(0, 6) + '.json') $Change)
+        $r.Result | Should -Be 'BLOCKED' -Because $r.Text
+        $r.Text | Should -Match 'PD079'
+    }
+
+    It 'NEGATIVE CONTROL: GUIDs and expressions in id properties are not PD079' {
+        $r = Get-PdTargeted (Join-Path $script:Fx 'valid-api.json')
+        $r.Text | Should -Not -Match 'PD079'
+        $e = New-PdVariant 'expr-ids.json' { param($def) $def.properties.activities[2].typeProperties.sqlEndpointId = '@pipeline().libraryVariables.EndpointId' }
+        (Get-PdTargeted $e).Text | Should -Not -Match 'PD079'
+    }
 }
 
 Describe 'SQL analytics endpoint refresh contract (PIPE-01)' {
@@ -215,6 +259,19 @@ Describe 'Workspace portability (PIPE-02, PIPE-06)' {
         (Get-PdTargeted $p).Text | Should -Match 'PD075'
         $q = New-PdVariant 'stale-conn.json' { param($def) $def.properties.activities[2].externalReferences.connection = $script:Unknown }
         (Get-PdTargeted $q).Text | Should -Match 'PD076'
+    }
+
+    It 'blocks a second workspace''s GUID inside an Expression object or an expression, and passes the target there' {
+        $obj = New-PdVariant 'foreign-exprobj.json' { param($def) $def.properties.activities[2].typeProperties.workspaceId = [pscustomobject]@{ value = $script:OtherWs; type = 'Expression' } }
+        $r = Get-PdTargeted $obj
+        $r.Result | Should -Be 'BLOCKED' -Because $r.Text
+        $r.Text | Should -Match 'PD071 Refresh SQL endpoint:typeProperties\.workspaceId\.value'
+        $expr = New-PdVariant 'foreign-concat.json' { param($def) $def.properties.activities[0].typeProperties.workspaceId = "@concat('', '$($script:OtherWs)')" }
+        $e = Get-PdTargeted $expr
+        $e.Result | Should -Be 'BLOCKED' -Because $e.Text
+        $e.Text | Should -Match 'PD071 Load orders:typeProperties\.workspaceId'
+        $own = New-PdVariant 'target-exprobj.json' { param($def) $def.properties.activities[2].typeProperties.workspaceId = [pscustomobject]@{ value = $script:Target; type = 'Expression' } }
+        (Get-PdTargeted $own).Result | Should -Be 'PASS'
     }
 }
 
@@ -557,7 +614,8 @@ Describe 'Agent 036 deployment safeguards (PIPE-09)' {
     }
 
     It 'never saves a BLOCKED result, and an UNCHECKED or unrun check only with the user''s decision on each point' {
-        $script:Agent036 | Should -Match 'Only `RESULT: PASS` allows the save\. BLOCKED -> fix or ask; it is never saved'
+        $script:Agent036 | Should -Match '`RESULT: PASS` with the token allows the save\. BLOCKED -> fix or ask; it is never saved'
+        $script:Agent036 | Should -Not -Match 'Only `RESULT: PASS` allows the save' -Because 'an UNCHECKED result may be saved after the user decided on each unchecked point'
         $script:Agent036 | Should -Match 'UNCHECKED -> never saved on your own decision: say what could not be checked and return NEEDS INPUT'
         $script:Agent036 | Should -Match 'A check that could not be run at all counts as UNCHECKED for every point; without its change plan you return NEEDS INPUT, not NEEDS APPROVAL'
         $script:Agent036 | Should -Match 'a BLOCKED result was never saved, and an UNCHECKED result \(or a check that could not be run\) was not saved unless the WORK ORDER carried the user''''s decision on each unchecked point'

@@ -19,7 +19,7 @@ BeforeAll {
     $script:Raw = [IO.File]::ReadAllText($script:Installer)
     $script:Ast = [System.Management.Automation.Language.Parser]::ParseFile($script:Installer, [ref]$null, [ref]$null)
 
-    . (Get-InstallerFunctionLoader 'Test-ExplicitYes', 'Read-ExplicitYes', 'Read-DefaultYes', 'Set-ToolStatus', 'Invoke-OptionalToolPrompt',
+    . (Get-InstallerFunctionLoader 'Test-ExplicitYes', 'Read-ExplicitYes', 'Read-DefaultYes', 'Set-ToolStatus', 'Invoke-OptionalToolPrompt', 'Add-SetupWarning',
         'Get-VersionToken', 'Test-UpdateAvailable', 'Invoke-ToolUpdateOffer', 'Get-FabPythonRangeLabel', 'Ensure-Python', 'Add-DirToPath')
 
     # Stand-ins for everything around the consent decision. None of them touches the machine.
