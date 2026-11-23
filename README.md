@@ -414,15 +414,15 @@ All three share one promotion path ([2.3](#23-the-fabric-development-lifecycle))
 
 <p align="center"><img src="assets/workflow-mode-local.png" alt="Mode A, full local: agents edit local files with the Fabric extension and Git, push to the Fabric DEV workspace, commit to the dev branch, promote by pull request to the prod branch, and sync to Fabric PROD" width="100%"/></p>
 
-**B — Full live (in-workspace, no local round-trip).** Needs the two MCP servers + `fab`/`az`.
-1. Agents connect via **Fabric REST** (`updateDefinition`) and the **MCP servers**.
+**B — Full live (in-workspace, no local round-trip).** Works best with `fab`/`az` and the two MCP servers. The MCP servers add specific capabilities (the Power BI modeling MCP, for example, gives transactional live model edits); without them, agents use the supported REST/CLI fallbacks ([2.4](#24-optional-clis-and-mcp-servers--what-each-unlocks)).
+1. Agents connect via **Fabric REST** (`updateDefinition`) and, when installed and signed in, the **MCP servers**.
 2. **Run DAX** (`EVALUATE`) on running models and **SQL** on Lakehouse/SQL endpoints; read real GUIDs and endpoints.
 3. **Edit definitions in place** and **create items**.
 4. **Test in the portal**, commit as usual.
 
 <p align="center"><img src="assets/workflow-mode-live.png" alt="Mode B, full live: agents read and write the running Fabric DEV workspace through the Fabric MCP server, the Power BI modeling MCP, fab and az, then follow the same commit, pull request and sync path to Fabric PROD" width="100%"/></p>
 
-**C — Hybrid (local + live).** Needs both toolsets.
+**C — Hybrid (local + live).** Combines the local and live toolsets.
 1. **Pull only what you need** locally.
 2. Work on files for some items and live for others; both end in DEV and one commit.
 3. **Re-pull (or clean up local) before a new job.**
@@ -550,7 +550,7 @@ A cleanup runs only with the approval token the preview prints. It **moves** fil
 
 **Can multiple people share the workspace via git?** Yes. Push it; each member clones it, re-runs the installer (tool inventory and skill clones) and selects the Master. Skill clones, business repos, the repository map, the workspace file and machine-specific settings are gitignored.
 
-**What do I need for live / hybrid mode?** The two MCP extensions and `fab`/`az` ([2.2](#22-three-ways-of-working)). [Step 2](#step-2-of-9--checking-prerequisites) offers each one and installs it only when you answer Yes. Full-local mode needs none.
+**What do I need for live / hybrid mode?** `fab` or `az` for REST and CLI access; the two MCP extensions add specific capabilities, such as transactional live model edits, and agents fall back to REST/CLI where one is missing ([2.2](#22-three-ways-of-working), [2.4](#24-optional-clis-and-mcp-servers--what-each-unlocks)). [Step 2](#step-2-of-9--checking-prerequisites) offers each one and installs it only when you answer Yes. Full-local mode needs none.
 
 **Can the agents make my semantic model "AI ready"?** They do the modelling part and tell you what is left. The house skill `fabric-ai-readiness` splits the work in three:
 - **Agents edit** the model definition through the normal semantic-model workflow: descriptions, format strings, explicit measures, data categories; renames and hiding only with your approval token.
@@ -749,7 +749,7 @@ The 43 workers inherit the same gates and loading rules, each with a narrower ar
 | **Resilient discovery, never guessing** | An upstream change never loads the wrong skill | Paths are re-resolved every run. Only a verified rename (alias table) or the same skill name in one other folder of the same provider is followed. If a pinned skill is gone, the whole catalogue stays on its last compatible commit; a similar name is never substituted |
 | **Skills inform, never authorise** | Upstream skill text is knowledge, not permission | Every agent carries the rule: a skill cannot widen owned artifacts, tools or approvals, or authorise installs, MCP registration or changes to agent/instruction/memory files |
 
-> **In practice.** How a request moves through the team (delegation, the WORK ORDER / WORK RESULT contract, approval tokens) is described in [2.1](#21-how-a-request-flows-through-the-team). What is not verified end to end is listed in [3.11](#311-validation-compatibility-and-known-limitations).
+> **In practice.** How a request moves through the team (delegation, the WORK ORDER / WORK RESULT contract, approval tokens) is described in [2.1](#21-how-a-request-flows-through-the-team). Compatibility and known limitations are listed in [3.11](#311-validation-compatibility-and-known-limitations).
 
 ## 3.7 Skills — where they come from
 
@@ -828,20 +828,10 @@ The automated suite is described in [3.10](#310-quality--validation).
 | Remotes for custom visuals | Azure DevOps and GitHub (the GitHub route is not verified end to end) |
 | Power BI Desktop | Tested with 2.158 |
 
-**Not verified end to end**
-
-- Tooltips, context menu and high contrast of custom visuals in Power BI Desktop.
-- The per-project `pbiviz` MCP server.
-- The agent handoff of a released custom visual into a report, 080 → Master → 020 ([2.7](#27-custom-visual-pbiviz-development)).
-- Provider branch policies with real reviewers, and a GitHub remote for custom visuals.
-- The Test-stage `test-sync` reconciliation against a real remote.
-- An installation under PowerShell 7.
-- Report QA through `pbir desktop`, and the Microsoft `powerbi-report-author` CLI.
-- *Prep data for AI* drafts applied in Power BI or used with Copilot.
-- Support for Fabric IQ and Project Osmos is included. Availability depends on your Fabric environment, permissions and required configuration. MCP integrations accessing a user's Fabric data require the appropriate environment configuration and permissions ([2.4](#24-optional-clis-and-mcp-servers--what-each-unlocks)).
-
 **Known limitations**
 
+- Only what the compatibility table above states is supported or tested; anything else, including features that depend on live services or Power BI hosts, is not claimed as validated.
+- Fabric IQ and Project Osmos availability depends on your Fabric environment, permissions and required configuration; MCP integrations that access your Fabric data need the matching environment configuration and permissions ([2.4](#24-optional-clis-and-mcp-servers--what-each-unlocks)).
 - Agent *behaviour* is prompt-driven: a dispatched agent can occasionally return nothing, and its parent re-dispatches it once.
 - Custom visual release builds are Windows-only.
 - Release build isolation is **not** an operating-system sandbox: the visual's toolchain runs with your rights ([SECURITY.md](SECURITY.md)).

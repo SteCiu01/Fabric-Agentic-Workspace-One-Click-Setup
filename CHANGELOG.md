@@ -22,7 +22,6 @@ Refreshed upstream skills are checked against what the agents rely on, agent wor
 - **SQL permission classes** in the `fabric-cli-policy` skill, from `S0` (definition work) to `S4` (administration), decided before the route (`sqlcmd -G` first, then the Fabric Data Warehouse MCP server); a SQL tool being present is never permission. A data or schema change (`S3`) needs an approval token that names the statement and the object, such as `APPROVED:INSERT:dbo.Stage`.
 - **Remote MCP servers are detected, not assumed.** `tool-status.json` and the session status say whether `.vscode/mcp.json` holds an entry for the Fabric IQ or the Fabric Data Warehouse MCP server; the installer adds, configures and signs in to neither. Agents name the state they can prove: documented, configured, callable, signed in or executed.
 - `-StopAfterStep1`: runs the Step 1 questions and exits before anything is detected, installed or generated.
-- Regression suites for the areas above; see [tests/README](tests/README.md).
 - **Documentation workflow for maintainers** (in `.github/`, not shipped by the installer): a review is bound to one Communication Writer run and one session, the Writer may change five documents only, policy and legal documents need a recorded owner approval of their exact text, and `Doc-Review.ps1 -Gate` is the release gate. See [CONTRIBUTING](CONTRIBUTING.md#keeping-the-documentation-current).
 
 ### Changed
