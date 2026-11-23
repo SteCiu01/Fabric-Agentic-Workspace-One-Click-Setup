@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<!--
+  Source of assets/workflow-mode-local.png (README section 2.2, mode A). Render it with Render-Diagrams.ps1; see README.md.
+  The texts mirror README section 2.2 and 2.3. No third-party logo is stored here.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Working mode A - Full local</title>
+<link rel="stylesheet" href="diagram.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-agent" viewBox="0 0 24 24"><rect x="4.5" y="7" width="15" height="11" rx="4"/><path d="M12 7V4.5"/><circle cx="9.3" cy="12.4" r="1"/><circle cx="14.7" cy="12.4" r="1"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 4.2l8 4-8 4-8-4z"/><path d="M4 12.2l8 4 8-4"/><path d="M4 16.2l8 4 8-4"/></symbol>
+    <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="7" cy="6" r="2.1"/><circle cx="7" cy="18" r="2.1"/><circle cx="17" cy="8" r="2.1"/><path d="M7 8.1v7.8"/><path d="M17 10.1v.9a4 4 0 0 1-4 4H9.1"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.2"/><path d="M12 11.2v4.6"/><path d="M12 8.1h.01"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 4l2.4 5 5.4.7-4 3.8 1 5.4-4.8-2.6-4.8 2.6 1-5.4-4-3.8 5.4-.7z"/></symbol>
+  </defs>
+</svg>
+
+<header class="head">
+  <div class="eyebrow">Working mode A</div>
+  <h1 class="title">Full local</h1>
+  <p class="sub">File-first authoring for structured edits, reviewable diffs and offline work.</p>
+</header>
+
+<section class="band">
+  <!-- copilot-icon.png is supplied by the renderer from the local VS Code install and is not stored in the repository. -->
+  <div class="mlogo"><img src="copilot-icon.png" alt="" onerror="this.parentNode.className += ' no-icon'; this.remove();"><svg class="ic"><use href="#i-agent"/></svg></div>
+  <div class="who"><div class="mname">VS Code agents</div><div class="msub">Edit real files on disk</div></div>
+  <div class="tools">
+    <div class="chip"><b>Fabric extension</b><span>Pull / edit / push local files</span></div>
+    <div class="chip"><b>Git</b><span>Version control and history</span></div>
+    <div class="chip"><b>Local Fabric item files</b><span>TMDL, DAX, PBIR, pipeline JSON, notebooks, SQL, KQL</span></div>
+  </div>
+</section>
+
+<div class="link">
+  <div class="pair">
+    <div class="vflow" style="color:var(--blue)"><svg viewBox="0 0 12 46"><path d="M6 1v43"/><path d="M2 40l4 4.5 4-4.5"/></svg>push</div>
+    <div class="vflow" style="color:var(--green)"><svg viewBox="0 0 12 46"><path d="M6 45V2" stroke-dasharray="4 3"/><path d="M2 6l4-4.5 4 4.5"/></svg>pull</div>
+  </div>
+  <div class="hint">Toolset: Fabric extension + Git. No CLI or MCP server is required.</div>
+</div>
+
+<section class="flow">
+  <div class="card stage" style="--c:var(--green)">
+    <div class="st-h"><div class="st-i"><svg class="ic"><use href="#i-layers"/></svg></div><div><div class="st-n">Fabric DEV</div><span class="st-t">workspace</span></div></div>
+    <ul class="items">
+      <li><b>Push local changes here</b><span>Changes land in the DEV workspace</span></li>
+      <li><b>Test items in the workspace</b><span>Validate in the Fabric portal</span></li>
+      <li><b>Manual portal validation</b><span>Make any manual amendments</span></li>
+      <li><b>Same DEV workspace as the other modes</b><span>All edits converge here</span></li>
+    </ul>
+    <div class="st-f"><b>Live testing ground</b>Your sandbox for validation</div>
+  </div>
+  <div class="arrow">
+    <div class="hflow" style="color:var(--blue)">commit<svg viewBox="0 0 46 10"><path d="M1 5h42"/><path d="M39 1.5L43.5 5 39 8.5"/></svg></div>
+    <div class="hflow back dash" style="color:var(--orange)"><svg viewBox="0 0 46 10"><path d="M1 5h42"/><path d="M39 1.5L43.5 5 39 8.5"/></svg>revert</div>
+  </div>
+  <div class="card stage" style="--c:var(--blue)">
+    <div class="st-h"><div class="st-i"><svg class="ic"><use href="#i-branch"/></svg></div><div><div class="st-n">Azure DevOps</div><span class="st-t">dev branch</span></div></div>
+    <ul class="items">
+      <li><b>Workspace state commit</b><span>Captures the full workspace state</span></li>
+      <li><b>Versioned safety net</b><span>Every commit is reversible</span></li>
+      <li><b>Diff review and history</b><span>Compare changes, review history</span></li>
+      <li><b>Revert any commit</b><span>Roll DEV back to any version</span></li>
+    </ul>
+    <div class="st-f"><b>Full commit history</b>Your complete safety net</div>
+  </div>
+  <div class="arrow">
+    <div class="hflow" style="color:var(--purple)">pull<br>request<svg viewBox="0 0 46 10"><path d="M1 5h42"/><path d="M39 1.5L43.5 5 39 8.5"/></svg></div>
+  </div>
+  <div class="card stage" style="--c:var(--purple)">
+    <div class="st-h"><div class="st-i"><svg class="ic"><use href="#i-branch"/></svg></div><div><div class="st-n">Azure DevOps</div><span class="st-t">prod branch</span></div></div>
+    <ul class="items">
+      <li><b>Promote by pull request</b><span>Dev to prod review workflow</span></li>
+      <li><b>Review changes</b><span>Validate before production</span></li>
+      <li><b>Prod settings persist</b><span>Schedules, endpoints and parameters stay intact</span></li>
+      <li><b>Controlled release process</b><span>Only reviewed changes are merged</span></li>
+    </ul>
+    <div class="st-f"><b>Updated only by pull request</b>Changes land through approval</div>
+  </div>
+  <div class="arrow">
+    <div class="hflow" style="color:var(--green)">sync<svg viewBox="0 0 46 10"><path d="M1 5h42"/><path d="M39 1.5L43.5 5 39 8.5"/></svg></div>
+  </div>
+  <div class="card stage" style="--c:#1b6e2c">
+    <div class="st-h"><div class="st-i"><svg class="ic"><use href="#i-layers"/></svg></div><div><div class="st-n">Fabric PROD</div><span class="st-t">workspace</span></div></div>
+    <ul class="items">
+      <li><b>Synced from the prod branch</b><span>After the pull request is merged</span></li>
+      <li><b>End-user workspace</b><span>Consumed by business users</span></li>
+      <li><b>Stable operational state</b><span>Trusted, reliable, monitored</span></li>
+      <li><b>No experimental authoring</b><span>Production use only</span></li>
+    </ul>
+    <div class="st-f"><b>Live in production</b>Reliable for your users</div>
+  </div>
+</section>
+
+<section class="lower">
+  <div class="card panel">
+    <h3><svg class="ic"><use href="#i-info"/></svg>How it works: file-first editing</h3>
+    <ol class="steps">
+      <li><b>Pull</b> the Fabric items you need into your local folder with the Fabric extension.</li>
+      <li><b>Edit</b> the real files locally: TMDL, DAX, PBIR, pipeline JSON, notebooks, SQL and more.</li>
+      <li><b>Push</b> the changes back to the DEV workspace with the Fabric extension.</li>
+      <li><b>Test</b> everything in the Fabric DEV workspace and adjust manually if needed.</li>
+      <li><b>Commit</b> the workspace state to Azure DevOps (dev branch): versioned and reversible.</li>
+      <li><b>Promote</b> through a pull request (dev to prod), then sync the prod branch to Fabric PROD.</li>
+    </ol>
+    <div class="note"><b>Shared safety anchor.</b> Fabric Git commits capture the DEV workspace state after validation. You can review history and revert DEV when needed.</div>
+  </div>
+  <div class="card panel best">
+    <h3><svg class="ic"><use href="#i-star"/></svg>Best for</h3>
+    <ul class="ticks">
+      <li>Large semantic model refactoring</li>
+      <li>Bulk or structured edits</li>
+      <li>Code-style reviews and diff workflows</li>
+      <li>Offline or low-connectivity work</li>
+      <li>Clean, auditable file history</li>
+      <li>Teams that prefer file-based workflows</li>
+    </ul>
+    <div class="needs"><b>Needs only:</b> Fabric extension, Git.<i>No CLI or MCP server required.</i></div>
+  </div>
+</section>
+<!-- The renderer reads data-h to size the screenshot to the full page height. -->
+<script>document.documentElement.setAttribute('data-h', Math.ceil(document.documentElement.getBoundingClientRect().height));</script>
+</body>
+</html>

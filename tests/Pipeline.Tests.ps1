@@ -125,7 +125,7 @@ Describe 'Pipeline check: a correct definition' {
         $r.Text | Should -Match 'PD001'
     }
 
-    It 'takes both inventory lists as one comma-separated value, as the documented -File command passes them (Canary finding)' {
+    It 'takes both inventory lists as one comma-separated value, as the documented -File command passes them' {
         $twoInOne = "$($script:Inventory),$($script:Inventory)"
         $r = Invoke-PdCheck @{ Path = (Join-Path $script:Fx 'valid-api.json'); TargetWorkspaceId = $script:Target; InventoryPath = $twoInOne }
         $r.Result | Should -Be 'PASS' -Because $r.Text
@@ -144,7 +144,7 @@ Describe 'Pipeline check: a correct definition' {
         $script:InstallerText | Should -Not -Match ([regex]::Escape('-InventoryPath "<items.json>","<connections.json>"'))
     }
 
-    It 'blocks an id property that holds a placeholder or a name instead of a GUID or an expression: <Case> (Canary finding)' -TestCases @(
+    It 'blocks an id property that holds a placeholder or a name instead of a GUID or an expression: <Case>' -TestCases @(
         @{ Case = 'SQL endpoint id placeholder'; Change = { param($def) $def.properties.activities[2].typeProperties.sqlEndpointId = 'UNRESOLVED-sql-endpoint-id' } }
         @{ Case = 'connection placeholder';      Change = { param($def) $def.properties.activities[2].externalReferences.connection = '<connection-id>' } }
         @{ Case = 'notebook given by name';      Change = { param($def) $def.properties.activities[0].typeProperties.notebookId = 'Load orders notebook' } }
@@ -426,14 +426,79 @@ Describe 'References are checked for identity and item type' {
         $r.Text | Should -Match '\[unchecked\] PD086 Lookup:.*artifactId .*Warehouse'
     }
 
-    It 'still accepts the supported variants: <Case>' -TestCases @(
-        @{ Case = 'the id in upper case'; Set = { @{ 'CopyJob|typeProperties.copyJobId' = $script:Id.CopyJob.ToUpperInvariant() } } }
-        @{ Case = 'the id taken from a Variable Library value'; Set = { @{ 'Refresh|typeProperties.sqlEndpointId' = '@pipeline().libraryVariables.schema' } } }
-        @{ Case = 'the id as an Expression object'; Set = { @{ 'Refresh|typeProperties.sqlEndpointId' = [ordered]@{ value = "@pipeline().parameters.EndpointId"; type = 'Expression' }; 'properties|parameters' = [ordered]@{ EndpointId = [ordered]@{ type = 'string' } } } } }
-    ) {
-        param($Case, $Set)
-        $r = Invoke-PdRefs (New-PdReferences 'refs-variant.json' (& $Set)) $script:FullInventory
+    It 'still passes a literal id written in upper case' {
+        $r = Invoke-PdRefs (New-PdReferences 'refs-variant.json' @{ 'CopyJob|typeProperties.copyJobId' = $script:Id.CopyJob.ToUpperInvariant() }) $script:FullInventory
         $r.Result | Should -Be 'PASS' -Because $r.Text
+    }
+
+    It 'the three outcomes: verified literal PASS, wrong-type literal BLOCKED, dynamic @pipeline() reference UNCHECKED' {
+        $pass = Invoke-PdRefs (Join-Path $script:Base 'refs-ok.json') $script:FullInventory
+        $pass.Result | Should -Be 'PASS' -Because $pass.Text
+        $pass.Exit | Should -Be 0
+        $pass.Text | Should -Not -Match 'PD088'
+        $blocked = Invoke-PdRefs (New-PdReferences 'refs-three-blocked.json' @{ 'Refresh|typeProperties.sqlEndpointId' = $script:Id.Lakehouse }) $script:FullInventory
+        $blocked.Result | Should -Be 'BLOCKED' -Because $blocked.Text
+        $blocked.Exit | Should -Be 1
+        $blocked.Text | Should -Match '\[block\] PD084 Refresh:typeProperties\.sqlEndpointId'
+        $dynamic = Invoke-PdRefs (New-PdReferences 'refs-three-dynamic.json' @{ 'Refresh|typeProperties.sqlEndpointId' = '@pipeline().parameters.EndpointId'; 'properties|parameters' = [ordered]@{ EndpointId = [ordered]@{ type = 'string' } } }) $script:FullInventory
+        $dynamic.Result | Should -Be 'UNCHECKED' -Because $dynamic.Text
+        $dynamic.Exit | Should -Be 3
+        $dynamic.Text | Should -Match '\[unchecked\] PD088 Refresh:typeProperties\.sqlEndpointId .*SQLEndpoint'
+        $dynamic.Text | Should -Not -Match '\[block\]'
+    }
+
+    It 'a dynamic reference is UNCHECKED, never PASS: <Case>' -TestCases @(
+        @{ Case = 'an item id from a Variable Library value'; Where = 'Refresh:typeProperties\.sqlEndpointId'; Set = { @{ 'Refresh|typeProperties.sqlEndpointId' = '@pipeline().libraryVariables.schema' } } }
+        @{ Case = 'an item id as an Expression object'; Where = 'Refresh:typeProperties\.sqlEndpointId\.value'; Set = { @{ 'Refresh|typeProperties.sqlEndpointId' = [ordered]@{ value = '@pipeline().parameters.EndpointId'; type = 'Expression' }; 'properties|parameters' = [ordered]@{ EndpointId = [ordered]@{ type = 'string' } } } } }
+        @{ Case = 'an expression that holds a GUID of the right type'; Where = 'Notebook:typeProperties\.notebookId'; Set = { @{ 'Notebook|typeProperties.notebookId' = "@concat('', '$($script:Id.Notebook)')" } } }
+        @{ Case = 'an interpolated string'; Where = 'CopyJob:typeProperties\.copyJobId'; Set = { @{ 'CopyJob|typeProperties.copyJobId' = '@{pipeline().libraryVariables.schema}' } } }
+        @{ Case = 'a connection'; Where = 'Refresh:externalReferences\.connection'; Set = { @{ 'Refresh|externalReferences.connection' = '@pipeline().libraryVariables.schema' } } }
+        @{ Case = 'the pipeline of ExecutePipeline'; Where = 'Execute:typeProperties\.pipeline\.referenceName'; Set = { @{ 'Execute|typeProperties.pipeline.referenceName' = '@pipeline().libraryVariables.schema' } } }
+        @{ Case = 'a workspace other than the running one'; Where = 'Notebook:typeProperties\.workspaceId'; Set = { @{ 'Notebook|typeProperties.workspaceId' = '@pipeline().libraryVariables.schema' } } }
+    ) {
+        param($Case, $Where, $Set)
+        $r = Invoke-PdRefs (New-PdReferences 'refs-dynamic.json' (& $Set)) $script:FullInventory
+        $r.Result | Should -Be 'UNCHECKED' -Because $r.Text
+        $r.Exit | Should -Be 3
+        $r.Text | Should -Match "\[unchecked\] PD088 $Where "
+        @($r.Lines | Where-Object { $_ -match 'PD088' }).Count | Should -Be 1 -Because 'one line per dynamic reference'
+        $r.Text | Should -Not -Match '\[block\]'
+    }
+
+    It 'the same dynamic reference is UNCHECKED without an inventory and in the Git format too' {
+        $p = Join-Path $script:Base 'refs-three-dynamic.json'
+        $none = Invoke-PdCheck @{ Path = $p; TargetWorkspaceId = $script:Target }
+        $none.Result | Should -Be 'UNCHECKED'
+        $none.Text | Should -Match '\[unchecked\] PD088 Refresh:typeProperties\.sqlEndpointId'
+        $git = Invoke-PdCheck @{ Path = $p; Format = 'Git' }
+        $git.Result | Should -Be 'UNCHECKED' -Because $git.Text
+        $git.Text | Should -Match '\[unchecked\] PD088 Refresh:typeProperties\.sqlEndpointId'
+    }
+
+    It 'a wrong-type literal beside a dynamic reference is BLOCKED, and both are listed' {
+        $p = New-PdReferences 'refs-blocked-and-dynamic.json' @{ 'Refresh|typeProperties.sqlEndpointId' = $script:Id.Lakehouse; 'Notebook|typeProperties.notebookId' = '@pipeline().libraryVariables.schema' }
+        $r = Invoke-PdRefs $p $script:FullInventory
+        $r.Result | Should -Be 'BLOCKED' -Because $r.Text
+        $r.Exit | Should -Be 1
+        $r.Text | Should -Match '\[block\] PD084 Refresh:typeProperties\.sqlEndpointId'
+        $r.Text | Should -Match '\[unchecked\] PD088 Notebook:typeProperties\.notebookId'
+        $r.Text | Should -Match 'RESULT: BLOCKED \(1 blocking, 1 unchecked'
+    }
+
+    It 'NEGATIVE CONTROL: the running workspace (@pipeline().DataFactory) is not a dynamic reference to verify' {
+        foreach ($form in '@pipeline().DataFactory', '@{pipeline().DataFactory}') {
+            $r = Invoke-PdRefs (New-PdReferences 'refs-datafactory.json' @{ 'Notebook|typeProperties.workspaceId' = $form }) $script:FullInventory
+            $r.Result | Should -Be 'PASS' -Because $r.Text
+            $r.Text | Should -Not -Match 'PD088'
+        }
+        $obj = Invoke-PdRefs (New-PdReferences 'refs-datafactory-obj.json' @{ 'Notebook|typeProperties.workspaceId' = [ordered]@{ value = '@pipeline().DataFactory'; type = 'Expression' } }) $script:FullInventory
+        $obj.Result | Should -Be 'PASS' -Because $obj.Text
+    }
+
+    It 'a dynamic reference in an unchanged activity of the current definition is not reported again' {
+        $p = Join-Path $script:Base 'refs-three-dynamic.json'
+        $r = Invoke-PdCheck @{ Path = $p; CurrentPath = $p; TargetWorkspaceId = $script:Target; InventoryPath = $script:FullInventory }
+        $r.Text | Should -Not -Match 'PD088 Refresh'
     }
 
     It 'reads the type from a saved API answer and compares it without regard to letter case' {
@@ -456,11 +521,13 @@ Describe 'References are checked for identity and item type' {
         $r.Text | Should -Match 'PD084 Refresh:typeProperties\.sqlEndpointId\.value .*is a Lakehouse, not a SQLEndpoint'
     }
 
-    It 'says how many references are expressions, because their value cannot be compared offline' {
+    It 'lists every dynamic reference with its place, and the result line counts them' {
         $p = New-PdReferences 'refs-expr-count.json' @{ 'Refresh|typeProperties.sqlEndpointId' = '@pipeline().libraryVariables.schema'; 'Notebook|typeProperties.notebookId' = '@pipeline().libraryVariables.schema' }
         $r = Invoke-PdRefs $p $script:FullInventory
-        $r.Result | Should -Be 'PASS' -Because $r.Text
-        $r.Text | Should -Match '\[info\] PD088 properties - 2 item or connection reference\(s\) are expressions'
+        $r.Result | Should -Be 'UNCHECKED' -Because $r.Text
+        @($r.Lines | Where-Object { $_ -match '\[unchecked\] PD088' }).Count | Should -Be 2
+        $r.Text | Should -Not -Match '\[info\] PD088'
+        $r.Text | Should -Match 'RESULT: UNCHECKED \(0 blocking, 2 unchecked'
     }
 }
 

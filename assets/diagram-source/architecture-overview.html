@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<!--
+  Source of assets/architecture-overview.png (the cover at the top of the README). Render it with Render-Diagrams.ps1; see README.md.
+  Every figure mirrors the installer: 54 agents (3 + 8 + 43), 11 custom skills (5 Fabric + 6 PBIVIZ), the tools of README section 2.4.
+  The specialists per Team Lead are listed in ../agent-organisation-source/agent-organisation.html. No third-party logo is stored here.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fabric Agentic Workspace - overview</title>
+<link rel="stylesheet" href="diagram.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-agent" viewBox="0 0 24 24"><rect x="4.5" y="7" width="15" height="11" rx="4"/><path d="M12 7V4.5"/><circle cx="9.3" cy="12.4" r="1"/><circle cx="14.7" cy="12.4" r="1"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.4l6.6 2.6v5.3c0 4.1-2.8 7.4-6.6 8.9-3.8-1.5-6.6-4.8-6.6-8.9V6z"/><path d="M9.2 12l2 2 3.8-4.1"/></symbol>
+    <symbol id="i-clipboard" viewBox="0 0 24 24"><rect x="5.6" y="5" width="12.8" height="15.4" rx="2"/><path d="M9.4 3.6h5.2v2.8H9.4z"/><path d="M8.8 12.8l2.1 2.1 4.3-4.4"/></symbol>
+  </defs>
+</svg>
+
+<header class="cover-head">
+  <div>
+    <h1 class="title">Fabric Agentic Workspace &mdash; One-Click Setup</h1>
+    <p class="sub">A hierarchical, tool-aware GitHub Copilot agent system for Microsoft Fabric and Power BI.</p>
+  </div>
+  <div class="aside">Community project<br>Not affiliated with Microsoft</div>
+</header>
+
+<section class="org">
+  <div class="abs master">
+    <!-- copilot-icon.png is supplied by the renderer from the local VS Code install and is not stored in the repository. -->
+    <div class="mlogo"><img src="copilot-icon.png" alt="" onerror="this.parentNode.className += ' no-icon'; this.remove();"><svg class="ic"><use href="#i-agent"/></svg></div>
+    <div><div class="mname">Fabric Workspace Master</div><div class="msub">Primary contact · Orchestrator · Outcome owner</div></div>
+  </div>
+  <div class="wire" style="left:459.25px; top:78px; width:1.5px; height:118px;"></div>
+  <div class="wire" style="left:300px; top:96.25px; width:320px; height:1.5px;"></div>
+  <div class="wire" style="left:299.25px; top:97px; width:1.5px; height:19px;"></div>
+  <div class="wire" style="left:619.25px; top:97px; width:1.5px; height:19px;"></div>
+  <div class="abs card exec" style="left:160px;"><div class="badge"><svg class="ic"><use href="#i-shield"/></svg></div>Solution Architect</div>
+  <div class="abs card exec" style="left:480px;"><div class="badge"><svg class="ic"><use href="#i-clipboard"/></svg></div>Integration QA &amp; Change&nbsp;Controller</div>
+</section>
+
+<section class="leads">
+  <div class="eyebrow">8 Team Leads</div>
+  <div class="grid">
+    <div class="card lead" style="--c:#2b8a3e"><b>Semantic Model</b><span>6 specialists</span></div>
+    <div class="card lead" style="--c:#c69200"><b>Reporting</b><span>6 specialists</span></div>
+    <div class="card lead" style="--c:#1f6fd1"><b>Data Engineering</b><span>8 specialists</span></div>
+    <div class="card lead" style="--c:#0b5c6b"><b>Administration &amp; Governance</b><span>3 specialists</span></div>
+    <div class="card lead" style="--c:#6f42c1"><b>ALM &amp; DevOps</b><span>5 specialists</span></div>
+    <div class="card lead" style="--c:#9b59b6"><b>Applications &amp; Integration</b><span>3 specialists</span></div>
+    <div class="card lead" style="--c:#d9622b"><b>Capability Maintenance</b><span>6 specialists</span></div>
+    <div class="card lead" style="--c:#0e9aa7"><b>PBIVIZ Development</b><span>6 specialists</span></div>
+  </div>
+</section>
+<div class="foot"><div class="stem"></div><div class="pill">43 delegated specialists (hidden by default)</div></div>
+
+<section class="stats">
+  <div class="card stat"><div class="n">54</div><div class="l">agents</div><div class="d">3 executives + 8 Team Leads + 43 specialists</div></div>
+  <div class="card stat"><div class="n">11</div><div class="l">custom skills</div><div class="d">5 for Fabric + 6 for PBIVIZ</div></div>
+  <div class="card stat wide"><div class="n">2</div><div class="l">cloned skill repositories</div><div class="d">microsoft/skills-for-fabric<br>data-goblin/power-bi-agentic-development</div></div>
+  <div class="card stat"><div class="n">3</div><div class="l">working modes</div><div class="d">Local · Live · Hybrid, with one Git-governed delivery path</div></div>
+  <div class="card stat"><div class="n">2</div><div class="l">recommended CLIs</div><div class="d">Fabric CLI · Azure CLI</div></div>
+  <div class="card stat"><div class="n">6</div><div class="l">specialist CLIs</div><div class="d">pbir · Tabular Editor CLI · pbi-tools · sqlcmd · gh · az devops</div></div>
+  <div class="card stat"><div class="n">3</div><div class="l">MCP integrations</div><div class="d">Fabric · Power BI modeling · Microsoft Learn</div></div>
+</section>
+<!-- The renderer reads data-h to size the screenshot to the full page height. -->
+<script>document.documentElement.setAttribute('data-h', Math.ceil(document.documentElement.getBoundingClientRect().height));</script>
+</body>
+</html>

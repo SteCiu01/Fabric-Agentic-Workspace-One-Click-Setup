@@ -274,7 +274,7 @@ Describe 'Installer source: manifest ownership and purge containment (static)' {
     }
 }
 
-Describe 'Final step: a commit only when Git accepts the workspace folder (Canary finding)' {
+Describe 'Final step: a commit only when Git accepts the workspace folder' {
 
     BeforeAll {
         . (Get-InstallerFunctionLoader 'Test-GitWorkTreeUsable')
@@ -332,7 +332,7 @@ Describe 'Final step: a commit only when Git accepts the workspace folder (Canar
         Test-GitWorkTreeUsable -Path $d | Should -BeFalse
     }
 
-    It 'real Git: a repository Git has initialised is usable, every time (Canary finding)' -Skip:(-not (Get-Command git -CommandType Application -ErrorAction SilentlyContinue)) {
+    It 'real Git: a repository Git has initialised is usable, every time' -Skip:(-not (Get-Command git -CommandType Application -ErrorAction SilentlyContinue)) {
         $d = Join-Path $script:GitDir 'real repository'
         New-Item -ItemType Directory -Path $d | Out-Null
         & git init -q $d 2>$null

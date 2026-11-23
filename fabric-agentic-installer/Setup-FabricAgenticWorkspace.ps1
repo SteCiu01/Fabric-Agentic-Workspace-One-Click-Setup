@@ -2949,13 +2949,15 @@ $pipelineCheckScript = @'
                          An item reference must name an entry of the type its property takes (sqlEndpointId a
                          SQLEndpoint, notebookId a Notebook, ...); the type is read from the entry's "type",
                          never guessed. An entry without a type, a list that is missing or one page of
-                         several is UNCHECKED.
+                         several is UNCHECKED. So is a reference written as an expression: its value
+                         exists only when the pipeline runs (@pipeline().DataFactory as the workspace is
+                         the one exception: it is the running workspace).
     -Format              Api (default: a definition for createItem or updateDefinition) or
                          Git (a file in a Git-connected folder, where the all-zero workspace id is expected).
     -AllowRecreateTables accept recreateTables = true on a SQL analytics endpoint refresh (destructive).
     -AsJson              print the full result as JSON.
 
-    RESULT   PASS       exit 0   no blocking finding and every reference could be checked
+    RESULT   PASS       exit 0   no blocking finding, and every reference was found with the type its property takes
              UNCHECKED  exit 3   no blocking finding, but some checks could not be made (they are listed)
              BLOCKED    exit 1   at least one blocking finding
                         exit 2   the input could not be read
@@ -3372,7 +3374,7 @@ foreach ($k in $declLib) {
 
 # ---------------------------------------------------------------- bindings: GUIDs and credentials
 $bindings = New-Object System.Collections.Generic.List[object]
-$uncheckedRefs = 0; $uncheckedForeign = 0; $noTarget = 0; $expressionRefs = 0
+$uncheckedRefs = 0; $uncheckedForeign = 0; $noTarget = 0
 $itemKeys = @('notebookId', 'pipelineId', 'dataflowId', 'datasetId', 'sqlEndpointId', 'artifactId', 'lakehouseId', 'copyJobId', 'sparkJobDefinitionId', 'itemId', 'environmentId', 'functionSetId', 'libraryId', 'referenceName')
 $wsKeys = @('workspaceId', 'groupId')
 $secretKey = '(?i)^(password|pwd|secret|clientsecret|accountkey|accesskey|sastoken|sasuri|apikey|api_key|connectionstring|serviceprincipalkey|accesstoken|token)$'
@@ -3384,16 +3386,30 @@ function Test-PdLeafSet {
     foreach ($l in $Leaves) {
         # An id property must hold a GUID or an expression: a placeholder or a name would pass every GUID rule below.
         if ($l.kind -eq 'string' -and -not $Trusted) {
+            $idWhere = $l.where
             $idKey = ($l.where -split '\.')[-1] -replace '\[\d+\]$', ''
-            if ($idKey -ceq 'value' -and $l.where -match '(?:^|\.)([A-Za-z]+)\.value$') { $idKey = $Matches[1] }
-            $isIdProperty = ($l.where -match '(^|\.)externalReferences\.connection$') -or ($wsKeys -ccontains $idKey) -or ($itemKeys -ccontains $idKey -and $idKey -cne 'referenceName')
+            if ($idKey -ceq 'value' -and $l.where -match '^(.*?([A-Za-z]+))\.value$') { $idWhere = $Matches[1]; $idKey = $Matches[2] }
+            $isConnId = $idWhere -match '(^|\.)externalReferences\.connection$'
+            $isWsId = $wsKeys -ccontains $idKey
+            $isIdProperty = $isConnId -or $isWsId -or ($itemKeys -ccontains $idKey -and $idKey -cne 'referenceName')
             $idText = [string]$l.value
             if ($isIdProperty -and -not $idText.StartsWith('@') -and $idText -notmatch "^$($script:PdGuid)$") {
                 $shown = if ($idText.Length -gt 60) { $idText.Substring(0, 60) + '...' } else { $idText }
                 Add-PdFinding block 'PD079' "${Owner}:$($l.where)" "'$idKey' must be a GUID or an expression; '$shown' is neither (a placeholder, a name or an empty value)"
                 continue
             }
-            if ($isIdProperty -and ($wsKeys -cnotcontains $idKey) -and $idText.StartsWith('@') -and -not $idText.StartsWith('@@')) { $script:expressionRefs++ }
+            # A reference written as an expression has a value only when the pipeline runs: what it names, and
+            # of which type, cannot be established here. That is UNCHECKED, never a silent pass.
+            if (($isIdProperty -or $idWhere -match '(^|\.)pipeline\.referenceName$') -and $idText.StartsWith('@') -and -not $idText.StartsWith('@@')) {
+                if ($isWsId) {
+                    if ($idText -cnotmatch '^@\{?\s*pipeline\(\)\??\.DataFactory\s*\}?$') { Add-PdFinding unchecked 'PD088' "${Owner}:$($l.where)" "'$idKey' is an expression other than @pipeline().DataFactory (the running workspace): its value exists only when the pipeline runs and was not compared with the target workspace" }
+                }
+                elseif ($isConnId) { Add-PdFinding unchecked 'PD088' "${Owner}:$($l.where)" 'the connection is an expression: its value exists only when the pipeline runs, so the connection could not be verified' }
+                else {
+                    $wanted = Get-PdExpectedType -Key $idKey -Where $idWhere -ByWhere $byWhere
+                    Add-PdFinding unchecked 'PD088' "${Owner}:$($l.where)" "'$idKey' is an expression: its value exists only when the pipeline runs, so neither the item nor its type$(if ($wanted) { " ($wanted)" }) could be verified"
+                }
+            }
         }
         if ($l.kind -ne 'string' -or -not $l.value) { continue }
         $key = ($l.where -split '\.')[-1] -replace '\[\d+\]$', ''
@@ -3491,7 +3507,6 @@ Test-PdLeafSet -Leaves $topLeaves -Owner 'properties' -Trusted $false
 if ($Format -eq 'Api') {
     if ($script:noTarget) { Add-PdFinding unchecked 'PD002' 'properties' "$($script:noTarget) workspace reference(s) were not compared: no -TargetWorkspaceId" }
     if ($script:uncheckedRefs) { Add-PdFinding unchecked 'PD077' 'properties' "$($script:uncheckedRefs) item or connection reference(s) were not checked: no -InventoryPath" }
-    if ($script:expressionRefs) { Add-PdFinding info 'PD088' 'properties' "$($script:expressionRefs) item or connection reference(s) are expressions: their value exists only when the pipeline runs and was not compared with the inventory" }
     if ($script:uncheckedForeign) { Add-PdFinding unchecked 'PD078' 'properties' "$($script:uncheckedForeign) item reference(s) point into another workspace and could not be checked" }
     if ($source -and $target -and $source -ne $target -and -not $current) { Add-PdFinding block 'PD082' 'properties' 'a definition read from another workspace needs the target''s current definition (-CurrentPath) for comparison' }
 }
@@ -7852,7 +7867,7 @@ Write-Host "       only what you need, do your mixed work, then re-pull (or" -Fo
 Write-Host "       clean up local) before a new job so local = live workspace" -ForegroundColor DarkGray
 Write-Host "       and you avoid drift." -ForegroundColor DarkGray
 Write-Host ""
-Write-Host "  Diagrams: assets\workflow-mode-local|live|hybrid.svg  (see README)." -ForegroundColor DarkGray
+Write-Host "  Diagrams of the three modes: README section 2.2." -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "  Git versioning: this workspace is initialized with Git, so every" -ForegroundColor White
 Write-Host "  local change is tracked with full history and can be reverted." -ForegroundColor White
@@ -9859,7 +9874,9 @@ Read the next section before using it.
   has changed how it resolves the all-zero GUID for this activity is not documented
   (UNVERIFIED); re-check before replacing the expression.
 - `sqlEndpointId` and the connection stay specific to one workspace. Take them from Variable
-  Library values per environment.
+  Library values per environment. The offline check then answers `UNCHECKED` for them (the
+  value exists only at run time): confirm each value set against the inventory of its
+  workspace, and say so in the result.
 
 ---
 
@@ -10169,7 +10186,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .github/agent-docs/Test-Pipe
 
 | Result | Exit code | Meaning |
 |--------|-----------|---------|
-| `PASS` | 0 | no blocking finding and every reference could be checked |
+| `PASS` | 0 | no blocking finding, and every reference was found with the type its property takes |
 | `UNCHECKED` | 3 | no blocking finding, but some checks could not be made; they are listed |
 | `BLOCKED` | 1 | at least one blocking finding |
 | - | 2 | the input could not be read |
@@ -10196,8 +10213,13 @@ and `artifactId` Lakehouse under a `Lakehouse` linked service.
 It answers `UNCHECKED`, never `PASS`, when the type cannot be confirmed: the inventory entry
 has no `type`, the item or the connection list is missing, a saved list is one page of several
 (it still holds a continuation token), or the property is one whose item type the contract
-does not define (`itemId`, `artifactId` under another linked service). A reference written as
-an expression has no value offline; the check counts those and says so.
+does not define (`itemId`, `artifactId` under another linked service). The same holds for a
+reference written as an expression (a parameter, a variable, a Variable Library value): it
+has no value offline, so each one is listed as `PD088` with its place and the result is
+`UNCHECKED`. The one exception is `@pipeline().DataFactory` as the workspace id, which is the
+running workspace by definition. Report an `UNCHECKED` result as it is; never restate it as a
+pass. What turns it into evidence is the value itself: the Variable Library value set or the
+parameter default, compared with the inventory of the workspace it is for.
 
 A `PASS` is not proof that the pipeline runs. It says that nothing checkable offline is wrong.
 
@@ -10345,7 +10367,7 @@ $cliPolicySkillPath = "$rootPath\.github\skills\fabric-cli-policy\SKILL.md"
 $cliPolicyContent = @'
 ---
 name: fabric-cli-policy
-description: "CLI decision policy for Fabric/Power BI work, including the PBIR report edit policy (pbir first; direct JSON only as an approved exception), the SQL route and permission classes, and the evidence states for remote MCP servers (Fabric IQ, Fabric Data Warehouse). Read this BEFORE any terminal CLI or REST API task. Triggers: fabric cli, fab, fab api, call Fabric API, run notebook, run job, export item, import item, deploy item, onelake copy, table load, az rest, sqlcmd, run SQL, executeSQL, Fabric IQ MCP, SQL endpoint MCP, capacity, governance, workspace item CRUD, pbir, PBIR edit."
+description: "CLI decision policy for Fabric/Power BI work, including the PBIR report edit policy (pbir first; direct JSON only as an approved exception), the SQL route and permission classes, and the evidence states for remote MCP servers (Fabric IQ, Fabric Data Warehouse). Read this BEFORE any terminal CLI or REST API task. Triggers: fabric cli, fab, fab api, call Fabric API, run notebook, run job, export item, import item, deploy item, onelake copy, table load, az rest, sqlcmd, run SQL, Warehouse MCP, Fabric IQ MCP, SQL endpoint MCP, capacity, governance, workspace item CRUD, pbir, PBIR edit."
 ---
 
 # Fabric CLI Policy -- prefer `fab`, fall back to `az`
@@ -10485,12 +10507,19 @@ Rules:
 Route, in this order, for S1 to S3 against a Warehouse or SQL analytics endpoint:
 1. **`sqlcmd -G`** when tool-status says `sqlcmd` is found and TDS is reachable. It is generally
    available, scriptable and leaves a script file as evidence; S3 always runs from a script file.
-2. **Fabric Data Warehouse MCP `executeSQL`** when it is configured, callable in this session and
+2. **Fabric Data Warehouse MCP** when it is configured, callable in this session and
    you hold its grant (033 only): see the next section. It is in preview and runs whatever
    statement it is given, so the class rules above apply unchanged. Good for S1 and S2 when TDS is
-   blocked; for S3 only when route 1 is impossible and the approval names this route. To name
-   the route, the approval request you return says that the statement will run through
-   `executeSQL`.
+   blocked; for S3 only when route 1 is impossible and the approval names this route.
+   **Discover the tool, never assume it.** At this step read the tools that server lists in
+   this session (its `tools/list` answer; in VS Code, your tool list for that server) and call
+   only a listed tool whose description and input schema say it runs a T-SQL statement. A name
+   from documentation, a skill or an earlier session is not evidence.
+   - No such tool listed: the route is not callable. Say so and take route 3.
+   - More than one candidate, or a tool whose purpose is unclear: return NEEDS INPUT with the
+     names and descriptions you saw. Do not pick one, and do not try them in turn.
+   - To name the route, the approval request you return quotes the server and the tool name
+     exactly as listed.
 3. **Alternates** when neither works: a Script activity in a pipeline (`fab job run`), a notebook
    with Spark SQL for lakehouse tables (not T-SQL), or the portal SQL editor run by the user.
    `az` only supplies a token for a non-Fabric audience; it is not a SQL route by itself.
@@ -10507,8 +10536,8 @@ Microsoft Learn on 2026-11-18.
 |---|---|---|
 | Status | generally available | **preview** |
 | Does | finds Power BI reports and semantic models, reads their metadata, searches values, runs DAX the calling agent writes | runs a T-SQL statement against a Warehouse or SQL analytics endpoint |
-| Does not | answer in natural language by itself; create or change anything; cover dashboards, paginated reports, apps, ontologies or data agents | offer metadata, history or schema tools: it has one tool |
-| Tools | `DiscoverArtifacts`, `ResolveFabricItem`, `GetReportMetadata`, `GetSemanticModelSchema`, `ValueSearch`, `ExecuteQuery` (read `tools/list` at run time) | `executeSQL` on Microsoft's page; both endpoints listed it as `execute_query` on 2026-11-20. Use the name in your tool list |
+| Does not | answer in natural language by itself; create or change anything; cover dashboards, paginated reports, apps, ontologies or data agents | document metadata, history or schema tools: rely only on what the server lists |
+| Tools | `DiscoverArtifacts`, `ResolveFabricItem`, `GetReportMetadata`, `GetSemanticModelSchema`, `ValueSearch`, `ExecuteQuery` (read `tools/list` at run time) | no fixed name: the tool that runs a T-SQL statement is taken from the server's `tools/list` answer at the step that needs it (the published name and the listed name have differed) |
 | Writes | no (read-only) | **yes**, whatever the signed-in user may run, including DDL and DML |
 | Endpoint | `https://fabriciq.svc.cloud.microsoft/v1/mcp/fabriciq` (private links: `https://api.fabric.microsoft.com/v1/mcp/fabriciq`) | `https://api.fabric.microsoft.com/v1/mcp/dataPlane/sqlEndpoint` (global) or `.../v1/mcp/dataPlane/workspaces/<workspace-id>/items/<item-id>/sqlEndpoint` (one item) |
 | Sign-in | the user's Microsoft Entra account, delegated; no service principal; RLS and OLS apply | the user's Microsoft account; Fabric and SQL permissions apply |
@@ -12802,10 +12831,10 @@ $agentKnowledge = @{
             @{ ref = "$MC/SQLDW-CONSUMPTION-CORE.md"; why = 'read-only query patterns' },
             @{ ref = "$CS/fabric-cli-policy/SKILL.md"; why = 'SQL permission classes S0-S4, the route order (sqlcmd, Fabric Data Warehouse MCP, alternates) and the TDS fallback ladder' }
         )
-        playbook = @('Read existing schema (INFORMATION_SCHEMA / sys views) before DDL.', 'Classify every statement first (fabric-cli-policy, SQL work): S1 metadata read and S2 data read run inside your WORK ORDER; S3 (any statement that changes data or schema) is an environment-changing action and runs only from a script the user has seen, with the approval token in your WORK ORDER; S4 administration is not yours - return it for the 040 team.', 'Author idempotent scripts (IF NOT EXISTS / CREATE OR ALTER), parameterized by environment.', 'Execute with sqlcmd -G when tool-status says found and TDS is reachable. The Fabric Data Warehouse MCP (`executeSQL`, preview) is the second route and only when it is callable in this session (its tool is in your tool list - tool-status `fabricDataWarehouseMcp.configured` alone is not enough): it runs whatever statement it is given, so the same classes apply, and S3 goes through it only when sqlcmd is impossible and the approval names that route. Otherwise return the script with the pipeline/portal fallback.')
-        validate = @('Script executes without error; row counts or object existence confirmed; no cross-database references unsupported by Warehouse.', 'The result names the class of each statement run (S1-S3), the route used, and for the MCP route the state reached (configured / callable / signed in / executed).')
-        tools = @('sqlcmd (path from tool-status); fabric-dw-global/* or fabric-dw-item/* (`executeSQL`) only when the user configured that server and it is callable; Fabric MCP/* for warehouse items; fab api for endpoints. If 1433 is blocked on THIS machine, use the fabric-cli-policy fallback and say so.')
-        avoid = @('Assuming a TDS block is global.', 'Unsupported T-SQL features (check the core doc).', 'Treating a SQL tool being present as permission to change data.', 'Adding the Fabric Data Warehouse MCP server to mcp.json yourself, or calling it configured, connected or available without the evidence for that state.')
+        playbook = @('Read existing schema (INFORMATION_SCHEMA / sys views) before DDL.', 'Classify every statement first (fabric-cli-policy, SQL work): S1 metadata read and S2 data read run inside your WORK ORDER; S3 (any statement that changes data or schema) is an environment-changing action and runs only from a script the user has seen, with the approval token in your WORK ORDER; S4 administration is not yours - return it for the 040 team.', 'Author idempotent scripts (IF NOT EXISTS / CREATE OR ALTER), parameterized by environment.', 'Execute with sqlcmd -G when tool-status says found and TDS is reachable. The Fabric Data Warehouse MCP (preview) is the second route and only when it is callable in this session (its tools are in your tool list - tool-status `fabricDataWarehouseMcp.configured` alone is not enough). Its tool is discovered, never assumed: read what that server lists at this step and call only a listed tool whose description says it runs a T-SQL statement; none listed means the route is not callable, and more than one candidate or an unclear one is NEEDS INPUT with the names you saw. It runs whatever statement it is given, so the same classes apply, and S3 goes through it only when sqlcmd is impossible and the approval names that route. Otherwise return the script with the pipeline/portal fallback.')
+        validate = @('Script executes without error; row counts or object existence confirmed; no cross-database references unsupported by Warehouse.', 'The result names the class of each statement run (S1-S3), the route used, and for the MCP route the state reached (configured / callable / signed in / executed) and the tool name as the server listed it.')
+        tools = @('sqlcmd (path from tool-status); fabric-dw-global/* or fabric-dw-item/* (the tool that server lists for running T-SQL) only when the user configured that server and it is callable; Fabric MCP/* for warehouse items; fab api for endpoints. If 1433 is blocked on THIS machine, use the fabric-cli-policy fallback and say so.')
+        avoid = @('Assuming a TDS block is global.', 'Unsupported T-SQL features (check the core doc).', 'Treating a SQL tool being present as permission to change data.', 'Adding the Fabric Data Warehouse MCP server to mcp.json yourself, or calling it configured, connected or available without the evidence for that state.', 'Calling a Fabric Data Warehouse MCP tool by a name you remember or read somewhere instead of one the server listed in this session.')
     }
     'sql-database-agent' = @{
         skills = @(

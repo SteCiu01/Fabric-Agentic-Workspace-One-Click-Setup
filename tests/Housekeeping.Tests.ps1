@@ -452,7 +452,7 @@ Describe 'Restore and purge (recovery is restore-from-quarantine)' {
     It 'a fully cleaned task folder leaves with its marker' {
         @($script:RExec.moved | Where-Object { $_.class -eq 'Safe' }).Count | Should -Be 7
         @($script:RExec.moved | Where-Object { $_.class -eq 'Marker' }).Count | Should -Be 1
-        [long]@($script:RExec.moved | Where-Object { $_.class -eq 'Marker' })[0].bytes | Should -BeGreaterThan 0 -Because 'the execute log records the real size of the marker it moved (Canary finding)'
+        [long]@($script:RExec.moved | Where-Object { $_.class -eq 'Marker' })[0].bytes | Should -BeGreaterThan 0 -Because 'the execute log records the real size of the marker it moved'
         Test-Path -LiteralPath $script:R.T5 | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $script:R.T1 '.task.json') | Should -BeTrue -Because 'a task folder that still holds files keeps its marker'
     }
@@ -746,7 +746,7 @@ Describe 'Command line, as the agents run it (Windows PowerShell 5.1)' {
         Test-Path -LiteralPath (Join-Path $script:C.T1 'a.ps1') | Should -BeTrue
     }
 
-    It 'explains every protected file, and says that a flagged protected file stays (Canary finding)' {
+    It 'explains every protected file, and says that a flagged protected file stays' {
         # A file with a tell-tale name inside an open task: reported for rotation, but never a candidate.
         Set-HkFile (Join-Path $script:C.T3 'api-token-notes.txt') 'no secret value here'
         $p = Invoke-HkCli -Preview

@@ -240,7 +240,7 @@ Describe 'Launchers report a run that failed or never started' {
     }
 }
 
-Describe 'Installer text survives Windows PowerShell 5.1 (Canary finding)' {
+Describe 'Installer text survives Windows PowerShell 5.1' {
 
     # Windows PowerShell 5.1 reads a script without a byte order mark in the ANSI code page, so any
     # character outside ASCII reaches the generated agent files as two or three garbled characters.

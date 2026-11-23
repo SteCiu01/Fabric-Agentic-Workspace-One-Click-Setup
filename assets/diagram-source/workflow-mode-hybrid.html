@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<!--
+  Source of assets/workflow-mode-hybrid.png (README section 2.2, mode C). Render it with Render-Diagrams.ps1; see README.md.
+  The texts mirror README section 2.2 and 2.3. No third-party logo is stored here.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Working mode C - Hybrid</title>
+<link rel="stylesheet" href="diagram.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-agent" viewBox="0 0 24 24"><rect x="4.5" y="7" width="15" height="11" rx="4"/><path d="M12 7V4.5"/><circle cx="9.3" cy="12.4" r="1"/><circle cx="14.7" cy="12.4" r="1"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 4.2l8 4-8 4-8-4z"/><path d="M4 12.2l8 4 8-4"/><path d="M4 16.2l8 4 8-4"/></symbol>
+    <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="7" cy="6" r="2.1"/><circle cx="7" cy="18" r="2.1"/><circle cx="17" cy="8" r="2.1"/><path d="M7 8.1v7.8"/><path d="M17 10.1v.9a4 4 0 0 1-4 4H9.1"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.2"/><path d="M12 11.2v4.6"/><path d="M12 8.1h.01"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 4l2.4 5 5.4.7-4 3.8 1 5.4-4.8-2.6-4.8 2.6 1-5.4-4-3.8 5.4-.7z"/></symbol>
+  </defs>
+</svg>
+
+<header class="head">
+  <div class="eyebrow">Working mode C</div>
+  <h1 class="title">Hybrid</h1>
+  <p class="sub">Use local files and live tools together, then keep both edit paths aligned.</p>
+</header>
+
+<section class="band">
+  <!-- copilot-icon.png is supplied by the renderer from the local VS Code install and is not stored in the repository. -->
+  <div class="mlogo"><img src="copilot-icon.png" alt="" onerror="this.parentNode.className += ' no-icon'; this.remove();"><svg class="ic"><use href="#i-agent"/></svg></div>
+  <div class="who"><div class="mname">VS Code agents</div><div class="msub">Local files + live tools</div></div>
+  <div class="tools grid" style="--cols:3">
+    <div class="chip"><b>Fabric extension</b><span>Pull / edit / push local files</span></div>
+    <div class="chip"><b>Fabric MCP server</b><span>REST operations</span></div>
+    <div class="chip"><b>Power BI modeling MCP</b><span>XMLA + DAX EVALUATE</span></div>
+    <div class="chip"><b>fab CLI</b><span>Fabric control plane</span></div>
+    <div class="chip"><b>az CLI</b><span>Azure + SQL (TDS)</span></div>
+  </div>
+</section>
+
+<div class="link">
+  <div class="pair">
+    <div class="vflow" style="color:var(--blue)"><svg viewBox="0 0 12 46"><path d="M6 1v43"/><path d="M2 40l4 4.5 4-4.5"/></svg>push<br>write</div>
+    <div class="vflow" style="color:var(--green)"><svg viewBox="0 0 12 46"><path d="M6 45V2" stroke-dasharray="4 3"/><path d="M2 6l4-4.5 4 4.5"/></svg>pull<br>read</div>
+  </div>
+  <div class="hint">Toolset: the five tools above. One DEV workspace, both edit paths.</div>
+</div>
+
+<section class="flow">
+  <div class="card stage" style="--c:var(--green)">
+    <div class="st-h"><div class="st-i"><svg class="ic"><use href="#i-layers"/></svg></div><div><div class="st-n">Fabric DEV</div><span class="st-t">workspace</span></div></div>
+    <ul class="items">
+      <li><b>Receives local pushes and live edits</b></li>
+      <li><b>Edits converge in the same session</b></li>
+      <li><b>Single source of truth</b><span>For both paths</span></li>
+      <li><b>Portal validation</b><span>As needed</span></li>
+    </ul>
+    <div class="st-f"><b>Both paths converge</b>In the same DEV workspace</div>
+  </div>
+  <div class="arrow">
+    <div class="hflow" style="color:var(--blue)">commit<svg viewBox="0 0 46 10"><path d="M1 5h42"/><path d="M39 1.5L43.5 5 39 8.5"/></svg></div>
+    <div class="hflow back dash" style="color:var(--orange)"><svg viewBox="0 0 46 10"><path d="M1 5h42"/><path d="M39 1.5L43.5 5 39 8.5"/></svg>revert</div>
+  </div>
+  <div class="card stage" style="--c:var(--blue)">
+    <div class="st-h"><div class="st-i"><svg class="ic"><use href="#i-branch"/></svg></div><div><div class="st-n">Azure DevOps</div><span class="st-t">dev branch</span></div></div>
+    <ul class="items">
+      <li><b>One commit, both paths</b></li>
+      <li><b>Workspace state commit</b></li>
+      <li><b>Revert to any commit</b></li>
+      <li><b>Diff review and history</b><span>For all changes</span></li>
+    </ul>
+    <div class="st-f"><b>Full commit history</b>Complete safety net</div>
+  </div>
+  <div class="arrow">
+    <div class="hflow" style="color:var(--purple)">pull<br>request<svg viewBox="0 0 46 10"><path d="M1 5h42"/><path d="M39 1.5L43.5 5 39 8.5"/></svg></div>
+  </div>
+  <div class="card stage" style="--c:var(--purple)">
+    <div class="st-h"><div class="st-i"><svg class="ic"><use href="#i-branch"/></svg></div><div><div class="st-n">Azure DevOps</div><span class="st-t">prod branch</span></div></div>
+    <ul class="items">
+      <li><b>Promoted from dev by pull request</b></li>
+      <li><b>Review dev-to-prod changes</b></li>
+      <li><b>Prod settings persist</b><span>Schedules, endpoints and parameters stay intact</span></li>
+      <li><b>Controlled history</b><span>Only reviewed changes are merged</span></li>
+    </ul>
+    <div class="st-f"><b>Updated only by pull request</b>Changes land through approval</div>
+  </div>
+  <div class="arrow">
+    <div class="hflow" style="color:var(--green)">sync<svg viewBox="0 0 46 10"><path d="M1 5h42"/><path d="M39 1.5L43.5 5 39 8.5"/></svg></div>
+  </div>
+  <div class="card stage" style="--c:#1b6e2c">
+    <div class="st-h"><div class="st-i"><svg class="ic"><use href="#i-layers"/></svg></div><div><div class="st-n">Fabric PROD</div><span class="st-t">workspace</span></div></div>
+    <ul class="items">
+      <li><b>Synced from the prod branch</b></li>
+      <li><b>Live for end users</b></li>
+      <li><b>Operational workspace</b><span>Stable, trusted, monitored</span></li>
+      <li><b>No experimental authoring here</b></li>
+    </ul>
+    <div class="st-f"><b>Live in production</b>Reliable for your users</div>
+  </div>
+</section>
+
+<section class="lower">
+  <div class="card panel">
+    <h3><svg class="ic"><use href="#i-info"/></svg>How it works: local files and live tools together</h3>
+    <ol class="steps">
+      <li>Per session, <b>pull locally only the items you need</b>, then do mixed work: edit some files locally, touch others live.</li>
+      <li>Both edit paths converge on the <b>same DEV workspace</b> and follow the <b>same review</b> and promotion lifecycle.</li>
+      <li><b>Commit</b> the workspace state, review history, and revert if needed.</li>
+      <li><b>Promote</b> by pull request (dev to prod), keep prod settings intact, then <b>sync</b> the prod branch to the Fabric PROD workspace.</li>
+    </ol>
+    <div class="note rule"><b>Golden rule: keep local = live.</b> Re-pull from the live workspace before each new job so your local folder matches it exactly. This avoids drift.</div>
+    <div class="note"><b>Shared safety anchor.</b> Commit the validated DEV workspace state, review changes, and revert when needed.</div>
+  </div>
+  <div class="card panel best">
+    <h3><svg class="ic"><use href="#i-star"/></svg>Best for</h3>
+    <ul class="ticks">
+      <li>Day-to-day work that blends local file edits with live checks</li>
+      <li>Situations where some items are easier as files and others are better live</li>
+      <li>Comparing live data and validating changes</li>
+      <li>Iterative development across multiple item types</li>
+      <li>Teams that need both flexibility and control</li>
+    </ul>
+    <div class="needs"><b>Needs:</b> Fabric extension, Fabric MCP server, Power BI modeling MCP, fab CLI, az CLI.<i>All optional: mode A works without them, hybrid work needs them all.</i></div>
+  </div>
+</section>
+<!-- The renderer reads data-h to size the screenshot to the full page height. -->
+<script>document.documentElement.setAttribute('data-h', Math.ceil(document.documentElement.getBoundingClientRect().height));</script>
+</body>
+</html>

@@ -190,7 +190,7 @@ Describe 'Ensure-Python and Step 2 wiring (static)' {
     }
 }
 
-Describe 'Optional CLI detection: a warning on stderr is not a missing CLI (Canary D1)' {
+Describe 'Optional CLI detection: a warning on stderr is not a missing CLI' {
 
     BeforeAll {
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:Installer, [ref]$null, [ref]$null)

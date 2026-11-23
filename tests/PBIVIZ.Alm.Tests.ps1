@@ -2370,7 +2370,7 @@ export class Visual {}
     }
 }
 
-Describe 'Build isolation contains the SDK''s known side effects (Canary D2, final hardening)' {
+Describe 'Build isolation contains the SDK''s known side effects' {
 
     BeforeAll {
         function New-TIso {
@@ -2780,7 +2780,7 @@ Describe 'Stale build homes are swept only when their build has ended (final har
     }
 }
 
-Describe 'Archive-only promotions verify completely at the source revision (Canary D3)' {
+Describe 'Archive-only promotions verify completely at the source revision' {
 
     BeforeAll {
         # Prod starts without Bar; a validated Level 1 release of Bar on Dev reaches Prod through an
@@ -2860,7 +2860,7 @@ Describe 'Archive-only promotions verify completely at the source revision (Cana
     }
 }
 
-Describe 'Test-stage reconciliation keeps rejected content out of Prod (Canary D4)' {
+Describe 'Test-stage reconciliation keeps rejected content out of Prod' {
 
     It 'reconciles only the selected visual on Test through test-sync, keeps the rejected pair as history and promotes the unchanged release branch' {
         $r = New-TL3
@@ -2933,7 +2933,7 @@ Describe 'Test-stage reconciliation keeps rejected content out of Prod (Canary D
     }
 }
 
-Describe 'Gate results stay readable in Windows PowerShell 5.1 (Canary D11)' {
+Describe 'Gate results stay readable in Windows PowerShell 5.1' {
 
     It 'returns all seven gates as a plain array for PASS and BLOCKED results' {
         $r = New-TL3

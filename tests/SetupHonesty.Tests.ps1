@@ -223,7 +223,7 @@ Describe 'Vendor refresh: a clone Git refuses is kept, not called a stray folder
         $script:Raw | Should -Match "'Get-GitProbe', 'Format-GitProbe',"
     }
 
-    It 'the agent that runs the refresh is told about the "not refreshed" line (Canary finding)' {
+    It 'the agent that runs the refresh is told about the "not refreshed" line' {
         # Every outcome word the maintenance command can print must be in the playbook of the agent that reports it.
         $playbook = [regex]::Match($script:Raw, "(?m)^\s+playbook = @\('Refresh the two vendor catalogs.*$").Value
         $playbook | Should -Not -BeNullOrEmpty

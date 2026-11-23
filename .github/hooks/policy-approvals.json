@@ -1,0 +1,30 @@
+{
+    "schemaVersion":  1,
+    "note":  "Owner approvals for the policy and legal documents. Each entry approves one exact text (SHA-256 of the UTF-8 text with LF line ends). Any other text fails the documentation gate. Written by Doc-Review.ps1 -ApprovePolicy; see CONTRIBUTING.md.",
+    "documents":  {
+                      "SECURITY.md":  {
+                                          "sha256":  "52bd422707713b532021e659bd31f39c56d00fbdf819b7932373037c20a58385",
+                                          "approvedBy":  "repository owner",
+                                          "reason":  "Factual correction of the MCP servers paragraph only (the Microsoft Learn MCP is configured by the installer; Fabric data MCP servers are not; the Warehouse tool is taken from the server\u0027s tool list, no fixed name).",
+                                          "approvedUtc":  "2026-11-23T11:30:17Z"
+                                      },
+                      "CODE_OF_CONDUCT.md":  {
+                                                 "sha256":  "4f9fd19d0c816d466f4c4be1deb8f560edd4de3f657497d77bbef7fff6ab79d2",
+                                                 "approvedBy":  "repository owner",
+                                                 "reason":  "Baseline: the text as committed by the owner.",
+                                                 "approvedUtc":  "2026-11-23T10:01:59Z"
+                                             },
+                      "LICENSE":  {
+                                      "sha256":  "0644e04cfac76e5fdbda6bba8567fcbaf17d661c65cb6a8a9e8bb433ff17568a",
+                                      "approvedBy":  "repository owner",
+                                      "reason":  "Baseline: the text as committed by the owner.",
+                                      "approvedUtc":  "2026-11-23T10:02:01Z"
+                                  },
+                      "THIRD_PARTY_NOTICES.md":  {
+                                                     "sha256":  "ea33d907f43adba9ceb6b98575374cae54caea4980bc4d0656952af1c8bdd1c3",
+                                                     "approvedBy":  "repository owner",
+                                                     "reason":  "Baseline: the text as committed by the owner.",
+                                                     "approvedUtc":  "2026-11-23T10:02:02Z"
+                                                 }
+                  }
+}

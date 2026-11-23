@@ -195,7 +195,9 @@ Describe 'Agents report the state they can prove (TOOL-01, TOOL-02)' {
         $script:Remote | Should -Match '(?m)^\| Writes \| no \(read-only\) \| \*\*yes\*\*, whatever the signed-in user may run, including DDL and DML \|$'
         $script:Remote | Should -Match '(?m)^\| Agents holding the grant \| 038 and 043 \| 033 only \|$'
         $script:Remote | Should -Match '(?m)^\| Server key the grants expect \| `FabricIQ` \| `fabric-dw-global`, `fabric-dw-item` \|$'
-        foreach ($tool in 'DiscoverArtifacts', 'ResolveFabricItem', 'GetReportMetadata', 'GetSemanticModelSchema', 'ValueSearch', 'ExecuteQuery', 'executeSQL') { $script:Remote | Should -Match $tool }
+        foreach ($tool in 'DiscoverArtifacts', 'ResolveFabricItem', 'GetReportMetadata', 'GetSemanticModelSchema', 'ValueSearch', 'ExecuteQuery') { $script:Remote | Should -Match $tool }
+        $row = @($script:Remote -split "`n" | Where-Object { $_ -match '^\| Tools \|' })[0]
+        $row | Should -Match 'no fixed name: the tool that runs a T-SQL statement is taken from the server''s `tools/list` answer at the step that needs it'
         $script:Remote | Should -Match 'answer in natural language by itself'
         $script:Remote | Should -Match 'ontologies or data agents'
     }
@@ -264,7 +266,7 @@ Describe 'SQL work: the permission class comes before the route (TOOL-03)' {
     It 'shows the token for a change, says which statements are destructive, and how an approval names the MCP route' {
         $script:Sql | Should -Match ([regex]::Escape('`APPROVED:INSERT:dbo.Stage`'))
         $script:Sql | Should -Match '`DELETE`, `TRUNCATE`, `DROP` and an `UPDATE` or `MERGE` that\s+overwrites existing rows are destructive: one token per object, never covered by another\s+approval'
-        $script:Sql | Should -Match 'To name\s+the route, the approval request you return says that the statement will run through\s+`executeSQL`'
+        $script:Sql | Should -Match 'To name the route, the approval request you return quotes the server and the tool name\s+exactly as listed'
     }
 
     It 'administration is not SQL work, and read-only roles stop at S2' {
@@ -273,7 +275,7 @@ Describe 'SQL work: the permission class comes before the route (TOOL-03)' {
     }
 
     It 'orders the routes: sqlcmd, then the Fabric Data Warehouse MCP, then alternates, then definition work' {
-        $i1 = $script:Sql.IndexOf('1. **`sqlcmd -G`**'); $i2 = $script:Sql.IndexOf('2. **Fabric Data Warehouse MCP `executeSQL`**')
+        $i1 = $script:Sql.IndexOf('1. **`sqlcmd -G`**'); $i2 = $script:Sql.IndexOf('2. **Fabric Data Warehouse MCP** when it is configured, callable in this session')
         $i3 = $script:Sql.IndexOf('3. **Alternates**'); $i4 = $script:Sql.IndexOf('4. **Otherwise S0**')
         $i1 | Should -BeGreaterThan 0
         $i2 | Should -BeGreaterThan $i1
@@ -298,6 +300,34 @@ Describe 'SQL work: the permission class comes before the route (TOOL-03)' {
         (Get-AgentBlock 'sql-odbc-data-access-agent') | Should -Match 'Running a statement that changes data or schema'
         (Get-AgentBlock 'monitoring-catalog-operations-agent') | Should -Match 'SQL stays at class S1 for you'
         foreach ($id in 'sql-database-agent', 'sql-odbc-data-access-agent') { (Get-AgentBlock $id) | Should -Match 'You hold no grant for the Fabric Data Warehouse MCP' }
+    }
+
+    It 'the Warehouse MCP tool is discovered at the step that needs it: no tool name is written into the kit' {
+        # Neither the published name nor the name the endpoints listed may be relied on anywhere in what the installer writes.
+        $script:Raw | Should -Not -Match '(?i)executeSQL|execute_query' -Because 'a hardcoded tool name is the defect'
+        $script:Sql | Should -Match '\*\*Discover the tool, never assume it\.\*\*'
+        $script:Sql | Should -Match 'read the tools that server lists in\s+this session \(its `tools/list` answer; in VS Code, your tool list for that server\)'
+        $script:Sql | Should -Match 'call\s+only a listed tool whose description and input schema say it runs a T-SQL statement'
+        $script:Sql | Should -Match 'A name\s+from documentation, a skill or an earlier session is not evidence'
+    }
+
+    It 'a missing, renamed or ambiguous Warehouse MCP tool is reported, never guessed' {
+        $script:Sql | Should -Match 'No such tool listed: the route is not callable\. Say so and take route 3'
+        $script:Sql | Should -Match 'More than one candidate, or a tool whose purpose is unclear: return NEEDS INPUT with the\s+names and descriptions you saw\. Do not pick one, and do not try them in turn'
+        $b = Get-AgentBlock 'warehouse-sql-agent'
+        $b | Should -Match 'Its tool is discovered, never assumed: read what that server lists at this step and call only a listed tool whose description says it runs a T-SQL statement'
+        $b | Should -Match 'none listed means the route is not callable, and more than one candidate or an unclear one is NEEDS INPUT with the names you saw'
+        $b | Should -Match 'the tool name as the server listed it'
+        $b | Should -Match 'Calling a Fabric Data Warehouse MCP tool by a name you remember or read somewhere instead of one the server listed in this session'
+    }
+
+    It 'discovery changes neither the grant nor the classes: 033 alone, by server, S3 still by approval' {
+        @(Get-IdList 'fabricDataWarehouseMcpAgents') | Should -Be @('warehouse-sql-agent')
+        # The grant names the server, so a renamed tool needs no new grant and no agent gains one.
+        $script:Raw | Should -Match ([regex]::Escape("`$mcpServersById[`$mcpAgentId] += @('fabric-dw-global', 'fabric-dw-item')"))
+        @((Get-RemoteMcpServers $null | Where-Object { $_.Key -eq 'fabricDataWarehouseMcp' }).GrantKeys) | Should -Be @('fabric-dw-global', 'fabric-dw-item')
+        $script:Sql | Should -Match 'so the class rules above apply unchanged'
+        $script:Sql | Should -Match 'for S3 only when route 1 is impossible and the approval names this route'
     }
 
     It 'the agents that may not edit files still cannot: 043 and 063 have no edit capability' {

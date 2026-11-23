@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<!--
+  Source of assets/fabric-git-workflow.png (README section 2.3). Render it with Render-Diagrams.ps1; see README.md.
+  The texts mirror README section 2.3. DEV and PROD are illustrative names. No third-party logo is stored here.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lifecycle and deployment</title>
+<link rel="stylesheet" href="diagram.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 4.2l8 4-8 4-8-4z"/><path d="M4 12.2l8 4 8-4"/><path d="M4 16.2l8 4 8-4"/></symbol>
+    <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="7" cy="6" r="2.1"/><circle cx="7" cy="18" r="2.1"/><circle cx="17" cy="8" r="2.1"/><path d="M7 8.1v7.8"/><path d="M17 10.1v.9a4 4 0 0 1-4 4H9.1"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.4l6.6 2.6v5.3c0 4.1-2.8 7.4-6.6 8.9-3.8-1.5-6.6-4.8-6.6-8.9V6z"/><path d="M9.2 12l2 2 3.8-4.1"/></symbol>
+  </defs>
+</svg>
+
+<header class="head">
+  <div class="eyebrow">Fabric Agentic Workspace</div>
+  <h1 class="title">Lifecycle and deployment</h1>
+  <p class="sub">However you edit (local, live or hybrid), every change lands in the DEV workspace first.</p>
+</header>
+
+<section class="flow">
+  <div class="card stage" style="--c:var(--green)">
+    <div class="st-h"><div class="st-i"><svg class="ic"><use href="#i-layers"/></svg></div><div><div class="st-n">Fabric DEV</div><span class="st-t">workspace</span></div></div>
+    <div class="st-k">All authoring lands here first</div>
+    <ul class="items">
+      <li><b>Validate pipelines, reports, models</b></li>
+      <li><b>Use the portal, VS Code, a CLI or MCP</b></li>
+      <li><b>Commit only after DEV is tested</b></li>
+    </ul>
+  </div>
+  <div class="arrow">
+    <div class="hflow" style="color:var(--blue)">commit<svg viewBox="0 0 46 10"><path d="M1 5h42"/><path d="M39 1.5L43.5 5 39 8.5"/></svg></div>
+    <div class="hflow back dash" style="color:var(--orange)"><svg viewBox="0 0 46 10"><path d="M1 5h42"/><path d="M39 1.5L43.5 5 39 8.5"/></svg>revert</div>
+  </div>
+  <div class="card stage" style="--c:var(--blue)">
+    <div class="st-h"><div class="st-i"><svg class="ic"><use href="#i-branch"/></svg></div><div><div class="st-n">Azure DevOps</div><span class="st-t">dev branch</span></div></div>
+    <ul class="items">
+      <li><b>Commit the DEV workspace state</b><span>Checkpoint every tested change</span></li>
+      <li><b>Compare changes</b><span>Diffs and pull requests</span></li>
+      <li><b>Full history</b><span>Review and track everything</span></li>
+      <li><b>Revert anytime</b><span>Return DEV to any state</span></li>
+    </ul>
+  </div>
+  <div class="arrow">
+    <div class="hflow" style="color:var(--purple)">pull<br>request<svg viewBox="0 0 46 10"><path d="M1 5h42"/><path d="M39 1.5L43.5 5 39 8.5"/></svg></div>
+  </div>
+  <div class="card stage" style="--c:var(--purple)">
+    <div class="st-h"><div class="st-i"><svg class="ic"><use href="#i-branch"/></svg></div><div><div class="st-n">Azure DevOps</div><span class="st-t">prod branch</span></div></div>
+    <ul class="items">
+      <li><b>Promote by pull request</b><span>Dev to prod workflow</span></li>
+      <li><b>Review changes</b><span>Validate dev-to-prod changes</span></li>
+      <li><b>Production history</b><span>Keep production history controlled</span></li>
+      <li><b>Preserve overrides</b><span>Keep prod-specific settings</span></li>
+    </ul>
+  </div>
+  <div class="arrow">
+    <div class="hflow" style="color:var(--green)">sync<svg viewBox="0 0 46 10"><path d="M1 5h42"/><path d="M39 1.5L43.5 5 39 8.5"/></svg></div>
+  </div>
+  <div class="card stage" style="--c:#1b6e2c">
+    <div class="st-h"><div class="st-i"><svg class="ic"><use href="#i-layers"/></svg></div><div><div class="st-n">Fabric PROD</div><span class="st-t">workspace</span></div></div>
+    <div class="st-k">Synced, approved production state</div>
+    <ul class="items">
+      <li><b>Stable reports, models, pipelines</b></li>
+      <li><b>No experimental authoring here</b></li>
+      <li><b>Operational workspace for users</b></li>
+    </ul>
+  </div>
+</section>
+
+<section class="why">
+  <h3><svg class="ic"><use href="#i-shield"/></svg>Why this is safe by design</h3>
+  <div class="three">
+    <div class="card cell" style="--c:var(--green)"><span class="tag">DEV</span>Build and test freely before anything reaches production.</div>
+    <div class="card cell" style="--c:var(--blue)"><span class="tag">Git</span>Commit, diff, review and revert the workspace state in Azure DevOps.</div>
+    <div class="card cell" style="--c:#1b6e2c"><span class="tag">PROD</span>Receives only reviewed, parameterized changes.</div>
+  </div>
+  <p class="close">Promote only when confident, and return to any previous version whenever needed.</p>
+</section>
+<!-- The renderer reads data-h to size the screenshot to the full page height. -->
+<script>document.documentElement.setAttribute('data-h', Math.ceil(document.documentElement.getBoundingClientRect().height));</script>
+</body>
+</html>

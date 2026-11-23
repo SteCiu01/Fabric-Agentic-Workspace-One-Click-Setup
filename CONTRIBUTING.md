@@ -1,4 +1,4 @@
-# Contributing to Fabric Agentic Workspace One-Click Setup
+# Contributing to Fabric Agentic Workspace — One-Click Setup
 
 Bug reports, ideas and pull requests are welcome.
 
@@ -86,7 +86,7 @@ chore: update skills-for-fabric clone URL
 ## Good first contributions
 
 Look for issues labelled [`good first issue`](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/labels/good%20first%20issue),
-or pick an item from *Not yet exercised* in
+or pick an item from *Not verified end to end* in
 [Validation, compatibility and known limitations](README.md#311-validation-compatibility-and-known-limitations).
 
 Some ideas:
@@ -130,41 +130,99 @@ The documents follow one house style,
 `.github/skills/product-communication/SKILL.md`: what each document is for,
 the changelog rules and the accuracy checks. Read it before you change one.
 
-Two pieces of maintainer tooling check that the documents still match the
-source when you work with a coding agent. The installer ships neither.
+Maintainer tooling in `.github/` checks that the documents still match the
+source when you work with a coding agent. The installer ships none of it.
 
 - **Communication Writer** (`.github/agents/communication-writer.agent.md`): a
   reviewer that other agents run as a subagent. It compares the documents with
-  the source, updates them and records a verdict. It edits documents only.
+  the source, updates them and records a verdict. It may change five files:
+  `README.md`, `CHANGELOG.md`, `CLI-FUNCTIONALITIES.md`, `CONTRIBUTING.md` and
+  `tests/README.md`.
 - **End-of-task hook** (`.github/hooks/documentation-review.json`, which runs
-  `.github/hooks/Doc-Review.ps1`): when a task changed a file under
-  `fabric-agentic-installer/` or `schema/`, a Markdown file in the repository
-  root, `LICENSE` or `tests/README.md`, it asks the agent to run the Writer
-  before the task ends. It asks at most twice, then reports the review as
-  incomplete: it can ask an agent to continue, but cannot make it delegate.
-  For a change nobody can observe, the agent can record
-  `-NoImpact -Reason "<one sentence>"` instead; the gate still needs a review.
-  The hook needs Windows PowerShell and does nothing on other systems.
+  `.github/hooks/Doc-Review.ps1`): when a task changed a file the review
+  covers, it asks the agent to run the Writer before the task ends. It asks at
+  most twice, then reports the review as incomplete: it can ask an agent to
+  continue, but cannot make it delegate. The hook needs Windows PowerShell and
+  does nothing on other systems.
 
-A review is recorded only when the Writer gave the verdict `complete` and the
-hook saw that run start and finish; running the script by hand never records
-one. It is stale as soon as one of the files above differs from what was
-reviewed (a file added to or removed from the two folders counts), and valid
-again when the reviewed content is restored. Records are kept in
-`.git/doc-review/` (under TEMP if the checkout has no `.git` folder), so they
-are never committed.
+**What a review covers.** A review is stale as soon as one of these files
+differs from what was reviewed (a file added to or removed from the three
+folders counts), and valid again when the reviewed content is restored:
 
-Before a release, run the gate from the repository root:
+- everything under `fabric-agentic-installer/`, `schema/` and `assets/` (the
+  images)
+- the Writer's five documents and the four policy and legal documents
+- the review controls: the Writer agent file, the `product-communication`
+  skill, `Doc-Review.ps1`, `documentation-review.json` and
+  `policy-approvals.json`
+
+**How a review is recorded.**
+
+- When a Writer run starts, the hook gives it a run id. The Writer records its
+  verdict with that id, as its last action:
+  ```
+  powershell -NoProfile -ExecutionPolicy Bypass -File .github/hooks/Doc-Review.ps1 -Attest -Run <run id> -Verdict complete -Summary "<one sentence>"
+  ```
+  Use `-Verdict incomplete` when the review could not be finished. A verdict
+  without a run id, with an unknown id or for a closed run is refused, so
+  running the script by hand never records a review.
+- The review is recorded when the hook of the same session sees that run
+  finish with the verdict `complete`. The record names the run, the session
+  and the agent.
+- The hook compares the whole repository before and after the run. If anything
+  outside the five documents was changed, added or removed, the review is not
+  recorded and the files are named. Nothing is reverted.
+- A review belongs to the session that produced it: it ends that session's
+  end-of-task request, never another session's.
+
+For a change nobody can observe (refactoring, comments), the agent can record
+that instead, with the session id printed in the end-of-task request:
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File .github/hooks/Doc-Review.ps1 -NoImpact -Session <session id> -Reason "<one sentence>"
+```
+
+This quiets that session only and is never a review: the gate still needs one.
+
+Records are kept in `.git/doc-review/` (under TEMP if the checkout has no
+`.git` folder), so they are never committed.
+
+**Policy and legal documents.** `SECURITY.md`, `CODE_OF_CONDUCT.md`, `LICENSE`
+and `THIRD_PARTY_NOTICES.md` change only by the owner's decision. The Writer
+never edits them, not even a typo: it proposes the exact text.
+`.github/hooks/policy-approvals.json` records, for each document, the SHA-256
+of the text the owner approved (UTF-8, LF line ends). After the owner decided
+on a change, record the decision from the repository root:
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File .github/hooks/Doc-Review.ps1 -ApprovePolicy -File <document> -ApprovedBy "<who decided>" -Reason "<the decision>"
+```
+
+The approval covers that exact text only, so a later edit needs its own.
+`tests/DocReview.Tests.ps1` checks in CI that the four documents match the
+approvals file.
+
+**Release gate.** Before a release, run the gate from the repository root:
 
 ```
 powershell -NoProfile -ExecutionPolicy Bypass -File .github/hooks/Doc-Review.ps1 -Gate
 ```
 
-It prints `DOC GATE: PASS` and returns exit code 0 only when a recorded review
-matches the current files and the hook configuration, the Writer and the skill
-are in place. Otherwise it prints `DOC GATE: FAIL` and returns 1: ask your
-agent to run a Communication Writer review, then run the gate again. `-Status`
-instead of `-Gate` shows the same state without the pass or fail.
+It looks at the files only, whichever session reviewed them. It prints
+`DOC GATE: PASS` and returns exit code 0 only when all of this holds:
+
+- a recorded review matches the current files
+- each policy and legal document holds the text its owner approved
+- the hook configuration, the Writer and the skill are in place
+
+Otherwise it prints `DOC GATE: FAIL` with the reason and returns 1. For a
+missing or stale review, ask your agent to run a Communication Writer review,
+then run the gate again. A review cannot settle a policy or legal document
+that differs from its approved text: restore it, or have the owner approve the
+new text.
+
+`-Status` instead of `-Gate` shows the same state without the pass or fail,
+including the latest Writer run when it was rejected.
 
 ## Code of Conduct
 

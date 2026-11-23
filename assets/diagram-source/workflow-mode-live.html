@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<!--
+  Source of assets/workflow-mode-live.png (README section 2.2, mode B). Render it with Render-Diagrams.ps1; see README.md.
+  The texts mirror README section 2.2 and 2.3. No third-party logo is stored here.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Working mode B - Full live</title>
+<link rel="stylesheet" href="diagram.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-agent" viewBox="0 0 24 24"><rect x="4.5" y="7" width="15" height="11" rx="4"/><path d="M12 7V4.5"/><circle cx="9.3" cy="12.4" r="1"/><circle cx="14.7" cy="12.4" r="1"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 4.2l8 4-8 4-8-4z"/><path d="M4 12.2l8 4 8-4"/><path d="M4 16.2l8 4 8-4"/></symbol>
+    <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="7" cy="6" r="2.1"/><circle cx="7" cy="18" r="2.1"/><circle cx="17" cy="8" r="2.1"/><path d="M7 8.1v7.8"/><path d="M17 10.1v.9a4 4 0 0 1-4 4H9.1"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.2"/><path d="M12 11.2v4.6"/><path d="M12 8.1h.01"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 4l2.4 5 5.4.7-4 3.8 1 5.4-4.8-2.6-4.8 2.6 1-5.4-4-3.8 5.4-.7z"/></symbol>
+  </defs>
+</svg>
+
+<header class="head">
+  <div class="eyebrow">Working mode B</div>
+  <h1 class="title">Full live</h1>
+  <p class="sub">Edit and run directly in the live workspace, with no local files.</p>
+</header>
+
+<section class="band">
+  <!-- copilot-icon.png is supplied by the renderer from the local VS Code install and is not stored in the repository. -->
+  <div class="mlogo"><img src="copilot-icon.png" alt="" onerror="this.parentNode.className += ' no-icon'; this.remove();"><svg class="ic"><use href="#i-agent"/></svg></div>
+  <div class="who"><div class="mname">VS Code agents</div><div class="msub">Live, in-workspace read and write</div></div>
+  <div class="tools grid" style="--cols:2">
+    <div class="chip"><b>Fabric MCP server</b><span>REST operations</span></div>
+    <div class="chip"><b>Power BI modeling MCP</b><span>XMLA + DAX EVALUATE</span></div>
+    <div class="chip"><b>fab CLI</b><span>Fabric control plane</span></div>
+    <div class="chip"><b>az CLI</b><span>Azure + SQL (TDS)</span></div>
+  </div>
+</section>
+
+<div class="link">
+  <div class="pair">
+    <div class="vflow" style="color:var(--blue)"><svg viewBox="0 0 12 46"><path d="M6 1v43"/><path d="M2 40l4 4.5 4-4.5"/></svg>write</div>
+    <div class="vflow" style="color:var(--green)"><svg viewBox="0 0 12 46"><path d="M6 45V2" stroke-dasharray="4 3"/><path d="M2 6l4-4.5 4 4.5"/></svg>read</div>
+  </div>
+  <div class="hint">Toolset: Fabric MCP server + Power BI modeling MCP + fab CLI + az CLI.</div>
+</div>
+
+<section class="flow">
+  <div class="card stage" style="--c:var(--green)">
+    <div class="st-h"><div class="st-i"><svg class="ic"><use href="#i-layers"/></svg></div><div><div class="st-n">Fabric DEV</div><span class="st-t">workspace</span></div></div>
+    <ul class="items">
+      <li><b>Running workspace (live)</b><span>All changes happen here</span></li>
+      <li><b>Run DAX live</b><span>EVALUATE queries on running models</span></li>
+      <li><b>Run SQL live</b><span>Lakehouse and SQL database endpoints</span></li>
+      <li><b>Create and edit items</b><span>Through REST updateDefinition</span></li>
+    </ul>
+    <div class="st-f"><b>Test in the portal</b>Before every commit</div>
+  </div>
+  <div class="arrow">
+    <div class="hflow" style="color:var(--blue)">commit<svg viewBox="0 0 46 10"><path d="M1 5h42"/><path d="M39 1.5L43.5 5 39 8.5"/></svg></div>
+    <div class="hflow back dash" style="color:var(--orange)"><svg viewBox="0 0 46 10"><path d="M1 5h42"/><path d="M39 1.5L43.5 5 39 8.5"/></svg>revert</div>
+  </div>
+  <div class="card stage" style="--c:var(--blue)">
+    <div class="st-h"><div class="st-i"><svg class="ic"><use href="#i-branch"/></svg></div><div><div class="st-n">Azure DevOps</div><span class="st-t">dev branch</span></div></div>
+    <ul class="items">
+      <li><b>Workspace state commit</b><span>Single source of truth</span></li>
+      <li><b>Versioned safety net</b><span>Every commit is reversible</span></li>
+      <li><b>Compare and review</b><span>Diffs and history</span></li>
+    </ul>
+    <div class="st-f"><b>Full commit history</b>Your complete safety net</div>
+  </div>
+  <div class="arrow">
+    <div class="hflow" style="color:var(--purple)">pull<br>request<svg viewBox="0 0 46 10"><path d="M1 5h42"/><path d="M39 1.5L43.5 5 39 8.5"/></svg></div>
+  </div>
+  <div class="card stage" style="--c:var(--purple)">
+    <div class="st-h"><div class="st-i"><svg class="ic"><use href="#i-branch"/></svg></div><div><div class="st-n">Azure DevOps</div><span class="st-t">prod branch</span></div></div>
+    <ul class="items">
+      <li><b>Promote by pull request</b><span>Review dev-to-prod changes</span></li>
+      <li><b>Prod settings persist</b><span>Schedules, endpoints and parameters stay intact</span></li>
+      <li><b>Controlled history</b><span>Only reviewed changes are merged</span></li>
+    </ul>
+    <div class="st-f"><b>Updated only by pull request</b>Changes land through approval</div>
+  </div>
+  <div class="arrow">
+    <div class="hflow" style="color:var(--green)">sync<svg viewBox="0 0 46 10"><path d="M1 5h42"/><path d="M39 1.5L43.5 5 39 8.5"/></svg></div>
+  </div>
+  <div class="card stage" style="--c:#1b6e2c">
+    <div class="st-h"><div class="st-i"><svg class="ic"><use href="#i-layers"/></svg></div><div><div class="st-n">Fabric PROD</div><span class="st-t">workspace</span></div></div>
+    <ul class="items">
+      <li><b>Synced from the prod branch</b><span>After the pull request is merged</span></li>
+      <li><b>Live for end users</b><span>Stable, trusted data and reports</span></li>
+      <li><b>Operational workspace</b><span>No experimental authoring here</span></li>
+    </ul>
+    <div class="st-f"><b>Live in production</b>Reliable for your users</div>
+  </div>
+</section>
+
+<section class="lower">
+  <div class="card panel">
+    <h3><svg class="ic"><use href="#i-info"/></svg>How it works: live editing and analysis in the workspace</h3>
+    <ol class="steps">
+      <li>Agents <b>connect</b> to the running DEV workspace through the Fabric MCP server and the Power BI modeling MCP.</li>
+      <li><b>Read</b> metadata, list items, run DAX (EVALUATE) on live models and SQL on Lakehouse or SQL endpoints.</li>
+      <li><b>Edit or create</b> items through REST updateDefinition and other APIs, without pulling files locally.</li>
+      <li><b>Test</b> in the portal, then commit the workspace state to Azure DevOps (revert if needed).</li>
+    </ol>
+    <div class="note"><b>Shared safety anchor.</b> Live edits still follow the same review and promotion path: commit the validated DEV state, then promote by pull request.</div>
+  </div>
+  <div class="card panel best">
+    <h3><svg class="ic"><use href="#i-star"/></svg>Best for</h3>
+    <ul class="ticks">
+      <li>Live data comparison</li>
+      <li>Quick fixes</li>
+      <li>Investigative analysis</li>
+      <li>Reading real deployed values: GUIDs, endpoints, data</li>
+    </ul>
+    <div class="needs"><b>Needs:</b> Fabric MCP server, Power BI modeling MCP, fab CLI, az CLI.<i>Optional tools: mode A works without them.</i></div>
+  </div>
+</section>
+<!-- The renderer reads data-h to size the screenshot to the full page height. -->
+<script>document.documentElement.setAttribute('data-h', Math.ceil(document.documentElement.getBoundingClientRect().height));</script>
+</body>
+</html>
