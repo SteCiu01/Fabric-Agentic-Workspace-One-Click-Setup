@@ -2837,14 +2837,16 @@ function Add-McpServerText ([string]$Text, [string]$Key, [string]$ValueJson) {
     return @{ Text = $Text.Substring(0, $at) + $ins + $Text.Substring($at); Inserted = $ins }
 }
 
-# Safe merge of the workspace .vscode/mcp.json: adds the Microsoft Learn MCP server only when no
-# server with that URL exists (any key, including a legacy 'microsoft.docs.mcp'); never removes or
-# changes existing servers or inputs. An existing file is never re-serialised: the entry is
-# inserted as text so JSONC comments and formatting survive, and the result is verified before it
-# is written. Anything unexpected leaves the file untouched with a manual instruction.
+# Safe merge of the workspace .vscode/mcp.json: adds one remote server (default: the Microsoft Learn
+# MCP server) only when no server with that URL exists (any key, including a legacy
+# 'microsoft.docs.mcp') and the key is free; never removes or changes existing servers or inputs.
+# An existing file is never re-serialised: the entry is inserted as text so JSONC comments and
+# formatting survive, and the result is verified before it is written. Anything unexpected leaves
+# the file untouched with a manual instruction. The entry holds only type and url: no header,
+# token or credential is ever written.
 function Merge-McpJson {
-    param([string]$Path)
-    $docsUrl = 'https://learn.microsoft.com/api/mcp'
+    param([string]$Path, [string]$Key = 'microsoftDocs', [string]$Url = 'https://learn.microsoft.com/api/mcp', [string]$Label = 'Microsoft Learn MCP')
+    $docsUrl = $Url
     $entry = '{ "type": "http", "url": "' + $docsUrl + '" }'
     $result = [pscustomobject]@{ Changed = $false; Status = ''; Inserted = $null }
     $obj = $null; $raw = ''
@@ -2859,22 +2861,22 @@ function Merge-McpJson {
     $norm = { param($u) ([string]$u).Trim().TrimEnd('/').ToLowerInvariant() }
     if ($null -ne $obj -and $obj.PSObject.Properties['servers']) {
         foreach ($p in $obj.servers.PSObject.Properties) {
-            if ($p.Value -is [PSCustomObject] -and $p.Value.PSObject.Properties['url'] -and ((& $norm $p.Value.url) -eq (& $norm $docsUrl))) { $result.Status = "Microsoft Learn MCP already configured ('$($p.Name)')"; return $result }
+            if ($p.Value -is [PSCustomObject] -and $p.Value.PSObject.Properties['url'] -and ((& $norm $p.Value.url) -eq (& $norm $docsUrl))) { $result.Status = "$Label already configured ('$($p.Name)')"; return $result }
         }
-        if ($obj.servers.PSObject.Properties['microsoftDocs']) { $result.Status = "a server named 'microsoftDocs' already exists - left unchanged"; return $result }
+        if ($obj.servers.PSObject.Properties[$Key]) { $result.Status = "a server named '$Key' already exists - left unchanged"; return $result }
     }
     if ($null -eq $obj) {
-        Write-ManagedFile -Path $Path -Content ("{`n  ""servers"": {`n    ""microsoftDocs"": $entry`n  }`n}`n")
-        $result.Changed = $true; $result.Status = 'added microsoftDocs (Microsoft Learn MCP)'
+        Write-ManagedFile -Path $Path -Content ("{`n  ""servers"": {`n    ""$Key"": $entry`n  }`n}`n")
+        $result.Changed = $true; $result.Status = "added $Key ($Label)"
         return $result
     }
-    $manual = 'left untouched - add it manually under "servers": "microsoftDocs": ' + $entry
-    $patch = Add-McpServerText -Text $raw -Key 'microsoftDocs' -ValueJson $entry
+    $manual = 'left untouched - add it manually under "servers": "' + $Key + '": ' + $entry
+    $patch = Add-McpServerText -Text $raw -Key $Key -ValueJson $entry
     if ($null -eq $patch) { $result.Status = "layout not recognised; $manual"; return $result }
     # Verify before writing: the new entry is present and every other value is unchanged.
     $chk = ConvertFrom-JsonLenient $patch.Text
     $same = { param($a, $b) (ConvertTo-Json -InputObject $a -Depth 20 -Compress) -ceq (ConvertTo-Json -InputObject $b -Depth 20 -Compress) }
-    $ok = $null -ne $chk -and $chk -is [PSCustomObject] -and $chk.servers -is [PSCustomObject] -and $chk.servers.microsoftDocs -and ([string]$chk.servers.microsoftDocs.url -eq $docsUrl)
+    $ok = $null -ne $chk -and $chk -is [PSCustomObject] -and $chk.servers -is [PSCustomObject] -and $chk.servers.$Key -and ([string]$chk.servers.$Key.url -eq $docsUrl)
     if ($ok) {
         foreach ($p in $obj.PSObject.Properties) {
             if ($p.Name -ceq 'servers') { foreach ($s in $p.Value.PSObject.Properties) { if (-not (& $same $s.Value $chk.servers.($s.Name))) { $ok = $false } } }
@@ -2888,12 +2890,13 @@ function Merge-McpJson {
     $bom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
     [IO.File]::WriteAllText($Path, $patch.Text, (New-Object System.Text.UTF8Encoding($bom)))
     $result.Changed = $true; $result.Inserted = $patch.Inserted
-    $result.Status = 'added microsoftDocs (Microsoft Learn MCP); existing content, comments and formatting preserved'
+    $result.Status = "added $Key ($Label); existing content, comments and formatting preserved"
     return $result
 }
 
 # -- Remote Microsoft-hosted MCP servers this kit knows, matched by URL in a parsed mcp.json --
-# The kit never adds, registers or signs in to them. Configured means an entry with that endpoint
+# Setup adds one only on an explicit Yes (Invoke-RemoteMcpOffer) and never signs in to them.
+# Configured means an entry with that endpoint
 # exists; it says nothing about sign-in or whether its tools are callable in a chat session.
 # The same function is written into Get-SessionStatus.ps1 (kept identical by a test).
 function Get-RemoteMcpServers {
@@ -2923,6 +2926,158 @@ function Get-RemoteMcpServers {
             GrantKeys = @($k.GrantKeys)
         }
     }
+}
+
+# Records both remote servers in tool-status from the workspace mcp.json. Runs in Step 2 and again
+# after the Step 8 offer, so the tool-status written at the end reflects this run's answers.
+function Set-RemoteMcpToolStatus {
+    param([string]$McpJsonPath)
+    $remoteMcpConfig = $null
+    if (Test-Path -LiteralPath $McpJsonPath) { try { $remoteMcpConfig = ConvertFrom-JsonLenient ([IO.File]::ReadAllText($McpJsonPath)) } catch { } }
+    foreach ($remoteMcp in @(Get-RemoteMcpServers $remoteMcpConfig)) {
+        $remoteReason = $null
+        if (-not $remoteMcp.Configured) { $remoteReason = 'no entry with this endpoint in .vscode/mcp.json (setup offers one; only an explicit Yes adds it)' }
+        elseif (-not $remoteMcp.KeyMatchesGrant) { $remoteReason = "saved under another server key; the agents' grant expects: $($remoteMcp.GrantKeys -join ' or ')" }
+        Set-ToolStatus -Key $remoteMcp.Key -Found $remoteMcp.Configured -Category 'mcp-remote' -InstallMode 'detect' -Reason $remoteReason -Extra @{
+            documented = $true; release = $remoteMcp.Release; access = $remoteMcp.Access; configured = $remoteMcp.Configured
+            serverKeys = @($remoteMcp.ServerKeys); scope = $remoteMcp.Scope; keyMatchesGrant = $remoteMcp.KeyMatchesGrant; mcpToolsCallable = 'unknown'
+        }
+    }
+}
+
+# A Fabric workspace or item ID is a GUID; the all-zero GUID is a placeholder, never an item.
+function Test-FabricItemId {
+    param($Value)
+    if ($Value -isnot [string]) { return $false }
+    $v = $Value.Trim()
+    return ($v -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' -and $v -notmatch '^[0-]+$')
+}
+
+# One identifier, up to three attempts. $null for an empty answer, end of input or three invalid ones.
+function Read-FabricItemId {
+    param([string]$Prompt)
+    for ($attempt = 0; $attempt -lt 3; $attempt++) {
+        $answer = $null
+        try { $answer = Read-Host $Prompt } catch { return $null }
+        if ($answer -isnot [string] -or $answer.Trim() -eq '') { return $null }
+        if (Test-FabricItemId $answer) { return $answer.Trim().ToLowerInvariant() }
+        Write-Host '    Not a valid ID: expected a GUID (8-4-4-4-12 hexadecimal characters), as in the item URL.' -ForegroundColor Yellow
+    }
+    return $null
+}
+
+# Optional connections to the two Microsoft-hosted data MCP servers. Each is offered only when
+# .vscode/mcp.json can be read and holds no entry for its endpoint, and added only on an explicit
+# Yes through Merge-McpJson (type and URL only: no header, token or credential). Nothing is
+# installed and nobody is signed in: VS Code handles Microsoft Entra sign-in when the server
+# starts. The Warehouse server is item-scoped unless the user explicitly chooses the global one.
+function Invoke-RemoteMcpOffer {
+    param([string]$Path)
+    $iqUrl = 'https://fabriciq.svc.cloud.microsoft/v1/mcp/fabriciq'
+    $dwRoot = 'https://api.fabric.microsoft.com/v1/mcp/dataPlane'
+    $results = @()
+    $readConfig = {
+        if (-not (Test-Path -LiteralPath $Path)) { return @{ Ok = $true; Config = $null } }
+        $text = [IO.File]::ReadAllText($Path)
+        if ([string]::IsNullOrWhiteSpace($text)) { return @{ Ok = $true; Config = $null } }
+        $parsed = ConvertFrom-JsonLenient $text
+        if ($null -eq $parsed -or $parsed -isnot [PSCustomObject]) { return @{ Ok = $false; Config = $null } }
+        return @{ Ok = $true; Config = $parsed }
+    }
+    $report = { param($Server, $Changed, $Status) [pscustomobject]@{ Server = $Server; Changed = [bool]$Changed; Status = $Status } }
+    $merge = {
+        param($Server, $Key, $Url, $Label)
+        $m = Merge-McpJson -Path $Path -Key $Key -Url $Url -Label $Label
+        Write-Host "  .vscode/mcp.json: $($m.Status)" -ForegroundColor $(if ($m.Changed) { 'Green' } else { 'Yellow' })
+        if ($m.Changed) { Write-Host '  Configured only: VS Code asks you to sign in when the server first starts; start it from the MCP server list.' -ForegroundColor DarkGray }
+        return (& $report $Server $m.Changed $m.Status)
+    }
+
+    Write-Host ''
+    Write-Host '  OPTIONAL: MICROSOFT-HOSTED DATA MCP SERVERS (Fabric IQ, Fabric Data Warehouse)' -ForegroundColor Cyan
+    Write-Host '  Configuring one adds a connection entry (type and URL only) to .vscode/mcp.json.' -ForegroundColor DarkGray
+    Write-Host '  Nothing is installed and no credential or token is stored. Configured is not signed in:' -ForegroundColor DarkGray
+    Write-Host '  VS Code asks for your Microsoft Entra sign-in, and your Fabric permissions still apply.' -ForegroundColor DarkGray
+    $state = & $readConfig
+    if (-not $state.Ok) {
+        Write-Host '  .vscode/mcp.json could not be read, so neither server was offered and the file was not changed.' -ForegroundColor Yellow
+        Write-Host '  Fix the file, then re-run setup or add the entries by hand (README section 2.4).' -ForegroundColor DarkGray
+        return @((& $report 'fabricIqMcp' $false 'mcp.json unreadable - not offered'), (& $report 'fabricDataWarehouseMcp' $false 'mcp.json unreadable - not offered'))
+    }
+
+    # Fabric IQ: read-only.
+    $iq = @(Get-RemoteMcpServers $state.Config) | Where-Object { $_.Key -eq 'fabricIqMcp' }
+    Write-Host ''
+    Write-Host '  Fabric IQ MCP (generally available, read-only)' -ForegroundColor Cyan
+    if ($iq.Configured) {
+        $grantNote = if ($iq.KeyMatchesGrant) { '' } else { " (the agents' grant expects the key FabricIQ)" }
+        Write-Host "  Already configured as '$($iq.ServerKeys -join "', '")'$grantNote. Not asked again." -ForegroundColor Green
+        $results += & $report 'fabricIqMcp' $false 'already configured'
+    } else {
+        Write-Host '  Finds Power BI reports and semantic models you can already open, reads their metadata' -ForegroundColor DarkGray
+        Write-Host '  and runs DAX queries as you. It cannot change data; row-level and object-level security' -ForegroundColor DarkGray
+        Write-Host '  apply. Agents 038 and 043 hold its grant. Sign-in is delegated Microsoft Entra OAuth.' -ForegroundColor DarkGray
+        Write-Host '  Microsoft documents its setup for GitHub Copilot CLI, not for VS Code. If VS Code cannot' -ForegroundColor DarkGray
+        Write-Host '  complete the sign-in, your tenant may need a single-tenant app registration with the' -ForegroundColor DarkGray
+        Write-Host '  delegated Power BI Service permissions Item.Read.All and Item.Execute.All, and its' -ForegroundColor DarkGray
+        Write-Host '  consent policy can require administrator approval.' -ForegroundColor DarkGray
+        Write-Host "  Entry: ""FabricIQ"": $iqUrl" -ForegroundColor DarkGray
+        if (Read-ExplicitYes '  Configure Fabric IQ MCP in VS Code? (Y/N)') {
+            $results += & $merge 'fabricIqMcp' 'FabricIQ' $iqUrl 'Fabric IQ MCP'
+        } else {
+            Write-Host '  Not configured.' -ForegroundColor DarkGray
+            $results += & $report 'fabricIqMcp' $false 'declined'
+        }
+    }
+
+    # Fabric Data Warehouse: runs T-SQL, including changes. Item scope first; global only by explicit choice.
+    $state = & $readConfig
+    $dw = @(Get-RemoteMcpServers $state.Config) | Where-Object { $_.Key -eq 'fabricDataWarehouseMcp' }
+    Write-Host ''
+    Write-Host '  Fabric Data Warehouse MCP (preview)' -ForegroundColor Cyan
+    if ($dw.Configured) {
+        $grantNote = if ($dw.KeyMatchesGrant) { '' } else { " (the agents' grant expects fabric-dw-item or fabric-dw-global)" }
+        Write-Host "  Already configured as '$($dw.ServerKeys -join "', '")', scope $($dw.Scope)$grantNote. Not asked again." -ForegroundColor Green
+        $results += & $report 'fabricDataWarehouseMcp' $false 'already configured'
+    } else {
+        Write-Host '  Runs T-SQL against a Fabric Warehouse or SQL analytics endpoint, signed in as you.' -ForegroundColor DarkGray
+        Write-Host '  WARNING: it runs any statement your account may run, including statements that change' -ForegroundColor Yellow
+        Write-Host '  data or schema (INSERT, UPDATE, DELETE, CREATE, ALTER, DROP).' -ForegroundColor Yellow
+        Write-Host '  In this workspace only agent 033 holds its grant, and every change still needs your' -ForegroundColor DarkGray
+        Write-Host '  approval token (SQL classes S3 and S4).' -ForegroundColor DarkGray
+        if (Read-ExplicitYes '  Configure Fabric Data Warehouse MCP in VS Code? (Y/N)') {
+            Write-Host '  Scope:' -ForegroundColor DarkGray
+            Write-Host '    I = one warehouse or SQL analytics endpoint (recommended; needs its workspace ID and item ID)' -ForegroundColor DarkGray
+            Write-Host '    G = global: every warehouse and SQL analytics endpoint your account can open, chosen in chat' -ForegroundColor DarkGray
+            $scope = $null
+            try { $scope = Read-Host '  Choose I or G (Enter = cancel)' } catch { }
+            $scope = if ($scope -is [string]) { $scope.Trim().ToLowerInvariant() } else { '' }
+            if ($scope -eq 'i' -or $scope -eq 'item') {
+                $wsId = Read-FabricItemId '  Workspace ID'
+                $itemId = if ($wsId) { Read-FabricItemId '  Warehouse or SQL analytics endpoint item ID' } else { $null }
+                if ($wsId -and $itemId -and $wsId -ne $itemId) {
+                    $results += & $merge 'fabricDataWarehouseMcp' 'fabric-dw-item' "$dwRoot/workspaces/$wsId/items/$itemId/sqlEndpoint" 'Fabric Data Warehouse MCP (one item)'
+                } else {
+                    Write-Host '  Not configured: no valid workspace ID and item ID. The global endpoint is not used instead.' -ForegroundColor Yellow
+                    $results += & $report 'fabricDataWarehouseMcp' $false 'item scope chosen, no valid identifiers - not configured'
+                }
+            } elseif ($scope -eq 'g' -or $scope -eq 'global') {
+                if (Read-ExplicitYes '  Confirm the GLOBAL endpoint, which reaches every warehouse your account can open? (y/N)') {
+                    $results += & $merge 'fabricDataWarehouseMcp' 'fabric-dw-global' "$dwRoot/sqlEndpoint" 'Fabric Data Warehouse MCP (global)'
+                } else {
+                    Write-Host '  Not configured.' -ForegroundColor DarkGray
+                    $results += & $report 'fabricDataWarehouseMcp' $false 'global scope not confirmed - not configured'
+                }
+            } else {
+                Write-Host '  Not configured: no scope chosen.' -ForegroundColor DarkGray
+                $results += & $report 'fabricDataWarehouseMcp' $false 'no scope chosen - not configured'
+            }
+        } else {
+            Write-Host '  Not configured.' -ForegroundColor DarkGray
+            $results += & $report 'fabricDataWarehouseMcp' $false 'declined'
+        }
+    }
+    return $results
 }
 
 # -- Offline pipeline definition check (single source; emitted to .github/agent-docs/Test-PipelineDefinition.ps1) --
@@ -8354,7 +8509,7 @@ if ($azHit) {
 # needed); whether their tools are actually exposed depends on the servers being
 # started and selected in the chat tool picker (mind the ~128-tool session limit).
 # So we ALSO record `extensionInstalled` (proven here) and `mcpToolsCallable`
-# ('unknown' until the agent runs the startup MCP self-test).
+# ('unknown': only an agent in the current chat session can establish it, when it needs the tools).
 $fabMcpFound = Test-VsCodeExtension -Id 'fabric.vscode-fabric-mcp-server' -List $installedExts
 $fabMcpReason = $null; if (-not $fabMcpFound) { $fabMcpReason = 'extension not installed' }
 Set-ToolStatus -Key 'fabricMcpServer' -Found $fabMcpFound -Category 'mcp-extension' -InstallMode 'ask' -ExtensionId 'fabric.vscode-fabric-mcp-server' -Reason $fabMcpReason -Extra @{ extensionInstalled = $fabMcpFound; mcpToolsCallable = 'unknown' }
@@ -8362,21 +8517,10 @@ $pbiMcpFound = Test-VsCodeExtension -Id 'analysis-services.powerbi-modeling-mcp'
 $pbiMcpReason = $null; if (-not $pbiMcpFound) { $pbiMcpReason = 'extension not installed' }
 Set-ToolStatus -Key 'powerBiModelMcpServer' -Found $pbiMcpFound -Category 'mcp-extension' -InstallMode 'ask' -ExtensionId 'analysis-services.powerbi-modeling-mcp' -Reason $pbiMcpReason -Extra @{ extensionInstalled = $pbiMcpFound; mcpToolsCallable = 'unknown' }
 
-# -- Remote MCP servers (Fabric IQ, Fabric Data Warehouse): recorded only, never added or signed in to.
+# -- Remote MCP servers (Fabric IQ, Fabric Data Warehouse): recorded here, offered in Step 8.
 # `found` = an entry with that endpoint is in this workspace's .vscode/mcp.json. Whether its tools are
 # callable is a per-session fact only an agent in that session can establish (mcpToolsCallable 'unknown').
-$remoteMcpConfig = $null
-$workspaceMcpJson = Join-Path $rootPath '.vscode\mcp.json'
-if (Test-Path -LiteralPath $workspaceMcpJson) { try { $remoteMcpConfig = ConvertFrom-JsonLenient ([IO.File]::ReadAllText($workspaceMcpJson)) } catch { } }
-foreach ($remoteMcp in @(Get-RemoteMcpServers $remoteMcpConfig)) {
-    $remoteReason = $null
-    if (-not $remoteMcp.Configured) { $remoteReason = 'no entry with this endpoint in .vscode/mcp.json (the kit never adds one)' }
-    elseif (-not $remoteMcp.KeyMatchesGrant) { $remoteReason = "saved under another server key; the agents' grant expects: $($remoteMcp.GrantKeys -join ' or ')" }
-    Set-ToolStatus -Key $remoteMcp.Key -Found $remoteMcp.Configured -Category 'mcp-remote' -InstallMode 'detect' -Reason $remoteReason -Extra @{
-        documented = $true; release = $remoteMcp.Release; access = $remoteMcp.Access; configured = $remoteMcp.Configured
-        serverKeys = @($remoteMcp.ServerKeys); scope = $remoteMcp.Scope; keyMatchesGrant = $remoteMcp.KeyMatchesGrant; mcpToolsCallable = 'unknown'
-    }
-}
+Set-RemoteMcpToolStatus -McpJsonPath (Join-Path $rootPath '.vscode\mcp.json')
 
 # -- Specialist tools -- detect, explain, and ask Y/N per tool.
 Write-Host ""
@@ -10527,10 +10671,10 @@ Route, in this order, for S1 to S3 against a Warehouse or SQL analytics endpoint
 
 ## Remote MCP servers - Fabric IQ and Fabric Data Warehouse
 
-Microsoft hosts both. This kit does not add, register or sign in to them; it records whether the
-workspace `.vscode/mcp.json` already holds an entry (tool-status `fabricIqMcp`,
-`fabricDataWarehouseMcp`) and grants their tools to named agents only. Facts were read on
-Microsoft Learn on 2026-11-18.
+Microsoft hosts both. Setup offers to add each to the workspace `.vscode/mcp.json` and adds one
+only on the user's explicit Yes (type and URL only, no credential); it never signs in to them.
+It records whether an entry exists (tool-status `fabricIqMcp`, `fabricDataWarehouseMcp`) and
+grants their tools to named agents only. Facts were read on Microsoft Learn on 2026-11-24.
 
 | | Fabric IQ MCP | Fabric Data Warehouse MCP |
 |---|---|---|
@@ -10540,10 +10684,10 @@ Microsoft Learn on 2026-11-18.
 | Tools | `DiscoverArtifacts`, `ResolveFabricItem`, `GetReportMetadata`, `GetSemanticModelSchema`, `ValueSearch`, `ExecuteQuery` (read `tools/list` at run time) | no fixed name: the tool that runs a T-SQL statement is taken from the server's `tools/list` answer at the step that needs it (the published name and the listed name have differed) |
 | Writes | no (read-only) | **yes**, whatever the signed-in user may run, including DDL and DML |
 | Endpoint | `https://fabriciq.svc.cloud.microsoft/v1/mcp/fabriciq` (private links: `https://api.fabric.microsoft.com/v1/mcp/fabriciq`) | `https://api.fabric.microsoft.com/v1/mcp/dataPlane/sqlEndpoint` (global) or `.../v1/mcp/dataPlane/workspaces/<workspace-id>/items/<item-id>/sqlEndpoint` (one item) |
-| Sign-in | the user's Microsoft Entra account, delegated; no service principal; RLS and OLS apply | the user's Microsoft account; Fabric and SQL permissions apply |
+| Sign-in | the user's Microsoft Entra account, delegated (`Item.Read.All`, `Item.Execute.All` on the Power BI Service); no service principal; RLS and OLS apply | the user's Microsoft account; Fabric and SQL permissions apply |
 | Server key the grants expect | `FabricIQ` | `fabric-dw-global`, `fabric-dw-item` |
 | Agents holding the grant | 038 and 043 | 033 only |
-| Microsoft documents the VS Code setup | no: the page shows GitHub Copilot CLI, and says some clients need their own app registration | yes: `.vscode/mcp.json`, type `http` |
+| Microsoft documents the VS Code setup | no: the page shows GitHub Copilot CLI, and says some clients need their own single-tenant app registration | yes: `.vscode/mcp.json`, type `http` |
 
 **Five states. Report the highest one you have evidence for, by its name.**
 1. **Documented** - Microsoft describes it. Says nothing about this machine.
@@ -10560,8 +10704,8 @@ skill that describes an endpoint is state 1. When a server is not callable, the 
 fallback applies and belongs to the agent that owns that work (model questions: the semantic-model
 team with REST `executeQueries` or the modeling MCP; SQL: route 1 or 3 above). Say which state you
 reached; when the fallback is not yours, return NEEDS INPUT so the Master can route it. Adding a
-server to `mcp.json` is the user's decision: give
-them the Microsoft Learn page, prefer the item-scoped warehouse endpoint, and do not edit
+server to `mcp.json` is the user's decision: point them to re-running setup (it offers both) or
+the Microsoft Learn page, prefer the item-scoped warehouse endpoint, and do not edit
 `mcp.json` yourself.
 
 ## Guardrails
@@ -11788,7 +11932,7 @@ if (Test-Path -LiteralPath $toolStatusPath) {
         }
         foreach ($r in $remoteMcp) {
             $reason = ''
-            if (-not $r.Configured) { $reason = 'no entry with this endpoint in .vscode/mcp.json (the kit never adds one)' }
+            if (-not $r.Configured) { $reason = 'no entry with this endpoint in .vscode/mcp.json (setup offers one; only an explicit Yes adds it)' }
             elseif (-not $r.KeyMatchesGrant) { $reason = "saved under another server key; the agents' grant expects: $($r.GrantKeys -join ' or ')" }
             $ts | Add-Member -Force -NotePropertyName $r.Key -NotePropertyValue ([pscustomobject][ordered]@{
                 found = $r.Configured; version = $null; command = $null; path = $null; category = 'mcp-remote'; installMode = 'detect'; reason = $reason
@@ -11805,7 +11949,7 @@ if (Test-Path -LiteralPath $toolStatusPath) {
     $mcpLine = if ($mcpInstalled.Count -gt 0) { "installed: $($mcpInstalled -join ', ')" } else { 'installed: none' }
     if ($mcpMissing.Count -gt 0) { $mcpLine += " | not installed: $($mcpMissing -join ', ')" }
     $remoteConfigured = @($remoteMcp | Where-Object { $_.Configured } | ForEach-Object { "$($_.Name) ($($_.Release)$(if ($_.Scope) { ', ' + $_.Scope })$(if (-not $_.KeyMatchesGrant) { ', key not the one the agents hold' }))" })
-    $remoteLine = if ($remoteConfigured.Count -gt 0) { "remote servers in .vscode/mcp.json: $($remoteConfigured -join ', ') - configured is not signed in or callable" } else { 'remote servers (Fabric IQ, Fabric Data Warehouse): none configured' }
+    $remoteLine = if ($remoteConfigured.Count -gt 0) { "remote servers in .vscode/mcp.json: $($remoteConfigured -join ', ') - configured is not signed in or callable" } else { 'remote servers (Fabric IQ, Fabric Data Warehouse): none configured (setup offers both)' }
     $out.Add("MCP      $mcpLine | connected: none yet - the Master opens a Power BI modeling connection (ConnectFabric) in the main chat before dispatching live-model work; installed != callable | $remoteLine")
 } else { $out.Add('TOOLS    tool-status.json not found -> re-run the installer') }
 
@@ -12480,8 +12624,8 @@ foreach ($mcpAgentId in $pbivizMcpAgents) {
     if ($mcpServersById.ContainsKey($mcpAgentId)) { $mcpServersById[$mcpAgentId] += 'pbiviz' }
     else { $mcpServersById[$mcpAgentId] = @('pbiviz') }
 }
-# Remote Microsoft-hosted MCP servers. The installer never adds them to mcp.json; the names are the
-# server keys Microsoft documents, so a grant only takes effect when the user saved the server under
+# Remote Microsoft-hosted MCP servers. Setup adds them to mcp.json only on an explicit Yes; the names are the
+# server keys Microsoft documents, so a grant only takes effect when the server is saved under
 # that key. Fabric IQ is read-only. The Fabric Data Warehouse server runs T-SQL including writes,
 # so it goes to the Warehouse worker alone - never to a read-only or analysis role.
 $fabricIqMcpAgents = @('fabric-intelligence-ontology-agent', 'monitoring-catalog-operations-agent')
@@ -12913,7 +13057,7 @@ $agentKnowledge = @{
             'These features change quickly: read the skill and check current API behaviour before acting.',
             'Ontology work uses ontology-cli only. Authoring = legacy V1 JSON definitions (create, then updateDefinition after a preview the user approves). Questions = new-experience (V2) Ontologies through the Ontology agent endpoint (its `tools/list` must show `ask_ontology`). V2 authoring or a V1-to-V2 upgrade is unsupported - report it; V1 natural-language queries are unsupported - never hand-compose KQL or SQL from the definition instead.',
             'Fabric IQ MCP is read-only and covers Power BI reports and semantic models only - not dashboards, paginated reports, apps, ontologies or data agents. It has no tool that answers a question: you find the item (`DiscoverArtifacts` / `ResolveFabricItem`), read its metadata and schema, write the DAX yourself and run it with `ExecuteQuery` (250 rows unless `maxRows` is set; one model per call). Row-level and object-level security apply to what it returns, so record the identity the question ran under. It is never a substitute for Ontology work, and semantic model or DAX authoring belongs to 010 via the Master.',
-            'Before relying on Fabric IQ or the Ontology agent, establish the state you can prove (fabric-cli-policy, remote MCP servers): tool-status `fabricIqMcp.configured` says only that an entry exists in `.vscode/mcp.json`; callable means its tools are in your tool list in this session; signed in means a first `DiscoverArtifacts` returned a result. The installer never configures or signs in to these endpoints, and an upstream skill describing one proves nothing about this machine. Not callable: say which state was reached and return NEEDS INPUT asking the Master to route the question to 010 (modeling MCP or REST executeQueries); you do not answer it from another source yourself. Data Agents have no dedicated upstream skill in the current catalogs - check current product documentation before acting.'
+            'Before relying on Fabric IQ or the Ontology agent, establish the state you can prove (fabric-cli-policy, remote MCP servers): tool-status `fabricIqMcp.configured` says only that an entry exists in `.vscode/mcp.json`; callable means its tools are in your tool list in this session; signed in means a first `DiscoverArtifacts` returned a result. Setup adds an entry only on the user''s explicit Yes and never signs in, and an upstream skill describing one proves nothing about this machine. Not callable: say which state was reached and return NEEDS INPUT asking the Master to route the question to 010 (modeling MCP or REST executeQueries); you do not answer it from another source yourself. Data Agents have no dedicated upstream skill in the current catalogs - check current product documentation before acting.'
         )
         validate = @('Authoring: the updateDefinition call returned success and a read-back matches the approved preview.', 'Questions: the answer came from the Ontology agent or Fabric IQ endpoint, never from KQL or SQL you composed against the underlying source; the result names the state reached (configured / callable / signed in / executed) and quotes the query that was run.')
         tools = @('Fabric MCP/*; fab api; FabricIQ/* and the Ontology agent endpoint only when callable in this session.')
@@ -14167,11 +14311,12 @@ makes one cheap read-only call on first live use. If either is unavailable, the
 REST/CLI fallback described in `working-flow-reference.md` applies. Mind the
 ~128-tool chat picker budget.
 
-Two remote Microsoft-hosted MCP servers are known to the kit but never added or signed
-in to by it: Fabric IQ (read-only questions over reports and semantic models) and the
-Fabric Data Warehouse server (preview; runs T-SQL, including changes). tool-status
-`fabricIqMcp` / `fabricDataWarehouseMcp` only say whether `.vscode/mcp.json` holds an
-entry. Agents report the state they can prove - documented, configured, callable,
+Two remote Microsoft-hosted MCP servers are known to the kit. Setup offers to configure
+each and adds one only on an explicit Yes; it never signs in to them: Fabric IQ (read-only
+questions over reports and semantic models) and the Fabric Data Warehouse server (preview;
+runs T-SQL, including changes). tool-status `fabricIqMcp` / `fabricDataWarehouseMcp` only
+say whether `.vscode/mcp.json` holds an entry. Agents never add or edit an entry themselves.
+Agents report the state they can prove - documented, configured, callable,
 signed in, executed - as defined in `fabric-cli-policy`.
 
 ### Microsoft skills (cloned repo -- registered in `chat.agentSkillsLocations`)
@@ -14403,6 +14548,10 @@ Write-ManagedFile "$rootPath\.github\agent-docs\Pbiviz-Alm.ps1" $pbivizAlmScript
 Write-Host "  Written: .github/agent-docs/Pbiviz-Alm.ps1" -ForegroundColor Green
 $mcpMerge = Merge-McpJson -Path "$rootPath\.vscode\mcp.json"
 Write-Host "  .vscode/mcp.json: $($mcpMerge.Status)" -ForegroundColor $(if ($mcpMerge.Status -match 'malformed|unexpected|manually') { 'Yellow' } else { 'Green' })
+if (-not $EmitAgentsTo) {
+    $null = Invoke-RemoteMcpOffer -Path "$rootPath\.vscode\mcp.json"
+    Set-RemoteMcpToolStatus -McpJsonPath "$rootPath\.vscode\mcp.json"
+}
 
 $pbivizInitStatus = $null
 $pbivizInit = $null

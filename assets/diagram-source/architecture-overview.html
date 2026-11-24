@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   Source of assets/architecture-overview.png (the cover at the top of the README). Render it with Render-Diagrams.ps1; see README.md.
-  Every figure mirrors the installer: 54 agents (3 + 8 + 43), 11 custom skills (5 Fabric + 6 PBIVIZ), the tools of README section 2.4.
+  Every figure mirrors the installer: 54 agents (3 + 8 + 43), 11 custom skills (5 Fabric + 6 PBIVIZ), the tools of README section 2.4
+  and 5 supported MCP integrations (2 optional extensions, 1 automatic Microsoft Learn entry, 2 remote data servers offered in Step 8).
   The specialists per Team Lead are listed in ../agent-organisation-source/agent-organisation.html. No third-party logo is stored here.
 -->
 <html lang="en">
@@ -62,8 +63,15 @@
   <div class="card stat wide"><div class="n">2</div><div class="l">cloned skill repositories</div><div class="d">microsoft/skills-for-fabric<br>data-goblin/power-bi-agentic-development</div></div>
   <div class="card stat"><div class="n">3</div><div class="l">working modes</div><div class="d">Local · Live · Hybrid, with one Git-governed delivery path</div></div>
   <div class="card stat"><div class="n">2</div><div class="l">recommended CLIs</div><div class="d">Fabric CLI · Azure CLI</div></div>
-  <div class="card stat"><div class="n">6</div><div class="l">specialist CLIs</div><div class="d">pbir · Tabular Editor CLI · pbi-tools · sqlcmd · gh · az devops</div></div>
-  <div class="card stat"><div class="n">3</div><div class="l">MCP integrations</div><div class="d">Fabric · Power BI modeling · Microsoft Learn</div></div>
+  <div class="card stat wide"><div class="n">6</div><div class="l">specialist CLIs</div><div class="d">pbir · Tabular Editor CLI · pbi-tools · sqlcmd · gh · az devops<br>All CLIs are optional and installed only on your Yes</div></div>
+  <div class="card stat mcp">
+    <div class="mhead"><div class="n">5</div><div class="l">supported MCP integrations</div><div class="d">Supported does not mean installed, signed in or callable.</div></div>
+    <div class="groups">
+      <div class="grp"><div class="k">2</div><div class="t">optional VS Code extensions</div><div class="d">Fabric · Power BI modeling<br>Installed only on your Yes</div></div>
+      <div class="grp"><div class="k">1</div><div class="t">configured automatically</div><div class="d">Microsoft Learn MCP<br>Public documentation, no sign-in</div></div>
+      <div class="grp"><div class="k">2</div><div class="t">Microsoft-hosted data MCPs</div><div class="d">Fabric IQ · Fabric Data Warehouse<br>Configured only on your Yes</div></div>
+    </div>
+  </div>
 </section>
 <!-- The renderer reads data-h to size the screenshot to the full page height. -->
 <script>document.documentElement.setAttribute('data-h', Math.ceil(document.documentElement.getBoundingClientRect().height));</script>

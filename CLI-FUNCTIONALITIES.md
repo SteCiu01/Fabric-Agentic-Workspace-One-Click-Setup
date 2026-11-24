@@ -8,10 +8,12 @@ The agents run in GitHub Copilot Chat in VS Code, in local Agent Mode. The CLIs 
 are tools that the agents, or you, run in a terminal.
 
 - **No CLI is required.** The Fabric VS Code extension and the agents editing local files
-  work without one. A CLI adds terminal access to the Fabric control plane and data plane.
-- **The Fabric CLI (`fab`) is the default.** The Azure CLI (`az`) and `sqlcmd` are fallbacks
-  for what `fab` does not cover: T-SQL queries, tokens for non-Fabric audiences, a REST
-  endpoint `fab api` does not reach, and Azure resource actions such as pausing a capacity.
+  work without one; Git is the only command-line prerequisite. A CLI adds terminal access to
+  the Fabric control plane and data plane.
+- **The Fabric CLI (`fab`) is the default.** The Azure CLI (`az`) is the fallback for what
+  `fab` does not cover: tokens for non-Fabric audiences, a REST endpoint `fab api` does not
+  reach, and Azure resource actions such as pausing a capacity. Neither `fab` nor `az` runs
+  T-SQL: that is `sqlcmd`, a separate specialist CLI.
 - **Specialist CLIs are opt-in.** `pbir`, Tabular Editor CLI, `pbi-tools`, `sqlcmd`, `gh`
   and `az devops` give individual agents extra reach for reports, semantic models, SQL and ALM.
 - **Nothing is installed without your Yes.** The installer asks `Y/N` before it installs a
@@ -78,7 +80,7 @@ Official references:
 - [5. Tables & OneLake (data plane)](#5-tables--onelake-data-plane)
 - [6. Admin & governance](#6-admin--governance)
 - [7. Raw REST API access](#7-raw-rest-api-access)
-- [8. SQL / TDS query (az / sqlcmd fallback)](#8-sql--tds-query-az--sqlcmd-fallback)
+- [8. SQL / TDS query (sqlcmd)](#8-sql--tds-query-sqlcmd)
 - [9. Tokens for non-Fabric audiences (az fallback)](#9-tokens-for-non-fabric-audiences-az-fallback)
 - [10. Interactive shell & navigation](#10-interactive-shell--navigation)
 - [11. Workspace & item lifecycle](#11-workspace--item-lifecycle)
@@ -110,7 +112,7 @@ Official references:
 # Part I — Fabric platform CLIs (`fab` + `az` fallback)
 
 Commands are grouped by workload. `fab` is the default for control-plane and data-plane
-work; `az` and `sqlcmd` appear only in the fallback cases (sections 0, 7, 8, 9 and 19).
+work; `az` appears only in the fallback cases (sections 0, 7, 9 and 19) and `sqlcmd` for T-SQL (section 8).
 
 ## 0. Authentication & identity
 
@@ -248,10 +250,10 @@ authentication and filters the response with JMESPath (`-q`).
 
 ---
 
-## 8. SQL / TDS query (az / sqlcmd fallback)
+## 8. SQL / TDS query (sqlcmd)
 
-`fab` does not run T-SQL against a SQL endpoint. Use `sqlcmd` with Microsoft Entra
-authentication (`-G`), or another SQL client:
+`fab` does not run T-SQL against a SQL endpoint, and neither does `az`. Use `sqlcmd` with
+Microsoft Entra authentication (`-G`), or another SQL client:
 
 ```
 sqlcmd -G -S <endpoint>.datawarehouse.fabric.microsoft.com -d <db> -Q "SELECT TOP 10 * FROM dbo.sales"
@@ -296,9 +298,12 @@ whose description and input schema say it runs a T-SQL statement.
   names and descriptions it saw.
 
 **MCP servers.** The public Microsoft Learn documentation MCP can be configured automatically where supported. MCP integrations accessing a user's Fabric data require the appropriate environment configuration and permissions.
-The installer never adds or signs in to the Fabric Data Warehouse MCP server: adding it to
-`.vscode/mcp.json` is your decision. `tool-status.json` (`fabricDataWarehouseMcp`) records
-only whether that file holds an entry.
+The installer offers to configure the Fabric Data Warehouse MCP server in Step 8 and adds it
+to `.vscode/mcp.json` only on your explicit Yes: item-scoped (`fabric-dw-item`) by default,
+global (`fabric-dw-global`) only when you choose and confirm it. It writes the type and URL
+only, never a credential, and never signs in. `tool-status.json` (`fabricDataWarehouseMcp`)
+records only whether that file holds an entry: configured is not signed in or callable.
+Manual setup: [README 2.4](README.md#configure-the-remote-mcp-servers-yourself).
 
 ---
 
@@ -363,8 +368,8 @@ navigate workspaces and items like a file system.
 | Start mirroring | `fab api workspaces/<wsId>/mirroredDatabases/<id>/startMirroring --method post` |
 | Get mirroring status | `fab api workspaces/<wsId>/mirroredDatabases/<id>/getMirroringStatus --method post` |
 
-> T-SQL queries against these endpoints are a fallback case: see
-> [section 8](#8-sql--tds-query-az--sqlcmd-fallback).
+> T-SQL queries against these endpoints run through `sqlcmd`, not `fab` or `az`: see
+> [section 8](#8-sql--tds-query-sqlcmd).
 
 ---
 
@@ -688,7 +693,7 @@ PBIX/PBIT, converts between serialization formats, and deploys.
 
 Runs T-SQL against a Fabric Warehouse or Lakehouse SQL analytics endpoint (or Azure SQL),
 which `fab` does not do. Permission classes and the route order:
-[section 8](#8-sql--tds-query-az--sqlcmd-fallback).
+[section 8](#8-sql--tds-query-sqlcmd).
 
 - **Owner**: 033 Warehouse SQL Agent, 034 SQL Database Agent and 063 SQL, ODBC & Data Access
   Agent. 063 reads only: it stops at class `S2`.
@@ -703,7 +708,7 @@ which `fab` does not do. Permission classes and the route order:
 | CSV-style output | add `-s "," -W` to the query |
 
 - **Fallback when absent**: 033 continues with routes 2 to 4 of
-  [section 8](#8-sql--tds-query-az--sqlcmd-fallback). In data-access code (063): Python
+  [section 8](#8-sql--tds-query-sqlcmd). In data-access code (063): Python
   `pyodbc` with an Entra token
   (`conn = pyodbc.connect(connstr, attrs_before={1256: token})`), or any SQL client.
   Get the token with `az account get-access-token --resource https://database.windows.net`.

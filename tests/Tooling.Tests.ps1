@@ -3,8 +3,8 @@
 # CLI and MCP capability rules added in v0.9.0, read from the installer source and run
 # in-process (nothing is installed, started or contacted):
 #   * remote Microsoft-hosted MCP servers (Fabric IQ, Fabric Data Warehouse) are detected
-#     by URL in a parsed mcp.json, never added by the installer, and granted to named
-#     agents only;
+#     by URL in a parsed mcp.json, added by setup only on an explicit Yes (type and URL,
+#     never a credential), and granted to named agents only;
 #   * agents report the state they can prove: documented, configured, callable,
 #     signed in, executed;
 #   * SQL work is classified (S0-S4) before a route is chosen: a SQL tool is not permission;
@@ -17,7 +17,8 @@ BeforeAll {
     $script:Raw = [IO.File]::ReadAllText($script:Installer)
     $script:Ast = [System.Management.Automation.Language.Parser]::ParseFile($script:Installer, [ref]$null, [ref]$null)
     $script:Manifest = Get-AgentManifest
-    . (Get-InstallerFunctionLoader 'Get-RemoteMcpServers')
+    . (Get-InstallerFunctionLoader 'Get-RemoteMcpServers', 'Set-RemoteMcpToolStatus', 'Set-ToolStatus', 'Invoke-RemoteMcpOffer', 'Test-FabricItemId', 'Read-FabricItemId',
+        'Merge-McpJson', 'Add-McpServerText', 'Get-JsoncTokens', 'ConvertFrom-JsonLenient', 'Write-ManagedFile', 'Test-ExplicitYes', 'Read-ExplicitYes')
 
     function Get-HereString([string]$Name) {
         $m = [regex]::Match($script:Raw, "(?s)\`$$Name = @'\r?\n(.*?)\r?\n'@")
@@ -133,24 +134,222 @@ Describe 'Remote MCP servers are detected by URL, not assumed (TOOL-01, TOOL-02)
     }
 }
 
-Describe 'The installer records remote MCP servers and never adds them (TOOL-01, TOOL-02)' {
+Describe 'Optional configuration of the remote MCP servers (installer offer, mocked answers)' {
+
+    BeforeAll {
+        $script:OfferRoot = Join-Path ([IO.Path]::GetTempPath()) ('fabric_mcpoffer_' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        New-Item -ItemType Directory -Path $script:OfferRoot | Out-Null
+        $script:OfferCount = 0
+        function New-OfferFile($Content) {
+            $script:OfferCount++
+            $dir = Join-Path $script:OfferRoot "w$($script:OfferCount)\.vscode"
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $f = Join-Path $dir 'mcp.json'
+            if ($null -ne $Content) { [IO.File]::WriteAllText($f, $Content) }
+            return $f
+        }
+        function Get-OfferBytes([string]$Path) { if (Test-Path -LiteralPath $Path) { return [Convert]::ToBase64String([IO.File]::ReadAllBytes($Path)) } return '<none>' }
+        # Each Read-Host takes the next answer; an exhausted queue is end of input (no value at all).
+        function Invoke-Offer([string]$Path, [object[]]$Answers) {
+            $script:AnswerQueue = New-Object System.Collections.Queue
+            foreach ($a in $Answers) { $script:AnswerQueue.Enqueue($a) }
+            $script:Asked = 0
+            return @(Invoke-RemoteMcpOffer -Path $Path)
+        }
+    }
+
+    BeforeEach {
+        Mock Write-Host { }
+        Mock Read-Host { $script:Asked++; if ($script:AnswerQueue.Count -gt 0) { return $script:AnswerQueue.Dequeue() }; return }
+    }
+
+    AfterAll {
+        if ($script:OfferRoot -and (Test-Path -LiteralPath $script:OfferRoot)) { Remove-Item -LiteralPath $script:OfferRoot -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'Y for Fabric IQ, N for the Warehouse: only FabricIQ is added, with type and URL only' {
+        $f = New-OfferFile $null
+        $r = Invoke-Offer $f @('Y', 'N')
+        ($r | Where-Object Server -eq 'fabricIqMcp').Changed | Should -BeTrue
+        ($r | Where-Object Server -eq 'fabricDataWarehouseMcp').Status | Should -Be 'declined'
+        $j = [IO.File]::ReadAllText($f) | ConvertFrom-Json
+        @($j.servers.PSObject.Properties.Name) | Should -Be @('FabricIQ')
+        @($j.servers.FabricIQ.PSObject.Properties.Name) | Should -Be @('type', 'url')
+        $j.servers.FabricIQ.type | Should -Be 'http'
+        $j.servers.FabricIQ.url | Should -BeExactly $script:IqUrl
+        [IO.File]::ReadAllText($f) | Should -Not -Match '(?i)authorization|headers|bearer|token|mcpServers'
+    }
+
+    It 'YES in any case is a Yes; <Name> is a No' -TestCases @(
+        @{ Name = 'N'; Answer = 'N' }, @{ Name = 'NO'; Answer = 'NO' }, @{ Name = 'an empty line'; Answer = '' },
+        @{ Name = 'other text'; Answer = 'sure' }, @{ Name = 'a null answer'; Answer = $null }
+    ) {
+        param($Name, $Answer)
+        $f = New-OfferFile '{ "servers": { "microsoftDocs": { "type": "http", "url": "https://learn.microsoft.com/api/mcp" } } }'
+        $before = Get-OfferBytes $f
+        $r = Invoke-Offer $f @($Answer, $Answer)
+        Get-OfferBytes $f | Should -Be $before -Because $Name
+        @($r | Where-Object { $_.Changed }).Count | Should -Be 0
+        $g = New-OfferFile $null
+        Invoke-Offer $g @(' yes ', 'n') | Out-Null
+        ([IO.File]::ReadAllText($g) | ConvertFrom-Json).servers.FabricIQ.url | Should -BeExactly $script:IqUrl
+    }
+
+    It 'unanswered input (end of input) configures nothing and creates no file' {
+        $f = New-OfferFile $null
+        $r = Invoke-Offer $f @()
+        Test-Path -LiteralPath $f | Should -BeFalse
+        @($r | ForEach-Object { $_.Status }) | Should -Be @('declined', 'declined')
+        $script:Asked | Should -Be 2 -Because 'each server is asked once; nothing follows a No'
+    }
+
+    It 'a malformed JSONC file is neither offered nor repaired' {
+        $f = New-OfferFile "{ // mine`n  ""servers"": { broken"
+        $before = Get-OfferBytes $f
+        $r = Invoke-Offer $f @('Y', 'Y', 'G', 'Y')
+        Get-OfferBytes $f | Should -Be $before
+        $script:Asked | Should -Be 0
+        @($r | ForEach-Object { $_.Status }) | Should -Be @('mcp.json unreadable - not offered', 'mcp.json unreadable - not offered')
+    }
+
+    It 'a key conflict is reported and never overwritten' {
+        $f = New-OfferFile '{ "servers": { "FabricIQ": { "type": "http", "url": "https://example.invalid/other" }, "fabric-dw-item": { "type": "stdio", "command": "x" } } }'
+        $before = Get-OfferBytes $f
+        $r = Invoke-Offer $f @('Y', 'Y', 'I', $script:Ws, $script:Item)
+        Get-OfferBytes $f | Should -Be $before
+        ($r | Where-Object Server -eq 'fabricIqMcp').Status | Should -Match "a server named 'FabricIQ' already exists - left unchanged"
+        ($r | Where-Object Server -eq 'fabricDataWarehouseMcp').Status | Should -Match "a server named 'fabric-dw-item' already exists - left unchanged"
+    }
+
+    It 'an endpoint already present under any key is detected and not asked again (no duplicate)' {
+        $f = New-OfferFile '{ "servers": { "my-iq": { "type": "http", "url": "https://api.fabric.microsoft.com/v1/mcp/fabriciq" }, "dw": { "type": "http", "url": "https://api.fabric.microsoft.com/v1/mcp/dataPlane/sqlEndpoint" } } }'
+        $before = Get-OfferBytes $f
+        $r = Invoke-Offer $f @('Y', 'Y', 'G', 'Y')
+        Get-OfferBytes $f | Should -Be $before
+        $script:Asked | Should -Be 0
+        @($r | ForEach-Object { $_.Status }) | Should -Be @('already configured', 'already configured')
+    }
+
+    It 'item scope writes the item-scoped endpoint with the validated identifiers' {
+        $f = New-OfferFile $null
+        Invoke-Offer $f @('n', 'Y', 'I', " $($script:Ws.ToUpperInvariant()) ", $script:Item) | Out-Null
+        $j = [IO.File]::ReadAllText($f) | ConvertFrom-Json
+        @($j.servers.PSObject.Properties.Name) | Should -Be @('fabric-dw-item')
+        $j.servers.'fabric-dw-item'.url | Should -BeExactly $script:DwItem
+        (@(Get-RemoteMcpServers $j) | Where-Object Key -eq 'fabricDataWarehouseMcp').Scope | Should -Be 'item'
+    }
+
+    It 'invalid or missing identifiers never fall back to the global endpoint (<Name>)' -TestCases @(
+        @{ Name = 'three invalid workspace IDs'; Ids = @('abc', '12345', 'not-a-guid') },
+        @{ Name = 'the all-zero placeholder'; Ids = @('00000000-0000-0000-0000-000000000000', '', '') },
+        @{ Name = 'end of input after the workspace ID'; Ids = @('11111111-1111-1111-1111-111111111111') },
+        @{ Name = 'the same ID twice'; Ids = @('11111111-1111-1111-1111-111111111111', '11111111-1111-1111-1111-111111111111') }
+    ) {
+        param($Name, $Ids)
+        $f = New-OfferFile $null
+        $r = Invoke-Offer $f (@('n', 'Y', 'I') + $Ids)
+        Test-Path -LiteralPath $f | Should -BeFalse -Because $Name
+        ($r | Where-Object Server -eq 'fabricDataWarehouseMcp').Status | Should -Match 'no valid identifiers - not configured'
+    }
+
+    It 'the global endpoint needs its own explicit confirmation (<Name>)' -TestCases @(
+        @{ Name = 'confirmed'; Confirm = 'y'; Added = $true },
+        @{ Name = 'declined'; Confirm = 'n'; Added = $false },
+        @{ Name = 'unanswered'; Confirm = $null; Added = $false }
+    ) {
+        param($Name, $Confirm, $Added)
+        $f = New-OfferFile $null
+        $answers = @('n', 'Y', 'G'); if ($null -ne $Confirm) { $answers += $Confirm }
+        Invoke-Offer $f $answers | Out-Null
+        if ($Added) { ([IO.File]::ReadAllText($f) | ConvertFrom-Json).servers.'fabric-dw-global'.url | Should -BeExactly $script:DwGlobal }
+        else { Test-Path -LiteralPath $f | Should -BeFalse -Because $Name }
+    }
+
+    It 'no scope chosen configures nothing' {
+        $f = New-OfferFile $null
+        $r = Invoke-Offer $f @('n', 'Y', '')
+        Test-Path -LiteralPath $f | Should -BeFalse
+        ($r | Where-Object Server -eq 'fabricDataWarehouseMcp').Status | Should -Be 'no scope chosen - not configured'
+    }
+
+    It 'keeps JSONC comments, formatting and existing servers, and a re-run changes nothing and asks nothing' {
+        $orig = "{`r`n  // my servers`r`n  ""servers"": {`r`n    ""microsoftDocs"": { ""type"": ""http"", ""url"": ""https://learn.microsoft.com/api/mcp"" }`r`n  },`r`n  /* inputs */`r`n  ""inputs"": []`r`n}`r`n"
+        $f = New-OfferFile $orig
+        Invoke-Offer $f @('y', 'y', 'i', $script:Ws, $script:Item) | Out-Null
+        $new = [IO.File]::ReadAllText($f)
+        $new | Should -Match ([regex]::Escape('// my servers'))
+        $new | Should -Match ([regex]::Escape('/* inputs */'))
+        $j = ConvertFrom-JsonLenient $new
+        @($j.servers.PSObject.Properties.Name | Sort-Object) | Should -Be @('fabric-dw-item', 'FabricIQ', 'microsoftDocs')
+        $j.servers.microsoftDocs.url | Should -Be 'https://learn.microsoft.com/api/mcp'
+        $after = Get-OfferBytes $f
+        $r = Invoke-Offer $f @('y', 'y', 'g', 'y')
+        Get-OfferBytes $f | Should -Be $after
+        $script:Asked | Should -Be 0
+        @($r | ForEach-Object { $_.Status }) | Should -Be @('already configured', 'already configured')
+    }
+
+    It 'tool-status then says configured, with the key the agents hold, and never callable' {
+        $f = New-OfferFile $null
+        Invoke-Offer $f @('y', 'y', 'i', $script:Ws, $script:Item) | Out-Null
+        $script:ToolStatus = [ordered]@{}
+        Set-RemoteMcpToolStatus -McpJsonPath $f
+        foreach ($k in 'fabricIqMcp', 'fabricDataWarehouseMcp') {
+            $script:ToolStatus[$k].configured | Should -BeTrue
+            $script:ToolStatus[$k].keyMatchesGrant | Should -BeTrue
+            $script:ToolStatus[$k].mcpToolsCallable | Should -Be 'unknown'
+        }
+        $script:ToolStatus['fabricDataWarehouseMcp'].scope | Should -Be 'item'
+        $script:ToolStatus = [ordered]@{}
+        Set-RemoteMcpToolStatus -McpJsonPath (Join-Path $script:OfferRoot 'missing\mcp.json')
+        $script:ToolStatus['fabricIqMcp'].reason | Should -Match 'only an explicit Yes adds it'
+    }
+
+    It 'validates Fabric identifiers locally' {
+        Test-FabricItemId $script:Ws | Should -BeTrue
+        foreach ($bad in @($null, '', 'x', '{11111111-1111-1111-1111-111111111111}', '11111111-1111-1111-1111-11111111111', '00000000-0000-0000-0000-000000000000', "$($script:Ws)/items")) { Test-FabricItemId $bad | Should -BeFalse -Because "[$bad]" }
+    }
+}
+
+Describe 'The installer records remote MCP servers and adds one only on an explicit Yes (TOOL-01, TOOL-02)' {
 
     It 'records both as detect-only entries whose tools are of unknown callability' {
         $script:Raw | Should -Match ([regex]::Escape("Set-ToolStatus -Key `$remoteMcp.Key -Found `$remoteMcp.Configured -Category 'mcp-remote' -InstallMode 'detect'"))
         $script:Raw | Should -Match "keyMatchesGrant = \`$remoteMcp\.KeyMatchesGrant; mcpToolsCallable = 'unknown'"
     }
 
-    It 'writes only the Microsoft Learn server into mcp.json' {
+    It 'adds the Microsoft Learn server at top level and the remote servers only through the offer, outside emit mode' {
         $fn = $script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Merge-McpJson' }, $false) | Select-Object -First 1
-        $fn.Extent.Text | Should -Not -Match 'fabriciq|sqlEndpoint|dataPlane'
-        $calls = @($script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -in @('Merge-McpJson', 'Add-McpServerText') }, $true) |
+        $fn.Extent.Text | Should -Not -Match 'fabriciq|sqlEndpoint|dataPlane' -Because 'the merge is generic; the offer decides what to add'
+        $calls = @($script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -in @('Merge-McpJson', 'Add-McpServerText', 'Invoke-RemoteMcpOffer') }, $true) |
             Where-Object { $p = $_.Parent; $inside = $false; while ($p) { if ($p -is [System.Management.Automation.Language.FunctionDefinitionAst]) { $inside = $true; break }; $p = $p.Parent }; -not $inside })
-        $calls.Count | Should -Be 1
-        $calls[0].Extent.Text | Should -BeExactly 'Merge-McpJson -Path "$rootPath\.vscode\mcp.json"'
+        @($calls | ForEach-Object { $_.Extent.Text }) | Should -Be @('Merge-McpJson -Path "$rootPath\.vscode\mcp.json"', 'Invoke-RemoteMcpOffer -Path "$rootPath\.vscode\mcp.json"')
+        $script:Raw | Should -Match ('if \(-not \$EmitAgentsTo\) \{\r?\n    \$null = Invoke-RemoteMcpOffer -Path "\$rootPath\\\.vscode\\mcp\.json"\r?\n    Set-RemoteMcpToolStatus -McpJsonPath "\$rootPath\\\.vscode\\mcp\.json"')
+        $script:Raw.IndexOf('$null = Invoke-RemoteMcpOffer') | Should -BeLessThan $script:Raw.IndexOf('Write-ManagedFile "$rootPath\.github\agent-docs\tool-status.json" $toolStatusJson') -Because 'tool-status must reflect this run''s answers'
     }
 
-    It 'has no question that offers to add or sign in to a remote server' {
-        $script:Raw | Should -Not -Match '(?i)Read-(ExplicitYes|DefaultYes|Host)[^\r\n]*(Fabric IQ|FabricIQ|Data Warehouse MCP|sqlEndpoint)'
+    It 'asks both questions through the fail-closed consent helper, with the agreed wording' {
+        $fn = ($script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-RemoteMcpOffer' }, $false) | Select-Object -First 1).Extent.Text
+        $fn | Should -Match ([regex]::Escape("Read-ExplicitYes '  Configure Fabric IQ MCP in VS Code? (Y/N)'"))
+        $fn | Should -Match ([regex]::Escape("Read-ExplicitYes '  Configure Fabric Data Warehouse MCP in VS Code? (Y/N)'"))
+        $fn | Should -Match ([regex]::Escape("Read-ExplicitYes '  Confirm the GLOBAL endpoint"))
+        $script:Raw | Should -Not -Match '(?i)(Read-DefaultYes)[^\r\n]*(Fabric IQ|FabricIQ|Data Warehouse MCP|GLOBAL endpoint)'
+    }
+
+    It 'never writes a credential, header or token into mcp.json' {
+        foreach ($name in 'Invoke-RemoteMcpOffer', 'Merge-McpJson') {
+            $fn = ($script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $false) | Select-Object -First 1).Extent.Text
+            $fn | Should -Not -Match '(?i)"(headers|authorization)"|Bearer|access_?token|client_?secret' -Because $name
+        }
+    }
+
+    It 'describes the servers as remote connections, never as an install' {
+        $fn = ($script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-RemoteMcpOffer' }, $false) | Select-Object -First 1).Extent.Text
+        $fn | Should -Match 'Nothing is installed'
+        $fn | Should -Not -Match '(?i)install (the|a|this) (server|MCP)|installing (the|a) (server|MCP)'
+        $fn | Should -Match 'Item\.Read\.All and Item\.Execute\.All'
+        $fn | Should -Match 'single-tenant app registration'
+        $fn | Should -Match 'including statements that change'
     }
 
     It 'grants Fabric IQ (read-only) to 038 and 043 only' {
@@ -185,8 +384,8 @@ Describe 'Agents report the state they can prove (TOOL-01, TOOL-02)' {
         $script:Remote | Should -Match 'A\s+skill that describes an endpoint is state 1'
     }
 
-    It 'the kit does not add, register or sign in to these servers, and agents do not edit mcp.json' {
-        $script:Remote | Should -Match 'This kit does not add, register or sign in to them'
+    It 'setup adds these servers only on an explicit Yes and never signs in; agents do not edit mcp.json' {
+        $script:Remote | Should -Match 'Setup offers to add each to the workspace `\.vscode/mcp\.json` and adds one\s+only on the user''s explicit Yes \(type and URL only, no credential\); it never signs in to them'
         $script:Remote | Should -Match 'do not edit\s+`mcp\.json` yourself'
     }
 
@@ -221,7 +420,7 @@ Describe 'Agents report the state they can prove (TOOL-01, TOOL-02)' {
         $b = Get-AgentBlock 'fabric-intelligence-ontology-agent'
         $b | Should -Match 'tool-status `fabricIqMcp\.configured` says only that an entry exists'
         $b | Should -Match 'callable means its tools are in your tool list in this session'
-        $b | Should -Match 'The installer never configures or signs in to these endpoints, and an upstream skill describing one proves nothing about this machine'
+        $b | Should -Match 'Setup adds an entry only on the user''''s explicit Yes and never signs in, and an upstream skill describing one proves nothing about this machine'
         $b | Should -Match 'It has no tool that answers a question'
         $b | Should -Match 'not dashboards, paginated reports, apps, ontologies or data agents'
         $b | Should -Match 'never a substitute for Ontology work'
@@ -239,7 +438,8 @@ Describe 'Agents report the state they can prove (TOOL-01, TOOL-02)' {
     }
 
     It 'the copilot instructions carry the same rule for every agent' {
-        $script:Raw | Should -Match 'Two remote Microsoft-hosted MCP servers are known to the kit but never added or signed\r?\nin to by it'
+        $script:Raw | Should -Match 'Two remote Microsoft-hosted MCP servers are known to the kit\. Setup offers to configure\r?\neach and adds one only on an explicit Yes; it never signs in to them'
+        $script:Raw | Should -Match 'Agents never add or edit an entry themselves\.'
         $script:Raw | Should -Match 'Agents report the state they can prove - documented, configured, callable,\r?\nsigned in, executed'
     }
 }

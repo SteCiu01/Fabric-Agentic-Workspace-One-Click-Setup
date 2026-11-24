@@ -86,7 +86,7 @@ chore: update skills-for-fabric clone URL
 ## Good first contributions
 
 Look for issues labelled [`good first issue`](https://github.com/SteCiu01/Fabric-Agentic-Workspace-One-Click-Setup/labels/good%20first%20issue),
-or pick an item from *Not verified end to end* in
+or pick an item from the known limitations in
 [Validation, compatibility and known limitations](README.md#311-validation-compatibility-and-known-limitations).
 
 Some ideas:

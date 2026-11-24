@@ -15,7 +15,7 @@
 > - **How to start** — check the [prerequisites](#11-before-you-start--checklist), [get the two installer files](#13-get-the-two-files), double-click `Setup-FabricAgenticWorkspace.bat` and answer the prompts. When VS Code opens, select **000 - Fabric Workspace Master** in Copilot Chat ([1.5](#15-your-first-session)).
 
 <p align="center">
-  <img src="assets/architecture-overview.png" alt="Overview: the Fabric Workspace Master, two reviewers (Solution Architect, Integration QA and Change Controller) and eight Team Leads with 43 delegated specialists; 54 agents, 11 custom skills, 2 cloned skill repositories, 3 working modes, 2 recommended CLIs, 6 specialist CLIs and 3 MCP integrations" width="100%"/>
+  <img src="assets/architecture-overview.png" alt="Overview: the Fabric Workspace Master, two reviewers (Solution Architect, Integration QA and Change Controller) and eight Team Leads with 43 delegated specialists; 54 agents, 11 custom skills, 2 cloned skill repositories, 3 working modes, 2 recommended CLIs, 6 specialist CLIs and 5 supported MCP integrations: 2 optional VS Code extensions, the Microsoft Learn MCP configured automatically, and 2 Microsoft-hosted data MCPs configured only on your Yes. Supported does not mean installed, signed in or callable" width="100%"/>
 </p>
 
 ---
@@ -101,9 +101,13 @@ The installer **stops** when Git or VS Code is missing. It **asks** before every
 
 A **No** is not remembered: a missing tool is offered again on the next run.
 
-**Detected only** — Tabular Editor 3, the `te` CLI, `powerbi-report-author` and the remote **Fabric IQ** and **Fabric Data Warehouse** MCP servers are reported and recorded for the agents when present. The installer never installs or configures them.
+**Detected only** — Tabular Editor 3, the `te` CLI and `powerbi-report-author` are reported and recorded for the agents when present. The installer never installs them.
 
-**MCP and your data** — the public Microsoft Learn documentation server is added to `.vscode/mcp.json` when the file can be patched safely ([1.2](#12-what-the-installer-puts-on-your-machine)). The two MCP extensions reach your Fabric data only after you sign in, with the permissions your account has: installing one does not connect it ([1.5](#15-your-first-session)).
+**Offered as connections, not installs** — the Microsoft-hosted **Fabric IQ** and **Fabric Data Warehouse** MCP servers. In [Step 8](#step-8-of-9--writing-configuration-files) the installer asks about each one; a **Yes** adds its address to `.vscode/mcp.json`. Nothing is installed and no credential is stored: you sign in later, in VS Code.
+
+**MCP and your data** — the public Microsoft Learn documentation server is added to `.vscode/mcp.json` when the file can be patched safely ([1.2](#12-what-the-installer-puts-on-your-machine)). The two MCP extensions and the two remote data servers reach your Fabric data only after you sign in, with the permissions your account has: installing an extension or configuring a server does not connect it ([1.5](#15-your-first-session)).
+
+> **No optional CLI is required.** Git is the only command-line prerequisite. `fab`, `az` and the specialist CLIs are optional: full-local mode needs none of them, and agents fall back when one is missing.
 
 > **Full-local mode needs none of the optional tools.** They power the live and hybrid ways of working ([2.2](#22-three-ways-of-working)). "Recommended" is advice, not consent. If company policy blocks an install you agreed to, the installer prints a warning and continues.
 
@@ -117,7 +121,7 @@ A **No** is not remembered: a missing tool is offered again on the next run.
 - Installer-managed files: 54 agent definitions, 11 custom skills, `copilot-instructions.md`, `AGENTS.md`, `.vscode/` settings and tasks, and `.github/agent-docs/` (status script, helper scripts, flow documents, `tool-status.json`). The layout is in [2.5](#25-workspace-structure).
 - `.gitignore`: written only if none exists; an existing one gets only the required exclusions appended.
 - `0 - Team of Agents Local Files/` (gitignored): where the agents keep their working files. Existing content in a folder of that name is never moved or removed. A root `scripts/` folder is never moved or emptied; it is added to `.gitignore` only when it exists and holds nothing tracked.
-- `.vscode/mcp.json`: the Microsoft Learn documentation MCP server (`microsoftDocs`, `https://learn.microsoft.com/api/mcp`) is added when no server with that URL exists. Your servers and inputs are kept, a malformed file is left untouched, and the file is never purged.
+- `.vscode/mcp.json`: the Microsoft Learn documentation MCP server (`microsoftDocs`, `https://learn.microsoft.com/api/mcp`) is added when no server with that URL exists. Only if you answer **Y** in Step 8: a `FabricIQ` entry and a `fabric-dw-item` (or, by explicit choice, `fabric-dw-global`) entry, each holding only the type and URL. Your servers and inputs are kept, a malformed file is left untouched, and the file is never purged.
 - Two public clones (gitignored): [`microsoft/skills-for-fabric`](https://github.com/microsoft/skills-for-fabric) and [`data-goblin/power-bi-agentic-development`](https://github.com/data-goblin/power-bi-agentic-development). On a re-run they are refreshed to upstream, or kept at the last compatible version when upstream dropped a skill the agents use.
 - Only if you opt in: your business repositories under `source-control-repositories/`, and one PBIVIZ folder for custom visual projects (default `0 - PBIVIZ Developing Environment`) with its own local Git repository on `main`. Both are independent of, and ignored by, the outer repository. Existing visuals are never imported or committed for you.
 - Git: a new repository gets an initial commit; an existing one gets a commit limited to installer-owned paths.
@@ -234,6 +238,17 @@ The step writes or merges:
 - `.vscode/mcp.json` — the Microsoft Learn MCP server is added only if missing, as inserted text, so your comments and formatting are kept. A layout the installer cannot patch verifiably is left untouched, with a manual instruction.
 
 It then removes files the installer shipped before but no longer ships.
+
+**Optional remote MCP connections.** For each Microsoft-hosted data server the installer first checks `.vscode/mcp.json`. An entry for its endpoint, under any key, means it is reported as already configured and not asked again. Otherwise it explains what the server can reach and asks:
+
+| Question | What a Yes adds | Notes |
+|---|---|---|
+| `Configure Fabric IQ MCP in VS Code? (Y/N)` | `"FabricIQ": { "type": "http", "url": "https://fabriciq.svc.cloud.microsoft/v1/mcp/fabriciq" }` | Read-only: finds the reports and semantic models you can already open and runs DAX queries on them. |
+| `Configure Fabric Data Warehouse MCP in VS Code? (Y/N)` | then `Choose I or G (Enter = cancel)` | ⚠️ Runs T-SQL as you, **including statements that change data or schema**. Preview. |
+| *I* (recommended) | `fabric-dw-item`, bound to one warehouse or SQL analytics endpoint | Asks for the workspace ID and the item ID and checks both are GUIDs. Invalid or missing IDs configure nothing; the global endpoint is never used instead. |
+| *G* | `fabric-dw-global`, after `Confirm the GLOBAL endpoint, which reaches every warehouse your account can open? (y/N)` | Any warehouse or SQL analytics endpoint your account can open, chosen in chat. |
+
+The same Yes rule applies: Enter, `N` or no answer configures nothing. An existing key is never overwritten, the same endpoint is never added twice, and an unreadable file is not offered at all. Only the type and URL are written — never a header, token or credential. Sign-in is left to VS Code, so *configured* does not mean signed in or available ([manual setup](#configure-the-remote-mcp-servers-yourself)).
 
 **PBIVIZ folder (only if enabled in Step 1).** The outer `.gitignore` gets `/<folder>/` first, then the folder becomes its own repository (Level 1, see [2.8](#28-versioning-custom-visuals--three-levels)):
 
@@ -448,30 +463,48 @@ The path is the same for all three ways of working; only the editing step differ
 | Tool | Who uses it | What it unlocks | Without it |
 |---|---|---|---|
 | `fab` | Semantic, Data Eng, Admin, ALM, Apps | Fabric API, jobs, export/import, OneLake & table ops | Portal + `az rest` fallback |
-| `az` | Data Eng, Admin, ALM, Apps | SQL/TDS (`sqlcmd -G`), non-Fabric token audiences | Covered by `fab` for most things |
+| `az` | Data Eng, Admin, ALM, Apps | `az rest` and Entra tokens for audiences `fab` does not cover | Covered by `fab` for most things |
 | Fabric MCP | Data Eng, Admin, ALM, Apps | Structured live Fabric ops (items, OneLake, definitions) | REST/CLI |
 | Power BI modeling MCP | Semantic (the Master opens the connection) | Live XMLA: DAX `EVALUATE`, transactional model edits | REST `executeQueries` → local TMDL |
 | `pbir` | Reporting | Explore, edit, format, validate and publish PBIR; Desktop refresh and screenshots for report QA | Direct PBIR JSON edit, only with `APPROVED:PBIR-DIRECT-EDIT:<report>` |
 | Tabular Editor CLI | Semantic | BPA, validation, automation (free TE2) | `fabric-tmdl` + `bpa-rules` checklist |
 | `pbi-tools` | ALM & DevOps | PBIX/PBIP extract-compile workflows | Native PBIP/PBIR ALM via `fab`/`pbir` |
-| `sqlcmd` | Semantic, Data Eng, Apps | T-SQL over Fabric SQL endpoints | Fabric Data Warehouse MCP (033 only, when callable) → notebook, pipeline or portal |
+| `sqlcmd` | Semantic, Data Eng, Apps | T-SQL over Fabric SQL endpoints (its own tool; `az` does not run T-SQL) | Fabric Data Warehouse MCP (033 only, when callable) → notebook, pipeline or portal |
 | `gh` | ALM & DevOps | GitHub PRs, Actions, releases | `git` + web |
 | `az devops` | ALM & DevOps | Azure DevOps PRs, pipelines, boards | `git` + web |
 | Tabular Editor 3, `te` CLI *(detected only)* | Semantic | Recorded separately from TE2 and never inferred from it | TE2 CLI, then the checklist |
-| **Fabric IQ MCP** *(remote, detected only)* | 038 Fabric Intelligence & Ontology, 043 Monitoring, Catalog & Operations | Read-only questions over existing semantic models and reports; no ontology authoring | REST `executeQueries` or the Power BI modeling MCP |
-| **Fabric Data Warehouse MCP** *(remote, preview, detected only)* | 033 Warehouse SQL only | T-SQL on a Warehouse or SQL analytics endpoint, write statements included; the agent takes the tool from the server's tool list | `sqlcmd` (preferred anyway) |
+| **Fabric IQ MCP** *(remote, optional connection — Step 8)* | 038 Fabric Intelligence & Ontology, 043 Monitoring, Catalog & Operations | Read-only questions over existing semantic models and reports; no ontology authoring | REST `executeQueries` or the Power BI modeling MCP |
+| **Fabric Data Warehouse MCP** *(remote, preview, optional connection — Step 8)* | 033 Warehouse SQL only | T-SQL on a Warehouse or SQL analytics endpoint, write statements included; the agent takes the tool from the server's tool list | `sqlcmd` (preferred anyway) |
 
 Requests are routed by **topic**. A missing tool never changes the owner: the specialist falls back. Commands and examples: [CLI-FUNCTIONALITIES.md](CLI-FUNCTIONALITIES.md).
 
 > **Remote MCP servers.** The public Microsoft Learn documentation MCP can be configured automatically where supported. MCP integrations accessing a user's Fabric data require the appropriate environment configuration and permissions.
 >
-> The installer never adds, configures or signs in to the Fabric IQ or Fabric Data Warehouse MCP server; it only records whether **your** `.vscode/mcp.json` already has an entry for one. Agents report the highest state they can prove: *documented* (Microsoft describes the server) → *configured* (an entry is in `mcp.json`) → *callable* (its tools are listed in this chat) → *signed in* (a call was accepted) → *executed* (an operation returned a result).
+> Four things are easy to confuse. An **installed extension** (Fabric MCP, Power BI modeling MCP) is software on your machine. A **configured remote server** (Fabric IQ, Fabric Data Warehouse) is only an address in `.vscode/mcp.json`. **Signed in** means VS Code completed your Microsoft Entra sign-in for it. **Available** means its tools appear in the current chat and a call returns data. Setup does the first two only with your Yes, and neither proves the last two. Agents report the highest state they can prove: *documented* → *configured* → *callable* (its tools are listed in this chat) → *signed in* (a call was accepted) → *executed* (an operation returned a result).
 >
 > Support for Fabric IQ and Project Osmos is included. Availability depends on your Fabric environment, permissions and required configuration.
 >
 > Fabric Agentic Workspace names no tool for the Fabric Data Warehouse server: agent 033 reads the tools the server lists in the session and calls only one whose description and input schema say it runs a T-SQL statement.
 >
-> **SQL: permission class first, tool second.** Agents class every statement before they pick a tool: `S0` offline (no connection), `S1` metadata read, `S2` data read, `S3` data or schema change (needs your approval token for the named object), `S4` administration (never inferred, separately approved). A write-capable tool grants nothing by itself. Route: `sqlcmd -G` → Fabric Data Warehouse MCP (033 only, when callable) → documented alternates → the script returned unrun. Details: [CLI-FUNCTIONALITIES.md §8](CLI-FUNCTIONALITIES.md).
+> **SQL: permission class first, tool second.** Agents class every statement before they pick a tool: `S0` offline (no connection), `S1` metadata read, `S2` data read, `S3` data or schema change (needs your approval token for the named object), `S4` administration (never inferred, separately approved). A write-capable tool grants nothing by itself. Route: `sqlcmd -G` → Fabric Data Warehouse MCP (033 only, when callable) → documented alternates → the script returned unrun. Details: [CLI-FUNCTIONALITIES.md §8](CLI-FUNCTIONALITIES.md#8-sql--tds-query-sqlcmd).
+
+#### Configure the remote MCP servers yourself
+
+If you skipped the Step 8 question, or the installer could not patch your file, re-run setup or add the entry under `"servers"` in the workspace `.vscode/mcp.json`:
+
+```jsonc
+{
+  "servers": {
+    "FabricIQ": { "type": "http", "url": "https://fabriciq.svc.cloud.microsoft/v1/mcp/fabriciq" },
+    "fabric-dw-item": { "type": "http", "url": "https://api.fabric.microsoft.com/v1/mcp/dataPlane/workspaces/<workspace-id>/items/<item-id>/sqlEndpoint" }
+  }
+}
+```
+
+- Keep these key names: the agents' grants use them. The global Warehouse endpoint is `https://api.fabric.microsoft.com/v1/mcp/dataPlane/sqlEndpoint` under `fabric-dw-global`; it reaches every warehouse your account can open.
+- With private links, Fabric IQ uses `https://api.fabric.microsoft.com/v1/mcp/fabriciq`.
+- Do not add an `Authorization` header or a token. Start the server from the VS Code MCP server list and sign in with your work account when asked.
+- Fabric IQ uses delegated Microsoft Entra permissions (`Item.Read.All` and `Item.Execute.All` on the Power BI Service). Microsoft documents its client setup for GitHub Copilot CLI, not for VS Code. If the VS Code sign-in does not complete, your tenant may need a single-tenant app registration, and its consent policy can require administrator approval. Sources: [Fabric IQ MCP](https://learn.microsoft.com/fabric/iq/connectors/fabric-iq-mcp), [Fabric Data Warehouse MCP](https://learn.microsoft.com/fabric/data-warehouse/data-warehouse-mcp-server).
 
 > **`pbir` licence.** The `pbir-cli` package has a custom non-commercial licence. Whether your use is covered is for you or your organisation to decide; the installer only offers it.
 >
@@ -550,7 +583,9 @@ A cleanup runs only with the approval token the preview prints. It **moves** fil
 
 **Can multiple people share the workspace via git?** Yes. Push it; each member clones it, re-runs the installer (tool inventory and skill clones) and selects the Master. Skill clones, business repos, the repository map, the workspace file and machine-specific settings are gitignored.
 
-**What do I need for live / hybrid mode?** `fab` or `az` for REST and CLI access; the two MCP extensions add specific capabilities, such as transactional live model edits, and agents fall back to REST/CLI where one is missing ([2.2](#22-three-ways-of-working), [2.4](#24-optional-clis-and-mcp-servers--what-each-unlocks)). [Step 2](#step-2-of-9--checking-prerequisites) offers each one and installs it only when you answer Yes. Full-local mode needs none.
+**What do I need for live / hybrid mode?** No optional CLI is required; Git, which you already have, is the only command-line prerequisite. `fab` or `az` add REST and CLI access, and the two MCP extensions add specific capabilities, such as transactional live model edits. Agents fall back to REST/CLI where one is missing ([2.2](#22-three-ways-of-working), [2.4](#24-optional-clis-and-mcp-servers--what-each-unlocks)). [Step 2](#step-2-of-9--checking-prerequisites) offers each one and installs it only when you answer Yes. Full-local mode needs none.
+
+**I configured Fabric IQ or the Warehouse server. Why does the Master say it is not available?** Configured means only that the address is in `.vscode/mcp.json`. The server becomes available after you start it in VS Code, complete the sign-in, and its tools appear in the chat. Your tenant may also restrict it ([manual setup and caveats](#configure-the-remote-mcp-servers-yourself)).
 
 **Can the agents make my semantic model "AI ready"?** They do the modelling part and tell you what is left. The house skill `fabric-ai-readiness` splits the work in three:
 - **Agents edit** the model definition through the normal semantic-model workflow: descriptions, format strings, explicit measures, data categories; renames and hiding only with your approval token.
@@ -654,7 +689,7 @@ This is a personal project that started from a real need. I work across **Micros
 
 The **[Microsoft Fabric](https://marketplace.visualstudio.com/items?itemName=fabric.vscode-fabric)** and **[Fabric Data Engineering - Remote](https://marketplace.visualstudio.com/items?itemName=SynapseVSCode.vscode-synapse-remote)** VS Code extensions sync items locally and run notebooks against remote Spark. But GitHub Copilot did not know my TMDL and DAX conventions (table naming, measure structure, folder organisation), and I found no good guidance for authoring pipeline JSON.
 
-So I built a multi-agent workspace. A **master agent** starts the session and routes work to **specialist teams**, one per Fabric workload. They read two community skill repositories, Microsoft's [skills-for-fabric](https://github.com/microsoft/skills-for-fabric) and data-goblin's [power-bi-agentic-development](https://github.com/data-goblin/power-bi-agentic-development), plus custom skills for TMDL and pipeline authoring that I wrote from scratch and keep updating from my daily work.
+So I built a multi-agent workspace. A **master agent** starts the session and routes work to **specialist teams**, one per Fabric workload. They read two community skill repositories, Microsoft's [skills-for-fabric](https://github.com/microsoft/skills-for-fabric) and data-goblin's [power-bi-agentic-development](https://github.com/data-goblin/power-bi-agentic-development), plus the house skills shipped with this workspace, such as TMDL and pipeline authoring, which I maintain and keep refining from daily work.
 
 The **agent → tools → skills** chain turned out to matter as much as the agents. Each agent owns a small, fixed set of tools. It uses a tool when the machine's `tool-status.json` inventory says it is installed and falls back when it is not, so the workspace stays usable without the optional tools. Each agent loads only the skills its current subtask needs ([3.5](#35-agent--tools--skills-matrix)).
 
@@ -714,7 +749,7 @@ The installer generates each of the 54 agents from a knowledge catalogue, with t
 
 ## 3.5 Agent → tools → skills matrix
 
-Each agent has a bounded purpose, a minimum set of tools, and reads only the skills its current subtask needs. CLIs run through `execute` and are gated on `tool-status.json`. MCP servers are Copilot frontmatter tools, so authorised agents list `powerbi-modeling-mcp/*` or `Fabric MCP/*` in their `tools:` allowlist. The two remote servers have a narrower audience: `FabricIQ/*` is held by 038 and 043 only, `fabric-dw-global/*` and `fabric-dw-item/*` by 033 only. A grant names a server key; it does nothing until **you** add that server to `.vscode/mcp.json` under that key.
+Each agent has a bounded purpose, a minimum set of tools, and reads only the skills its current subtask needs. CLIs run through `execute` and are gated on `tool-status.json`. MCP servers are Copilot frontmatter tools, so authorised agents list `powerbi-modeling-mcp/*` or `Fabric MCP/*` in their `tools:` allowlist. The two remote servers have a narrower audience: `FabricIQ/*` is held by 038 and 043 only, `fabric-dw-global/*` and `fabric-dw-item/*` by 033 only. A grant names a server key; it does nothing until that server is in `.vscode/mcp.json` under that key (Step 8 offers it on your Yes) and you have signed in.
 
 | Agent | Tools used (gated) | Skills / docs used (selective) |
 |---|---|---|
@@ -776,7 +811,7 @@ These states are different and none implies the next:
 | **Registered** | Its folder is in `chat.agentSkillsLocations` for the window you are using. |
 | **Pinned** | The installer lists it in an agent's *Knowledge and skills* as part of that agent's job. |
 | **Suggested** | Matched by keyword and listed as reference only; it grants nothing. |
-| **Installed tool / MCP configured** | The CLI or MCP server the skill describes is present and, for MCP, registered and authenticated. Support for Fabric IQ and Project Osmos is included. Availability depends on your Fabric environment, permissions and required configuration. |
+| **Installed tool / MCP configured** | The CLI the skill describes is installed, or its MCP server is installed (an extension) or configured (a remote address in `.vscode/mcp.json`). Neither means signed in. Support for Fabric IQ and Project Osmos is included. Availability depends on your Fabric environment, permissions and required configuration. |
 | **Callable / succeeded** | The tool actually ran in this session and returned a result. |
 
 Whatever its state, a skill grants nothing: skills inform, they never authorise ([3.6](#36-agentic-design-principles)).
@@ -832,6 +867,7 @@ The automated suite is described in [3.10](#310-quality--validation).
 
 - Only what the compatibility table above states is supported or tested; anything else, including features that depend on live services or Power BI hosts, is not claimed as validated.
 - Fabric IQ and Project Osmos availability depends on your Fabric environment, permissions and required configuration; MCP integrations that access your Fabric data need the matching environment configuration and permissions ([2.4](#24-optional-clis-and-mcp-servers--what-each-unlocks)).
+- The installer can configure the Fabric IQ and Fabric Data Warehouse MCP servers, but it cannot sign in to them or confirm that their tools work. Microsoft documents the Fabric IQ client setup for GitHub Copilot CLI, not for VS Code.
 - Agent *behaviour* is prompt-driven: a dispatched agent can occasionally return nothing, and its parent re-dispatches it once.
 - Custom visual release builds are Windows-only.
 - Release build isolation is **not** an operating-system sandbox: the visual's toolchain runs with your rights ([SECURITY.md](SECURITY.md)).

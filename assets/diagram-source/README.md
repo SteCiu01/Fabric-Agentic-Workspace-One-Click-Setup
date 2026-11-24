@@ -37,7 +37,8 @@ Every image is 2000 px wide (a 1000 px page at 2x); the height follows the conte
 - **Figures mirror the installer** (`fabric-agentic-installer/Setup-FabricAgenticWorkspace.ps1`). When one changes, change it here and in the README text together:
   - agents: 54 = 3 executives + 8 Team Leads + 43 specialists, and the specialists per Team Lead;
   - custom skills: 11 = 5 for Fabric + 6 for PBIVIZ;
-  - tools: 2 recommended CLIs, 6 specialist CLIs and 3 MCP integrations, as offered in installer Step 2 and listed in README 2.4.
+  - tools: 2 recommended CLIs and 6 specialist CLIs, as offered in installer Step 2 and listed in README 2.4;
+  - MCP: 5 supported integrations = 2 optional VS Code extensions (Step 2), 1 Microsoft Learn entry configured automatically and 2 Microsoft-hosted data servers (Fabric IQ, Fabric Data Warehouse) configured only on a Yes (Step 8). Keep the line that *supported* does not mean installed, signed in or callable.
 - **Texts mirror README 2.2 and 2.3.** The diagrams add no capability the README does not describe. `DEV` and `PROD` are illustrative names.
 - **One style.** Colours, type and card shapes live in `diagram.css` and match the agent organisation diagram. Change the style there, not in one page.
 - Open an `.html` file in a browser for a quick preview (it shows the placeholder icon), render, then check the PNG in the README before committing.

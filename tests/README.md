@@ -112,7 +112,7 @@ maintainer tooling in `.github/hooks`, `.github/agents` and `.github/skills` (se
 | `Housekeeping.Tests.ps1` | The working-files helper previews, moves and restores files without losing one. | [Housekeeping](#housekeeping) |
 | `Pipeline.Tests.ps1` | The offline pipeline check blocks unsafe definitions and never claims more than it checked. | [Pipeline definition check](#pipeline-definition-check) |
 | `AiReadiness.Tests.ps1` | The AI readiness skill separates what agents change, draft and leave to a person. | [AI readiness and tooling](#ai-readiness-and-tooling) |
-| `Tooling.Tests.ps1` | Remote MCP servers and optional tools are detected, never assumed or added. | [AI readiness and tooling](#ai-readiness-and-tooling) |
+| `Tooling.Tests.ps1` | Remote MCP servers are detected, never assumed, and added only on an explicit Yes; optional tools are detected, never assumed. | [AI readiness and tooling](#ai-readiness-and-tooling) |
 | `PBIVIZ.Install.Tests.ps1` | The installer sets up the PBIVIZ folder without damaging an existing folder or repository. | [PBIVIZ](#pbiviz) |
 | `PBIVIZ.Alm.Tests.ps1` | The adoption, promotion, release and build safeguards of the PBIVIZ helper hold. | [PBIVIZ](#pbiviz) |
 | `Version.Tests.ps1` | Version numbers, documents and launchers agree with the installer. | [Versions, documents and neutrality](#versions-documents-and-neutrality) |
@@ -482,7 +482,8 @@ it was not run at:
 - Routing: the skill is pinned to 010, 015 and 016, the earlier guardrails of those agents
   are still present, and no semantic-model agent gained a tool.
 
-`Tooling.Tests.ps1` loads `Get-RemoteMcpServers` from the installer and reads the
+`Tooling.Tests.ps1` loads `Get-RemoteMcpServers` and the Step 8 offer (`Invoke-RemoteMcpOffer`)
+from the installer and reads the
 `fabric-cli-policy` skill, the tool inventory code and the agent texts. *Documented*,
 *configured* and *callable* stay apart, and a tool being present never becomes permission to
 use it:
@@ -492,8 +493,12 @@ use it:
   endpoint). Look-alike URLs and servers without a URL are not taken for them. A server saved
   under a key the agents hold no grant for is reported as such. The status script carries the
   identical function and never lists a remote server as connected.
-- The installer records both as detect-only, writes only the Microsoft Learn server into
-  `mcp.json` and has no question that adds or signs in to a remote server.
+- The Step 8 offer, run on temporary files with mocked answers: only `Y` or `YES` adds an
+  entry, and it holds only the type and URL. No answer, `N`, other text, a malformed JSONC
+  file, a key conflict, an endpoint already present under any key and a re-run change
+  nothing. Item scope writes the validated identifiers; invalid or missing identifiers never
+  fall back to the global endpoint, which needs its own confirmation. Comments and existing
+  servers survive, and tool-status then reads *configured*, never callable.
 - Grants: Fabric IQ for 038 and 043 only, the write-capable warehouse server for 033 only.
 - Policy skill: it names the five evidence states in order and does not claim a VS Code setup
   Microsoft does not document.

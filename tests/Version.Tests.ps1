@@ -145,6 +145,11 @@ Describe 'Documentation matches what the installer ships and asks' {
         }
         $script:Raw | Should -Match ([regex]::Escape('Install the VS Code extension $($mcp.Id) now? (Y/N)'))
         $script:Readme | Should -Match ([regex]::Escape('Install the VS Code extension <id> now? (Y/N)'))
+        foreach ($q in 'Configure Fabric IQ MCP in VS Code? (Y/N)', 'Configure Fabric Data Warehouse MCP in VS Code? (Y/N)', 'Choose I or G (Enter = cancel)', 'Confirm the GLOBAL endpoint, which reaches every warehouse your account can open? (y/N)') {
+            $script:Readme.Contains($q) | Should -BeTrue -Because "the README quotes '$q'"
+            $script:Raw.Contains($q) | Should -BeTrue -Because "the installer asks '$q'"
+        }
+        $script:Readme | Should -Not -Match '(?i)remote[^.\r\n]{0,80}detected only|detected only[^.\r\n]{0,80}(Fabric IQ|Data Warehouse MCP)' -Because 'the remote servers are offered, not only detected'
     }
 
     It 'the documented switches exist in the installer' {
