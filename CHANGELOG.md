@@ -5,62 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v0.9.0]
+## [v0.9.0] - 2026-11-24
 
-Refreshed upstream skills are checked against what the agents rely on, agent working files get one home and a guarded clean-up, a pipeline definition is checked offline before it is saved, and no tool is installed without a typed Yes.
+Safer setup, controlled agent work, and clearer tool status.
 
-**Upgrading:** re-run the installer over your workspace to get the new skills and the regenerated agents. Optional tools are installed only after you answer `Y` or `YES`, so an unattended run now only detects tools. A PBIVIZ repository with a remote needs it reachable to promote.
+**Upgrading:** Re-run the installer in your existing workspace. Optional installs require `Y` or `YES`; no answer installs nothing. PBIVIZ promotion requires the current remote Prod revision when a remote is configured.
 
 ### Added
 
-- **Skills compatibility hold.** After each refresh, the installer and Capability Maintenance check every skill path the agents pin. If upstream renamed, removed or split one, the catalogue stays on its last compatible commit until a later refresh fits; you are asked nothing, and the session status names a held catalogue.
-- **Agent working folder** `0 - Team of Agents Local Files/` (git-ignored) and the **`fabric-housekeeping` skill**: agents work in one task folder per request, clean up at the end, never touch another session's folder and keep credentials out of files. The installer creates the folder and never moves or removes existing content; a root `scripts/` folder is no longer used for scratch work.
-- **Housekeeping in Capability Maintenance** (`Agent-Workspace.ps1`): a read-only preview classifies working files and prints approval tokens; execute moves approved files to a quarantine you can restore from, and a purge needs a second token. Git-tracked files are never moved, and a possible secret is reported by path, never by value.
-- **`Test-PipelineDefinition.ps1`**: an offline, read-only check of a pipeline definition, with the result `PASS`, `UNCHECKED` (something could not be checked) or `BLOCKED`. It checks activity types, dependencies, expressions, credential-like values, and workspace, item and connection ids against the target workspace's inventory (`-InventoryPath`), and prints a change plan. A reference to an item of the wrong type is `BLOCKED`. A reference written as an expression (a parameter, a variable, a Variable Library value) is `UNCHECKED` (`PD088`), because its value exists only when the pipeline runs; `@pipeline().DataFactory` as the workspace id is the one exception.
-- **Deployment safeguards for the pipeline agent (036).** A save needs the approval token `APPROVED:DEPLOY:<pipeline name>` and a `PASS`, or your decision on each `UNCHECKED` point. `BLOCKED` is never saved, and a definition read from one workspace is never sent to another.
-- **`fabric-ai-readiness` skill** for preparing a semantic model for Copilot and Fabric data agents. It separates what agents change in the model, what they only draft for you (AI instructions, AI data schema, verified answers) and the settings only a person changes (Q&A, *Approved for Copilot*, tenant settings); a check that was not run is reported as NOT RUN.
-- **SQL permission classes** in the `fabric-cli-policy` skill, from `S0` (definition work) to `S4` (administration), decided before the route (`sqlcmd -G` first, then the Fabric Data Warehouse MCP server); a SQL tool being present is never permission. A data or schema change (`S3`) needs an approval token that names the statement and the object, such as `APPROVED:INSERT:dbo.Stage`.
-- **Optional Fabric IQ and Fabric Data Warehouse MCP configuration.** Step 8 asks `Configure Fabric IQ MCP in VS Code? (Y/N)` and `Configure Fabric Data Warehouse MCP in VS Code? (Y/N)`, and only `Y` or `YES` adds the entry to `.vscode/mcp.json` (type and URL, never a credential). The Warehouse server is item-scoped unless you choose and confirm the global endpoint. An existing entry, a key conflict or an unreadable file is reported and left unchanged. Sign-in is left to VS Code.
-- **Remote MCP servers are detected, not assumed.** `tool-status.json` and the session status say whether `.vscode/mcp.json` holds an entry for either server. Agents name the state they can prove: documented, configured, callable, signed in or executed.
-- `-StopAfterStep1`: runs the Step 1 questions and exits before anything is detected, installed or generated.
-- **Documentation workflow for maintainers** (in `.github/`, not shipped by the installer): a review is bound to one Communication Writer run and one session, the Writer may change five documents only, policy and legal documents need a recorded owner approval of their exact text, and `Doc-Review.ps1 -Gate` is the release gate. See [CONTRIBUTING](CONTRIBUTING.md#keeping-the-documentation-current).
+- `Test-PipelineDefinition.ps1`: read-only pipeline checks that return `PASS`, `UNCHECKED` or `BLOCKED`.
+- Pipeline agent (036) safeguards: approval before deployment; wrong item types are `BLOCKED`, dynamic references `UNCHECKED`.
+- `fabric-housekeeping` and `0 - Team of Agents Local Files/`: session-separated work and approval-gated quarantine or purge.
+- `fabric-ai-readiness`: semantic-model preparation for Copilot and Fabric data agents, with human-only settings clearly separated.
+- SQL permission classes `S0`–`S4` in `fabric-cli-policy`, including specific approvals for data and schema changes.
+- Optional Fabric IQ and Data Warehouse MCP configuration in VS Code: explicit consent, endpoint-only entries, item-scoped Warehouse by default.
+- `-StopAfterStep1` to stop after setup questions, before installation or file generation.
+- Communication Writer skill, completion hook and documentation gate for maintainers; policy edits require recorded owner approval.
 
 ### Changed
 
-- **Every optional install asks first.** The Fabric CLI, Python, the Azure CLI and the two MCP extensions are each offered with a `(Y/N)` question and installed only on `Y` or `YES`; tools you already have are detected as before. A No is not remembered: a tool that is still missing is offered again on the next run.
-- Looking for a tool no longer changes the user PATH: a tool found outside PATH is used for the current run only.
-- **`fabric-pipelines` skill rewritten** against Microsoft Learn. Every activity and template carries an evidence class, and new sections cover the SQL analytics endpoint refresh, system variables, what moves between environments and how to change a deployed pipeline safely.
-- Project Osmos: its auth and routing files stay in the workspace's `.dataprojects/` and survive a skills refresh. `tool-status.json` records the detected Python version and whether it meets the 3.11 requirement.
-- A reference file that moved inside a skill that is still present points the agent at the skill folder instead of counting as unresolved.
-- The session status script registers new skill folders in place, so comments and formatting in `.vscode/settings.json` survive.
-- **`.gitignore` for Power BI project files:** a new workspace ignores the two per-machine files (`**/.pbi/localSettings.json`, `**/.pbi/cache.abf`) instead of every `.pbi/` folder, so `editorSettings.json` and `unappliedChanges.json` stay visible to Git. An existing `.gitignore` keeps every line it has.
-- The Warehouse (033), SQL database (034), SQL data access (063), Fabric intelligence (038) and monitoring (043) agents state the SQL class and the MCP state they reached. 033 holds the tool grant for the Fabric Data Warehouse MCP server, 038 and 043 the read-only Fabric IQ grant; a grant has no effect until that server is in `.vscode/mcp.json` and you have signed in. No tool of the Fabric Data Warehouse MCP server is named: 033 uses a tool the server itself lists for running T-SQL and reports a missing or ambiguous tool instead of guessing.
-- Microsoft's `powerbi-report-author` CLI is described as a detect-only companion to `pbir`, never as a second way to edit a report.
-- House skills describe their origin in neutral words, and examples use placeholder identifiers.
-- **README diagrams** (the overview, the three working modes and the lifecycle) are rebuilt in one style from editable HTML sources in `assets/diagram-source/`. The overview now shows 11 custom skills and the five supported MCP integrations.
-- The README, CLI guide and `SECURITY.md` say that `az` does not run T-SQL (`sqlcmd` does), that no optional CLI is required, and that Level 1 PBIVIZ checkpoints and restores are Git commands run by the agent rather than helper operations.
+- Optional Fabric CLI, Python, Azure CLI and MCP-extension installs now require an explicit Yes; detection leaves your PATH untouched.
+- Upstream skill refreshes keep the last compatible revision when required skills move or disappear.
+- Session status distinguishes MCP configuration, sign-in and successful calls, and reports actual skill refresh dates.
+- Warehouse agents discover executable SQL tools from the server; `sqlcmd -G` remains the preferred SQL route.
+- Project Osmos files under `.dataprojects/` survive refreshes; shareable files within Power BI `.pbi/` folders remain visible to Git.
+- Fabric pipeline guidance and templates now follow published activity names and safer deployment steps.
+- README diagrams rebuilt from editable HTML; Microsoft Learn MCP remains automatic when configuration is safe to update.
 
 ### Fixed
 
-- **An unanswered install question could count as Yes.** When input ended before an install or update question was answered (a closed window, redirected input, an unattended run), the installer went on to install or update. Only `Y` or `YES` (any case) now does.
-- At end of input the workspace-name question in Step 1 no longer repeats forever when the default folder name already exists; the workspace is skipped.
-- **The launchers gave no sign of a failed run.** `Setup-FabricAgenticWorkspace.bat` now says when setup did not complete and returns the exit code. `tests/Run-Tests.bat` ends with `RESULT: PASSED` or `RESULT: FAILED` and returns a non-zero exit code when a test failed or the run did not start.
-- **Setup ended with "Setup complete!" after skipped steps.** When something was skipped, the final message is now "Setup finished with N warning(s)" with the list. These are warnings, so the exit code stays 0.
-- **An optional install was reported as successful when the command was only on PATH.** Success now needs exit code 0 from the install command and a working tool (the Fabric CLI must answer `fab --version`).
-- **A Git refusal ended setup with a raw error.** When Git refuses the workspace folder (for example an ownership check), the commit is skipped with a warning that names Git's reason, and the PBIVIZ step says that Git could not be started instead of `git not found`.
-- **A skills clone that Git refused to open was called "not the root of its own Git repository".** The installer and Capability Maintenance now say what Git said (for example `detected dubious ownership`), keep the folder and record the catalogue as `blocked`.
-- **Skipped refreshes looked fresh.** The session status showed today's date for a skills catalogue that had not been refreshed. The date now moves only after a clone or refresh that took place.
-- **SQL analytics endpoint refresh template:** it used the type `RefreshSQLEndpoint` with the lakehouse id, which Fabric rejects. The activity is `RefreshSqlEndpoint` with `workspaceId`, `sqlEndpointId` (the endpoint item, not the lakehouse) and a connection.
-- Eleven further pipeline templates used activity type identifiers that the published definition does not have (`DataflowGen2`, `KQL`, `Webhook`, `StoredProcedure`, `SQLScript`, `HDInsightActivity`, `FunctionsActivity`, `CopyJob`, `AzureBatch`, `AzureDatabricks`, `Deactivate`); they are replaced by the published ones or removed. Three templates whose JSON is not published (lakehouse maintenance, materialized lake view refresh, approval) are no longer offered as templates.
-- Pipeline guidance said `pipeline().Pipeline` is the pipeline name (it is its id) and mapped Variable Library `Number` values to `Double` (pipelines cannot use them).
-- **Dashes reached some agent files as garbled characters**, in the description of the Power BI ALM agent and in the instructions of the Master and the Capability Maintenance team. The installer now holds ASCII characters only, because Windows PowerShell 5.1 reads a script without a byte order mark in the ANSI code page.
-- **A PBIVIZ promotion could start from an outdated Prod.** The target must now be the current production revision, read from the remote's `PBVIZ_Team_Prod` (or from the local branch when the repository has no remote); a stale or different target, or a revision that cannot be verified, is refused before anything is written. New optional parameters: `-Remote` (default `origin`) and `-ProdBranch`.
-- **Chat sessions overwrote each other's session status.** `Get-SessionStatus.ps1` now takes `-SessionId <id>` and also saves its block to `.github/agent-docs/session-status/<id>.txt`; `session-status.last.txt` remains the latest run of any session. Snapshots older than seven days are removed.
-- The starting flow now tells the Master to give the full path of the status script when the terminal is not in the workspace root (a window with several folders).
+- Unanswered prompts no longer trigger optional installs or cause the workspace-name question to repeat forever.
+- Launcher and installer now report failures, skipped steps and Git ownership errors accurately.
+- Incorrect SQL endpoint refresh activity and unsupported pipeline templates corrected or removed.
+- PBIVIZ promotion refuses stale or unverifiable production targets.
+- Per-session status snapshots stop concurrent sessions overwriting each other's records.
+- Agent text encoding, Master instructions and tool-routing descriptions corrected.
 
 ### Removed
 
-- The installation demo GIF (`assets/Installation-Demo.gif`).
+- The inline installation-demo GIF.
 
 ## [v0.8.0] - 2026-11-16
 
